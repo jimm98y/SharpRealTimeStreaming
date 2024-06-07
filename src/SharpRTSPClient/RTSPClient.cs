@@ -90,7 +90,9 @@ namespace SharpRTSPClient
 
         List<RtspRequestSetup> _setupMessages = new List<RtspRequestSetup>(); // setup messages still to send
 
-        // RTP packet (or RTCP packet) has been received.
+        public RTSPClient() : this(new DebugLogger())
+        { }
+
         public RTSPClient(ILogger logger)
         {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));

@@ -5,6 +5,8 @@ VisualStudioVersion = 17.9.34607.119
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SharpRTSPClient", "SharpRTSPClient\SharpRTSPClient.csproj", "{9D0C2B4B-9114-4FF9-8CED-C8D798E0EC44}"
 EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "RTSPClientApp", "RTSPClientApp\RTSPClientApp.csproj", "{A98D08A3-1617-4953-AB98-11CFB6159529}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -15,6 +17,10 @@ Global
 		{9D0C2B4B-9114-4FF9-8CED-C8D798E0EC44}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{9D0C2B4B-9114-4FF9-8CED-C8D798E0EC44}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{9D0C2B4B-9114-4FF9-8CED-C8D798E0EC44}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A98D08A3-1617-4953-AB98-11CFB6159529}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A98D08A3-1617-4953-AB98-11CFB6159529}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A98D08A3-1617-4953-AB98-11CFB6159529}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A98D08A3-1617-4953-AB98-11CFB6159529}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
