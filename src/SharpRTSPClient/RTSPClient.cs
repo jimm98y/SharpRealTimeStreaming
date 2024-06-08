@@ -44,44 +44,44 @@ namespace SharpRTSPClient
         public enum MEDIA_REQUEST { VIDEO_ONLY, AUDIO_ONLY, VIDEO_AND_AUDIO };
         private enum RTSP_STATUS { WaitingToConnect, Connecting, ConnectFailed, Connected };
 
-        IRtspTransport _rtspSocket; // RTSP connection
-        RTSP_STATUS _rtspSocketStatus = RTSP_STATUS.WaitingToConnect;
+        private IRtspTransport _rtspSocket; // RTSP connection
+        private RTSP_STATUS _rtspSocketStatus = RTSP_STATUS.WaitingToConnect;
         // this wraps around a the RTSP tcp_socket stream
-        RtspListener _rtspClient;
-        RTP_TRANSPORT _rtpTransport = RTP_TRANSPORT.UDP; // Mode, either RTP over UDP or RTP over TCP using the RTSP socket
+        private RtspListener _rtspClient;
+        private RTP_TRANSPORT _rtpTransport = RTP_TRANSPORT.UDP; // Mode, either RTP over UDP or RTP over TCP using the RTSP socket
         // Communication for the RTP (video and audio) 
-        IRtpTransport _videoRtpTransport;
-        IRtpTransport _audioRtpTransport;
+        private IRtpTransport _videoRtpTransport;
+        private IRtpTransport _audioRtpTransport;
 
-        Uri _uri;                         // RTSP URI (username & password will be stripped out
-        string _session = "";             // RTSP Session
+        private Uri _uri;                         // RTSP URI (username & password will be stripped out
+        private string _session = "";             // RTSP Session
         private Authentication _authentication;
         private NetworkCredential _credentials = new NetworkCredential();
-        bool _clientWantsVideo = false; // Client wants to receive Video
-        bool _clientWantsAudio = false; // Client wants to receive Audio
+        private bool _clientWantsVideo = false; // Client wants to receive Video
+        private bool _clientWantsAudio = false; // Client wants to receive Audio
 
-        Uri _video_uri = null;            // URI used for the Video Track
-        int _video_payload = -1;          // Payload Type for the Video. (often 96 which is the first dynamic payload value. Bosch use 35)
+        private Uri _video_uri = null;            // URI used for the Video Track
+        private int _video_payload = -1;          // Payload Type for the Video. (often 96 which is the first dynamic payload value. Bosch use 35)
 
-        Uri _audio_uri = null;            // URI used for the Audio Track
-        int _audio_payload = -1;          // Payload Type for the Video. (often 96 which is the first dynamic payload value)
-        string _audio_codec = "";         // Codec used with Payload Types (eg "PCMA" or "AMR")
+        private Uri _audio_uri = null;            // URI used for the Audio Track
+        private int _audio_payload = -1;          // Payload Type for the Video. (often 96 which is the first dynamic payload value)
+        private string _audio_codec = "";         // Codec used with Payload Types (eg "PCMA" or "AMR")
 
         /// <summary>
         /// If true, the client must send an "onvif-replay" header on every play request.
         /// </summary>
-        bool _playbackSession = false;
+        private bool _playbackSession = false;
 
         // Used with RTSP keepalive
-        bool _serverSupportsGetParameter = false;
-        System.Timers.Timer _keepaliveTimer = null;
+        private bool _serverSupportsGetParameter = false;
+        private System.Timers.Timer _keepaliveTimer = null;
 
-        IPayloadProcessor _videoPayloadProcessor = null;
-        IPayloadProcessor _audioPayloadProcessor = null;
+        private IPayloadProcessor _videoPayloadProcessor = null;
+        private IPayloadProcessor _audioPayloadProcessor = null;
         private bool disposedValue;
 
         // setup messages still to send
-        readonly Queue<RtspRequestSetup> _setupMessages = new Queue<RtspRequestSetup>();
+        private readonly Queue<RtspRequestSetup> _setupMessages = new Queue<RtspRequestSetup>();
 
         /// <summary>
         /// Called when the Setup command are completed, so we can start the right Play message (with or without playback informations)
@@ -191,6 +191,7 @@ namespace SharpRTSPClient
                 _videoRtpTransport = new UDPSocket(50000, 51000); // give a range of 500 pairs (1000 addresses) to try incase some address are in use
                 _audioRtpTransport = new UDPSocket(50000, 51000); // give a range of 500 pairs (1000 addresses) to try incase some address are in use
             }
+
             if (rtpTransport == RTP_TRANSPORT.TCP)
             {
                 int nextFreeRtpChannel = 0;
@@ -205,6 +206,7 @@ namespace SharpRTSPClient
                     ControlChannel = nextFreeRtpChannel++,
                 };
             }
+
             if (rtpTransport == RTP_TRANSPORT.MULTICAST)
             {
                 // Nothing to do. Will open Multicast UDP sockets after the SETUP command
@@ -216,23 +218,23 @@ namespace SharpRTSPClient
             {
                 RtspUri = _uri
             };
+
             _rtspClient.SendMessage(options_message);
         }
 
         // return true if this connection failed, or if it connected but is no longer connected.
         public bool StreamingFinished() 
         {
-
             switch(_rtspSocketStatus)
-        {
+            {
                 case RTSP_STATUS.ConnectFailed:
                     return true;
-                 case RTSP_STATUS.Connected:
+                case RTSP_STATUS.Connected:
                     return !(_rtspSocket?.Connected ?? false);
                 default:
                     return false;
+            }
         }
-    }
 
         public void Pause()
         {
@@ -1127,7 +1129,6 @@ namespace SharpRTSPClient
                     // RtspUri = new Uri(url)
                 };
             }
-                    
 
             keepAliveMessage.AddAuthorization(_authentication, _uri, _rtspSocket.NextCommandIndex());
             _rtspClient?.SendMessage(keepAliveMessage);
