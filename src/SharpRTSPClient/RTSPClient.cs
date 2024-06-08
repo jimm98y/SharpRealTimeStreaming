@@ -19,7 +19,7 @@ namespace SharpRTSPClient
     /// </summary>
     public class RTSPClient : IDisposable
     {
-        private static Random _rand = new Random();
+        private static readonly Random _rand = new Random();
 
         private readonly ILogger _logger;
         private readonly ILoggerFactory _loggerFactory;
@@ -1320,7 +1320,9 @@ namespace SharpRTSPClient
                 _logger = logger;
                 State = state;
             }
-            private CustomLogger _logger;
+
+            private readonly CustomLogger _logger;
+
             public TState State { get; }
             public void Dispose()
             { }
