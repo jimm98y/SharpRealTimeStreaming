@@ -41,32 +41,5 @@ namespace SharpRTSPClient
         public static Action<string, Exception> SinkDebug = new Action<string, Exception>((m, ex) => { System.Diagnostics.Debug.WriteLine(m); });
         public static Action<string, Exception> SinkInfo = new Action<string, Exception>((m, ex) => { System.Diagnostics.Debug.WriteLine(m); });
     }
-
-    public class DebugLogger : ILogger
-    {
-        class DebugLoggerScope<TState> : IDisposable
-        {
-            public DebugLoggerScope(DebugLogger logger, TState state)
-            {
-                _logger = logger;
-                State = state;
-            }
-            private DebugLogger _logger;
-            public TState State { get; }
-            public void Dispose()
-            { }
-        }
-        public IDisposable BeginScope<TState>(TState state)
-        {
-            return new DebugLoggerScope<TState>(this, state);
-        }
-        public bool IsEnabled(LogLevel logLevel)
-        {
-            return true;
-        }
-        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception exception, Func<TState, Exception, string> formatter)
-        {
-            if (SharpRTSPClient.Log.DebugEnabled) SharpRTSPClient.Log.Debug(formatter.Invoke(state, exception));
-        }
-    }
+    
 }
