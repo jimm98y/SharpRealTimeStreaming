@@ -5,6 +5,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 
 const string userName = "admin";
@@ -41,61 +42,35 @@ using (var server = new RTSPServer(port, userName, password))
         }
     }
 
-    var streamingTask = Task.Run(async () =>
+    uint initialDelay = 100;
+    uint videoSampleDuration = (uint)(90000d / 24d);
+    uint audioSampleDuration = 1024;
+    var videoTrack = parsedMDAT[videoTrackId];
+    int videoIndex = 0;
+
+    var audioTrack = parsedMDAT[audioTrackId];
+    int audioIndex = 0;
+
+    Timer _videoTimer = new Timer(new TimerCallback(async (s) => 
     {
-        while (true)
+        if (videoIndex == 0)
         {
-            DateTime started = DateTime.Now;
-            var videoStreaming = Task.Run(async () =>
-            {
-                DateTime videoStarted = DateTime.Now;
-                uint elapsed = 0;
-                var videoTrack = parsedMDAT[videoTrackId];
-                uint sampleDuration = (uint)(90000d / 24d);
-
-                server.FeedInRawSPSandPPS(videoTrack[0][0], videoTrack[0][1]);
-
-                foreach (var au in videoTrack)
-                {
-                    server.FeedInRawNAL(elapsed, (List<byte[]>)au);
-                    elapsed += sampleDuration;
-                    await Task.Delay((int)(sampleDuration / 90));
-                }
-
-                Console.WriteLine($"Finished video {DateTime.Now.Subtract(videoStarted)}");
-            });
-
-            var audioStreaming = Task.Run(async () =>
-            {
-                DateTime audioStarted = DateTime.Now;
-                uint elapsed = 0;
-                var audioTrack = parsedMDAT[audioTrackId];
-                uint sampleDuration = 1024;
-                byte[] header = new byte[4];
-
-                foreach (var frame in audioTrack[0])
-                {
-                    // add AU header
-                    short frameLen = (short)(frame.Length << 3);
-                    header[0] = 0x00;
-                    header[1] = 0x10;
-                    header[2] = (byte)((frameLen >> 8) & 0xFF);
-                    header[3] = (byte)(frameLen & 0xFF);
-                    server.FeedInAudioPacket(elapsed, header.Concat(frame).ToArray());
-
-                    elapsed += sampleDuration;
-                    await Task.Delay((int)(sampleDuration / 22.05d));
-                }
-
-                Console.WriteLine($"Finished audio {DateTime.Now.Subtract(audioStarted)}");
-            });
-
-            var playbackTasks = new[] { videoStreaming, audioStreaming };
-            await Task.WhenAll(playbackTasks);
-
-            Console.WriteLine($"Finished mp4 {DateTime.Now.Subtract(started)}");
+            server.FeedInRawSPSandPPS(videoTrack[0][0], videoTrack[0][1]);
         }
-    });
+        server.FeedInRawNAL((uint)videoIndex * videoSampleDuration, (List<byte[]>)videoTrack[videoIndex++ % videoTrack.Count]);
+    }), null, initialDelay, videoSampleDuration / 90);
+
+    Timer _audioTimer = new Timer(new TimerCallback((s) => {
+        var frame = audioTrack[0][audioIndex++ % audioTrack[0].Count];
+        // add AU header
+        short frameLen = (short)(frame.Length << 3);
+        byte[] header = new byte[4];
+        header[0] = 0x00;
+        header[1] = 0x10;
+        header[2] = (byte)((frameLen >> 8) & 0xFF);
+        header[3] = (byte)(frameLen & 0xFF);
+        server.FeedInAudioPacket((uint)audioIndex * audioSampleDuration, header.Concat(frame).ToArray());
+    }), null, initialDelay, (uint)(audioSampleDuration / 22.05d));
 
     Console.WriteLine("Press any key to exit");
     while (!Console.KeyAvailable)
