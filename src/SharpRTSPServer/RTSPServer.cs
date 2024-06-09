@@ -451,17 +451,23 @@ namespace SharpRTSPServer
             sdp.Append("s=SharpRTSP Test Camera\n");
             sdp.Append("c=IN IP4 0.0.0.0\n");
 
+            const int videoClock = 90000;
+            const string videoCodec = "H264";
             sdp.Append($"m=video 0 RTP/AVP {VIDEO_PAYLOAD_TYPE}\n");
             sdp.Append("a=control:trackID=0\n");
-            sdp.Append($"a=rtpmap:{VIDEO_PAYLOAD_TYPE} H264/90000\n");
+            sdp.Append($"a=rtpmap:{VIDEO_PAYLOAD_TYPE} {videoCodec}/{videoClock}\n");
             sdp.Append($"a=fmtp:{VIDEO_PAYLOAD_TYPE} profile-level-id=").Append(profile_level_id_str)
                 .Append("; sprop-parameter-sets=").Append(sps_str).Append(',').Append(pps_str).Append("\n");
 
             // AUDIO
+            const int audioSamplingRate = 22050;
+            const int audioChannelConfiguration = 2;
+            const string audioConfigDescriptor = "1390"; // hex
             sdp.Append($"m=audio 0 RTP/AVP {AUDIO_PAYLOAD_TYPE_AAC}\n"); // <---- 0 means G711 ULAW, 96-97 means AAC
             sdp.Append("a=control:trackID=1\n");
-            sdp.Append($"a=rtpmap:{AUDIO_PAYLOAD_TYPE_AAC} mpeg4-generic/22050/2\n");
-            sdp.Append($"a=fmtp:{AUDIO_PAYLOAD_TYPE_AAC} profile-level-id=16; config=138856e500; streamType=5; mode=AAC-hbr; objectType=64; sizeLength=13; indexLength=3; indexDeltaLength=3\n");
+            sdp.Append($"a=rtpmap:{AUDIO_PAYLOAD_TYPE_AAC} mpeg4-generic/{audioSamplingRate}/{audioChannelConfiguration}\n");
+            sdp.Append($"a=fmtp:{AUDIO_PAYLOAD_TYPE_AAC} profile-level-id={GetAACProfileLevel(audioSamplingRate, audioChannelConfiguration)}; " +
+                $"config={audioConfigDescriptor}; streamType=5; mode=AAC-hbr; objectType=64; sizeLength=13; indexLength=3; indexDeltaLength=3\n");
 
             // sdp.Append(media header info if we had AAC or other audio codec)
 
@@ -476,6 +482,86 @@ namespace SharpRTSPServer
             describe_response.Data = sdp_bytes;
             describe_response.AdjustContentLength();
             listener.SendMessage(describe_response);
+        }
+
+        private static int GetAACLevel(int samplingFrequency, int channelConfiguration)
+        {
+            if (samplingFrequency <= 24000)
+            {
+                if (channelConfiguration <= 2)
+                    return 1; // AAC Profile, Level 1
+            }
+            else if (samplingFrequency <= 48000)
+            {
+                if (channelConfiguration <= 2)
+                    return 2; // Level 2
+                else if (channelConfiguration <= 5)
+                    return 4; // Level 4
+            }
+            else if (samplingFrequency <= 96000)
+            {
+                if (channelConfiguration <= 5)
+                    return 5; // Level 5
+            }
+
+            return 5;
+        }
+
+        private static int GetAACHELevel(int samplingFrequency, int channelConfiguration, bool sbr)
+        {
+	        if (samplingFrequency <= 48000)
+	        {
+		        if (channelConfiguration <= 2)
+			        return sbr ? 3 : 2; // Level 2/3
+		        else if (channelConfiguration <= 5)
+			        return 4; // Level 4
+	        }
+	        else if (samplingFrequency <= 96000)
+	        {
+		        if (channelConfiguration <= 5)
+			        return 5; // Level 5
+	        }
+
+            return 5;
+        }
+
+        private static int GetAACHQLevel(int samplingFrequency, int channelConfiguration)
+        {
+	        if (samplingFrequency <= 22050)
+	        {
+		        if (channelConfiguration <= 2)
+			        return 1; // Level 1/5
+	        }
+	        else if (samplingFrequency <= 48000)
+	        {
+		        if (channelConfiguration <= 2)
+			        return 2; // Level 2/6
+		        else if (channelConfiguration <= 5)
+			        return 3; // Level 3/4/7/8
+	        }
+
+            return 8;
+        }
+
+        private static int GetAACProfileLevel(int samplingFrequency, int channelConfiguration, int profile = 2, bool sbr = false)
+        {
+            switch(profile)
+            {
+                case 2: // AAC_LC
+                    return GetAACLevel(samplingFrequency, channelConfiguration) - 1 + 0x28;
+
+                case 5: // AAC_SBR
+                    return GetAACHELevel(samplingFrequency, channelConfiguration, sbr) - 2 + 0x2C;
+
+                case 29: // AAC_PS
+                    return GetAACHELevel(samplingFrequency, channelConfiguration, sbr) - 2 + 0x30;
+
+                case 8: // AAC_CELP
+                    return GetAACHQLevel(samplingFrequency, channelConfiguration) - 1 + 0x0E;
+
+                default:
+                    return 1;
+            }
         }
 
         private RTSPConnection ConnectionByRtpTransport(IRtpTransport rtpTransport)
@@ -759,6 +845,18 @@ namespace SharpRTSPServer
             connection.audio.rtpChannel?.Dispose();
             connection.Listener.Dispose();
             _connectionList.Remove(connection);
+        }
+
+        public void FeedInAACPacket(uint timestamp, byte[] aac_packet)
+        {
+            // append AU header (required for AAC)
+            short frameLen = (short)(aac_packet.Length << 3);
+            byte[] header = new byte[4];
+            header[0] = 0x00;
+            header[1] = 0x10; // 16 bits size of the header
+            header[2] = (byte)((frameLen >> 8) & 0xFF);
+            header[3] = (byte)(frameLen & 0xFF);
+            FeedInAudioPacket(timestamp, header.Concat(aac_packet).ToArray());   
         }
 
         public void FeedInAudioPacket(uint timestamp, ReadOnlyMemory<byte> audio_packet)

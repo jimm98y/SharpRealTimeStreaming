@@ -28,7 +28,7 @@ using (var server = new RTSPServer(port, userName, password))
     Dictionary<uint, IList<IList<byte[]>>> parsedMDAT;
     uint videoTrackId = 0;
     uint audioTrackId = 0;
-    AudioSampleEntryBox sourceAudioTrackInfo;
+    AudioSampleEntryBox audioTrackInfo;
 
     using (Stream fs = new BufferedStream(new FileStream("frag_bunny.mp4", FileMode.Open, FileAccess.Read, FileShare.Read)))
     {
@@ -37,11 +37,11 @@ using (var server = new RTSPServer(port, userName, password))
             videoTrackId = fmp4.FindVideoTrackID().First();
             audioTrackId = fmp4.FindAudioTrackID().First();
             parsedMDAT = await fmp4.ParseMdatAsync();
-            sourceAudioTrackInfo = fmp4.FindAudioTracks().First().GetAudioSampleEntryBox();
+            audioTrackInfo = fmp4.FindAudioTracks().First().GetAudioSampleEntryBox();
         }
     }
 
-    uint videoSampleDuration = (uint)(90000d / 24d);
+    uint videoSampleDuration = 90000 / 24; // 24 fps
     uint audioSampleDuration = 1024;
     var videoTrack = parsedMDAT[videoTrackId];
     int videoIndex = 0;
@@ -49,8 +49,18 @@ using (var server = new RTSPServer(port, userName, password))
     var audioTrack = parsedMDAT[audioTrackId];
     int audioIndex = 0;
 
-    Timer _videoTimer = new Timer(videoSampleDuration / 90);
-    Timer _audioTimer = new Timer((uint)(audioSampleDuration / 22.05d));
+    Timer _videoTimer = new Timer(videoSampleDuration * 1000 / 90000);
+    Timer _audioTimer = new Timer(audioSampleDuration * 1000 / 22050);
+
+    var esdsBox = audioTrackInfo.Children[0] as EsdsBox;
+    var decoderConfigDescriptor = esdsBox.ESDescriptor.Descriptors.Single(x => x is DecoderConfigDescriptor) as DecoderConfigDescriptor;
+    var audioConfigDescriptor = decoderConfigDescriptor.AudioSpecificConfig;
+    string strAudioConfigDescriptor;
+    using (var ms = new MemoryStream())
+    {
+        await AudioSpecificConfigDescriptor.BuildAsync(ms, AudioSpecificConfigDescriptor.OBJECT_TYPE_INDICATION, 0, audioConfigDescriptor);
+        strAudioConfigDescriptor = Utilities.ToHexString(ms.ToArray());
+    }
 
     _videoTimer.Elapsed += (s, e) =>
     {
@@ -63,38 +73,16 @@ using (var server = new RTSPServer(port, userName, password))
 
         if (videoIndex % videoTrack.Count == 0)
         {
-            _videoTimer.Stop();
-            _audioTimer.Stop();
-
-            videoIndex = 0;
-            audioIndex = 0;
-
-            _videoTimer.Start();
-            _audioTimer.Start();
+            Reset(out videoIndex, out audioIndex, _videoTimer, _audioTimer);
         }
     };
     _audioTimer.Elapsed += (s, e) =>
     {
-        var frame = audioTrack[0][audioIndex++ % audioTrack[0].Count];
-        // add AU header
-        short frameLen = (short)(frame.Length << 3);
-        byte[] header = new byte[4];
-        header[0] = 0x00;
-        header[1] = 0x10; // 16 bits size of the header
-        header[2] = (byte)((frameLen >> 8) & 0xFF);
-        header[3] = (byte)(frameLen & 0xFF);
-        server.FeedInAudioPacket((uint)audioIndex * audioSampleDuration, header.Concat(frame).ToArray());
+        server.FeedInAACPacket((uint)audioIndex * audioSampleDuration, audioTrack[0][audioIndex++ % audioTrack[0].Count]);
 
-        if (videoIndex % videoTrack.Count == 0)
+        if (audioIndex % audioTrack[0].Count == 0)
         {
-            _videoTimer.Stop();
-            _audioTimer.Stop();
-
-            videoIndex = 0;
-            audioIndex = 0;
-
-            _videoTimer.Start();
-            _audioTimer.Start();
+            Reset(out videoIndex, out audioIndex, _videoTimer, _audioTimer);
         }
     };
 
@@ -106,4 +94,16 @@ using (var server = new RTSPServer(port, userName, password))
     {
         System.Threading.Thread.Sleep(250); 
     }
+}
+
+static void Reset(out int videoIndex, out int audioIndex, Timer _videoTimer, Timer _audioTimer)
+{
+    _videoTimer.Stop();
+    _audioTimer.Stop();
+
+    videoIndex = 0;
+    audioIndex = 0;
+
+    _videoTimer.Start();
+    _audioTimer.Start();
 }
