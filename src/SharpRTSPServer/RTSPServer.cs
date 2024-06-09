@@ -36,6 +36,7 @@ namespace SharpRTSPServer
 
         public const int VIDEO_PAYLOAD_TYPE = 96; // = user defined payload, required for H264
         public const int AUDIO_PAYLOAD_TYPE_PCMU = 0; // = Hard Coded to PCMU audio
+        public const int AUDIO_PAYLOAD_TYPE_AAC = 97; // = Hard Coded to AAC audio
 
         private byte[] _rawSPS;
         private byte[] _rawPPS;
@@ -467,17 +468,20 @@ namespace SharpRTSPServer
             sdp.Append("v=0\n");
             sdp.Append("o=user 123 0 IN IP4 0.0.0.0\n");
             sdp.Append("s=SharpRTSP Test Camera\n");
-            sdp.Append($"m=video 0 RTP/AVP {VIDEO_PAYLOAD_TYPE}\n");
             sdp.Append("c=IN IP4 0.0.0.0\n");
+
+            sdp.Append($"m=video 0 RTP/AVP {VIDEO_PAYLOAD_TYPE}\n");
             sdp.Append("a=control:trackID=0\n");
             sdp.Append($"a=rtpmap:{VIDEO_PAYLOAD_TYPE} H264/90000\n");
             sdp.Append($"a=fmtp:{VIDEO_PAYLOAD_TYPE} profile-level-id=").Append(profile_level_id_str)
-                .Append("; sprop-parameter-sets=").Append(sps_str).Append(',').Append(pps_str).Append(";\n");
+                .Append("; sprop-parameter-sets=").Append(sps_str).Append(',').Append(pps_str).Append("\n");
 
             // AUDIO
-            //sdp.Append("m=audio 0 RTP/AVP 0\n"); // <---- 0 means G711 ULAW
-            //sdp.Append("a=control:trackID=1\n");
-            //sdp.Append("a=rtpmap:0 PCMU/8000\n");
+            sdp.Append($"m=audio 0 RTP/AVP {AUDIO_PAYLOAD_TYPE_AAC}\n"); // <---- 0 means G711 ULAW, 96-97 means AAC
+            sdp.Append("a=control:trackID=1\n");
+            sdp.Append($"a=rtpmap:{AUDIO_PAYLOAD_TYPE_AAC} mpeg4-generic/22050/2\n");
+            sdp.Append($"a=fmtp:{AUDIO_PAYLOAD_TYPE_AAC} profile-level-id=16; config=138856e500; streamType=5; mode=AAC-hbr; objectType=64; sizeLength=13; indexLength=3; indexDeltaLength=3\n");
+
             // sdp.Append(media header info if we had AAC or other audio codec)
 
             byte[] sdp_bytes = Encoding.ASCII.GetBytes(sdp.ToString());
@@ -537,13 +541,13 @@ namespace SharpRTSPServer
         }
 
         // Feed in Raw NALs - no 32 bit headers, no 00 00 00 01 headers
-        public void FeedInRawNAL(uint timestamp_ms, List<byte[]> nal_array)
+        public void FeedInRawNAL(uint timestamp, List<byte[]> nal_array)
         {
             CheckTimeouts(out int current_rtsp_count, out int current_rtsp_play_count);
 
             if (current_rtsp_play_count == 0) return;
 
-            uint rtp_timestamp = timestamp_ms * 90; // 90kHz clock
+            uint rtp_timestamp = timestamp; 
 
             // Build a list of 1 or more RTP packets
             // The last packet will have the M bit set to '1'
@@ -560,8 +564,8 @@ namespace SharpRTSPServer
                     if (!connection.play) continue;
 
                     if (connection.video.rtpChannel is null) continue;
-                    _logger.LogDebug("Sending video session {sessionId} {TransportLogName} Timestamp(ms)={timestamp_ms}. RTP timestamp={rtp_timestamp}. Sequence={sequenceNumber}",
-                        connection.session_id, TransportLogName(connection.video.rtpChannel), timestamp_ms, rtp_timestamp, connection.video.sequenceNumber);
+                    _logger.LogDebug("Sending video session {sessionId} {TransportLogName} Timestamp(clock)={timestamp_ms}. RTP timestamp={rtp_timestamp}. Sequence={sequenceNumber}",
+                        connection.session_id, TransportLogName(connection.video.rtpChannel), timestamp, rtp_timestamp, connection.video.sequenceNumber);
 
                     if (connection.video.must_send_rtcp_packet)
                     {
@@ -776,7 +780,7 @@ namespace SharpRTSPServer
             _connectionList.Remove(connection);
         }
 
-        public void FeedInAudioPacket(uint timestamp_ms, ReadOnlyMemory<byte> audio_packet)
+        public void FeedInAudioPacket(uint timestamp, ReadOnlyMemory<byte> audio_packet)
         {
             CheckTimeouts(out int currentRtspCount, out int currentRtspPlayCount);
 
@@ -784,7 +788,7 @@ namespace SharpRTSPServer
 
             if (currentRtspPlayCount == 0) return;
 
-            uint rtp_timestamp = timestamp_ms * 8; // 8kHz clock
+            uint rtp_timestamp = timestamp;
 
             // Put the whole Audio Packet into one RTP packet.
             // 12 is header size when there are no CSRCs or extensions
@@ -808,7 +812,7 @@ namespace SharpRTSPServer
                 const bool rtpMarker = true; // always 1 as this is the last (and only) RTP packet for this audio timestamp
 
                 RTPPacketUtil.WriteHeader(rtp_packet.Span,
-                    RTPPacketUtil.RTP_VERSION, rtp_padding, rtpHasExtension, rtp_csrc_count, rtpMarker, AUDIO_PAYLOAD_TYPE_PCMU);
+                    RTPPacketUtil.RTP_VERSION, rtp_padding, rtpHasExtension, rtp_csrc_count, rtpMarker, AUDIO_PAYLOAD_TYPE_AAC);
 
                 // sequence number is set just before send
 
@@ -831,7 +835,7 @@ namespace SharpRTSPServer
                         // The client may have only subscribed to Video. Check if the client wants audio
                         if (connection.audio.rtpChannel is null) continue;
 
-                        Console.WriteLine("Sending audio session " + connection.session_id + " " + TransportLogName(connection.audio.rtpChannel) + " Timestamp(ms)=" + timestamp_ms + ". RTP timestamp=" + rtp_timestamp + ". Sequence=" + connection.audio.sequenceNumber);
+                        _logger.LogDebug("Sending audio session " + connection.session_id + " " + TransportLogName(connection.audio.rtpChannel) + " Timestamp(clock)=" + timestamp + ". RTP timestamp=" + rtp_timestamp + ". Sequence=" + connection.audio.sequenceNumber);
                         bool write_error = false;
 
                         if (connection.audio.must_send_rtcp_packet)
