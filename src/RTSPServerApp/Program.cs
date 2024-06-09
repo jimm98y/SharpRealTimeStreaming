@@ -80,7 +80,7 @@ using (var server = new RTSPServer(port, userName, password))
         short frameLen = (short)(frame.Length << 3);
         byte[] header = new byte[4];
         header[0] = 0x00;
-        header[1] = 0x10;
+        header[1] = 0x10; // 16 bits size of the header
         header[2] = (byte)((frameLen >> 8) & 0xFF);
         header[3] = (byte)(frameLen & 0xFF);
         server.FeedInAudioPacket((uint)audioIndex * audioSampleDuration, header.Concat(frame).ToArray());

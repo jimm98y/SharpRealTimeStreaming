@@ -44,7 +44,7 @@ namespace SharpRTSPServer
         private readonly List<RTSPConnection> _connectionList = new List<RTSPConnection>(); // list of RTSP Listeners
 
         private int _sessionHandle = 1;
-        private readonly NetworkCredential _credential;
+        private readonly NetworkCredential _credentials;
         private readonly Authentication _authentication;
 
         /// <summary>
@@ -74,12 +74,12 @@ namespace SharpRTSPServer
             if (!string.IsNullOrEmpty(userName) && !string.IsNullOrEmpty(password))
             {
                 const string realm = "SharpRTSPServer";
-                _credential = new NetworkCredential(userName, password);
-                _authentication = new AuthenticationDigest(_credential, realm, new Random().Next(100000000, 999999999).ToString(), string.Empty);
+                _credentials = new NetworkCredential(userName, password);
+                _authentication = new AuthenticationDigest(_credentials, realm, new Random().Next(100000000, 999999999).ToString(), string.Empty);
             }
             else
             {
-                _credential = new NetworkCredential();
+                _credentials = new NetworkCredential();
                 _authentication = null;
             }
 
@@ -150,25 +150,6 @@ namespace SharpRTSPServer
             _stopping?.Cancel();
             _listenTread?.Join();
         }
-
-        #region IDisposable Membres
-
-        public void Dispose()
-        {
-            Dispose(true);
-            GC.SuppressFinalize(this);
-        }
-
-        protected virtual void Dispose(bool disposing)
-        {
-            if (disposing)
-            {
-                StopListen();
-                _stopping?.Dispose();
-            }
-        }
-
-        #endregion
 
         // Process each RTSP message that is received
         private void RTSPMessageReceived(object sender, RtspChunkEventArgs e)
@@ -782,7 +763,7 @@ namespace SharpRTSPServer
 
         public void FeedInAudioPacket(uint timestamp, ReadOnlyMemory<byte> audio_packet)
         {
-            CheckTimeouts(out int currentRtspCount, out int currentRtspPlayCount);
+            CheckTimeouts(out _, out int currentRtspPlayCount);
 
             // Console.WriteLine(current_rtsp_count + " RTSP clients connected. " + current_rtsp_play_count + " RTSP clients in PLAY mode");
 
@@ -894,6 +875,25 @@ namespace SharpRTSPServer
                     return "";
             };
         }
+
+        #region IDisposable
+
+        public void Dispose()
+        {
+            Dispose(true);
+            GC.SuppressFinalize(this);
+        }
+
+        protected virtual void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                StopListen();
+                _stopping?.Dispose();
+            }
+        }
+
+        #endregion // IDisposable
 
         // An RTPStream can be a Video Stream, Audio Stream or a MetaData Stream
         public class RTPStream
@@ -1014,13 +1014,13 @@ namespace SharpRTSPServer
     {
         class CustomLoggerScope<TState> : IDisposable
         {
-            public CustomLoggerScope(CustomLogger logger, TState state)
+            public CustomLoggerScope(/*CustomLogger logger,*/ TState state)
             {
-                _logger = logger;
+                //_logger = logger;
                 State = state;
             }
 
-            private readonly CustomLogger _logger;
+            //private readonly CustomLogger _logger;
 
             public TState State { get; }
             public void Dispose()
@@ -1028,7 +1028,7 @@ namespace SharpRTSPServer
         }
         public IDisposable BeginScope<TState>(TState state)
         {
-            return new CustomLoggerScope<TState>(this, state);
+            return new CustomLoggerScope<TState>(/*this,*/ state);
         }
         public bool IsEnabled(LogLevel logLevel)
         {
@@ -1093,7 +1093,7 @@ namespace SharpRTSPServer
         }
     }
 
-    internal class Utilities
+    internal static class Utilities
     {
         public static byte[] FromHexString(string hex)
         {

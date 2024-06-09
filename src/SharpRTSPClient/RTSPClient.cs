@@ -492,9 +492,9 @@ namespace SharpRTSPClient
             var span = data.Data.Span;
             while (packetIndex < data.Data.Length)
             {
-                int rtcp_version = (span[packetIndex + 0] >> 6);
-                int rtcp_padding = (span[packetIndex + 0] >> 5) & 0x01;
-                int rtcp_reception_report_count = (span[packetIndex + 0] & 0x1F);
+                //int rtcp_version = (span[packetIndex + 0] >> 6);
+                //int rtcp_padding = (span[packetIndex + 0] >> 5) & 0x01;
+                //int rtcp_reception_report_count = (span[packetIndex + 0] & 0x1F);
                 byte rtcp_packet_type = span[packetIndex + 1]; // Values from 200 to 207
                 int rtcp_length = (int)(span[packetIndex + 2] << 8) + (int)(span[packetIndex + 3]); // number of 32 bit words
                 uint rtcp_ssrc = (uint)(span[packetIndex + 4] << 24) + (uint)(span[packetIndex + 5] << 16)
@@ -517,13 +517,13 @@ namespace SharpRTSPClient
                     UInt32 ntp_msw_seconds = (uint)(span[packetIndex + 8] << 24) + (uint)(span[packetIndex + 9] << 16)
                     + (uint)(span[packetIndex + 10] << 8) + span[packetIndex + 11];
 
-                    UInt32 ntp_lsw_fractions = (uint)(span[packetIndex + 12] << 24) + (uint)(span[packetIndex + 13] << 16)
-                    + (uint)(span[packetIndex + 14] << 8) + span[packetIndex + 15];
+                    //UInt32 ntp_lsw_fractions = (uint)(span[packetIndex + 12] << 24) + (uint)(span[packetIndex + 13] << 16)
+                    //+ (uint)(span[packetIndex + 14] << 8) + span[packetIndex + 15];
 
                     UInt32 rtp_timestamp = (uint)(span[packetIndex + 16] << 24) + (uint)(span[packetIndex + 17] << 16)
                     + (uint)(span[packetIndex + 18] << 8) + span[packetIndex + 19];
 
-                    double ntp = ntp_msw_seconds + (ntp_lsw_fractions / UInt32.MaxValue);
+                    //double ntp = ntp_msw_seconds + (ntp_lsw_fractions / UInt32.MaxValue);
 
                     // NTP Most Signigicant Word is relative to 0h, 1 Jan 1900
                     // This will wrap around in 2036
@@ -1315,13 +1315,13 @@ namespace SharpRTSPClient
     {
         class CustomLoggerScope<TState> : IDisposable
         {
-            public CustomLoggerScope(CustomLogger logger, TState state)
+            public CustomLoggerScope(/*CustomLogger logger,*/ TState state)
             {
-                _logger = logger;
+                //_logger = logger;
                 State = state;
             }
 
-            private readonly CustomLogger _logger;
+            //private readonly CustomLogger _logger;
 
             public TState State { get; }
             public void Dispose()
@@ -1329,7 +1329,7 @@ namespace SharpRTSPClient
         }
         public IDisposable BeginScope<TState>(TState state)
         {
-            return new CustomLoggerScope<TState>(this, state);
+            return new CustomLoggerScope<TState>(/*this,*/ state);
         }
         public bool IsEnabled(LogLevel logLevel)
         {
