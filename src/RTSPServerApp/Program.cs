@@ -30,6 +30,7 @@ using (var server = new RTSPServer(port, userName, password))
     uint audioTrackId = 0;
     AudioSampleEntryBox audioTrackInfo;
 
+    // frag_bunny.mp4 audio is not playable in VLC on Windows 11 (works on MacOS)
     using (Stream fs = new BufferedStream(new FileStream("frag_bunny.mp4", FileMode.Open, FileAccess.Read, FileShare.Read)))
     {
         using (var fmp4 = await FragmentedMp4.ParseAsync(fs))
@@ -55,12 +56,15 @@ using (var server = new RTSPServer(port, userName, password))
     var esdsBox = audioTrackInfo.Children[0] as EsdsBox;
     var decoderConfigDescriptor = esdsBox.ESDescriptor.Descriptors.Single(x => x is DecoderConfigDescriptor) as DecoderConfigDescriptor;
     var audioConfigDescriptor = decoderConfigDescriptor.AudioSpecificConfig;
-    string strAudioConfigDescriptor;
+    byte[] bAudioConfigDescriptor;
     using (var ms = new MemoryStream())
     {
         await AudioSpecificConfigDescriptor.BuildAsync(ms, AudioSpecificConfigDescriptor.OBJECT_TYPE_INDICATION, 0, audioConfigDescriptor);
-        strAudioConfigDescriptor = Utilities.ToHexString(ms.ToArray());
+        bAudioConfigDescriptor = ms.ToArray();
     }
+
+    server.VideoTrack = new SharpRTSPServer.H264Track();
+    server.AudioTrack = new SharpRTSPServer.AACTrack(22050, 2, bAudioConfigDescriptor);
 
     _videoTimer.Elapsed += (s, e) =>
     {

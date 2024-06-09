@@ -25,6 +25,9 @@ namespace SharpRTSPServer
 
     public class RTSPServer : IDisposable
     {
+        public H264Track VideoTrack { get; set; }
+        public AACTrack AudioTrack { get; set; }
+
         private const uint GLOBAL_SSRC = 0x4321FADE; // 8 hex digits
         private const int RTSP_TIMEOUT = 60; // 60 seconds
 
@@ -34,12 +37,8 @@ namespace SharpRTSPServer
         private CancellationTokenSource _stopping;
         private Thread _listenTread;
 
-        public const int VIDEO_PAYLOAD_TYPE = 96; // = user defined payload, required for H264
         public const int AUDIO_PAYLOAD_TYPE_PCMU = 0; // = Hard Coded to PCMU audio
-        public const int AUDIO_PAYLOAD_TYPE_AAC = 97; // = Hard Coded to AAC audio
-
-        private byte[] _rawSPS;
-        private byte[] _rawPPS;
+        public const int DYNAMIC_PAYLOAD_TYPE = 96; // Dynamic payload type base
 
         private readonly List<RTSPConnection> _connectionList = new List<RTSPConnection>(); // list of RTSP Listeners
 
@@ -415,31 +414,13 @@ namespace SharpRTSPServer
             // TODO. Check the requsted_url is valid. In this example we accept any RTSP URL
 
             // if the SPS and PPS are not defined yet, we have to return an error
-            if (_rawSPS == null || _rawPPS == null)
+            if (VideoTrack == null || VideoTrack.SPS == null || VideoTrack.PPS == null)
             {
                 RtspResponse describe_response2 = message.CreateResponse();
                 describe_response2.ReturnCode = 400; // 400 Bad Request
                 listener.SendMessage(describe_response2);
                 return;
             }
-
-            // Make the Base64 SPS and PPS
-            // raw_sps has no 0x00 0x00 0x00 0x01 or 32 bit size header
-            // raw_pps has no 0x00 0x00 0x00 0x01 or 32 bit size header
-            string sps_str = Convert.ToBase64String(_rawSPS);
-            string pps_str = Convert.ToBase64String(_rawPPS);
-
-            // Make the profile-level-id
-            // Eg a string of profile-level-id=42A01E is
-            // a Profile eg Constrained Baseline, Baseline, Extended, Main, High. This defines which features in H264 are used
-            // a Level eg 1,2,3 or 4. This defines a max resoution for the video. 2=up to SD, 3=upto 1080p. Decoders can then reserve sufficient RAM for frame buffers
-            const int profile_idc = 77; // Main Profile
-            const int profile_iop = 0; // bit 7 (msb) is 0 so constrained_flag is false
-            const int level = 42; // Level 4.2
-
-            string profile_level_id_str = profile_idc.ToString("X2") // convert to hex, padded to 2 characters
-                                        + profile_iop.ToString("X2")
-                                        + level.ToString("X2");
 
             StringBuilder sdp = new StringBuilder();
 
@@ -451,23 +432,11 @@ namespace SharpRTSPServer
             sdp.Append("s=SharpRTSP Test Camera\n");
             sdp.Append("c=IN IP4 0.0.0.0\n");
 
-            const int videoClock = 90000;
-            const string videoCodec = "H264";
-            sdp.Append($"m=video 0 RTP/AVP {VIDEO_PAYLOAD_TYPE}\n");
-            sdp.Append("a=control:trackID=0\n");
-            sdp.Append($"a=rtpmap:{VIDEO_PAYLOAD_TYPE} {videoCodec}/{videoClock}\n");
-            sdp.Append($"a=fmtp:{VIDEO_PAYLOAD_TYPE} profile-level-id=").Append(profile_level_id_str)
-                .Append("; sprop-parameter-sets=").Append(sps_str).Append(',').Append(pps_str).Append("\n");
-
+            // VIDEO
+            VideoTrack.BuildSDP(sdp);
+            
             // AUDIO
-            const int audioSamplingRate = 22050;
-            const int audioChannelConfiguration = 2;
-            const string audioConfigDescriptor = "1390"; // hex
-            sdp.Append($"m=audio 0 RTP/AVP {AUDIO_PAYLOAD_TYPE_AAC}\n"); // <---- 0 means G711 ULAW, 96-97 means AAC
-            sdp.Append("a=control:trackID=1\n");
-            sdp.Append($"a=rtpmap:{AUDIO_PAYLOAD_TYPE_AAC} mpeg4-generic/{audioSamplingRate}/{audioChannelConfiguration}\n");
-            sdp.Append($"a=fmtp:{AUDIO_PAYLOAD_TYPE_AAC} profile-level-id={GetAACProfileLevel(audioSamplingRate, audioChannelConfiguration)}; " +
-                $"config={audioConfigDescriptor}; streamType=5; mode=AAC-hbr; objectType=64; sizeLength=13; indexLength=3; indexDeltaLength=3\n");
+            AudioTrack?.BuildSDP(sdp);
 
             // sdp.Append(media header info if we had AAC or other audio codec)
 
@@ -484,85 +453,7 @@ namespace SharpRTSPServer
             listener.SendMessage(describe_response);
         }
 
-        private static int GetAACLevel(int samplingFrequency, int channelConfiguration)
-        {
-            if (samplingFrequency <= 24000)
-            {
-                if (channelConfiguration <= 2)
-                    return 1; // AAC Profile, Level 1
-            }
-            else if (samplingFrequency <= 48000)
-            {
-                if (channelConfiguration <= 2)
-                    return 2; // Level 2
-                else if (channelConfiguration <= 5)
-                    return 4; // Level 4
-            }
-            else if (samplingFrequency <= 96000)
-            {
-                if (channelConfiguration <= 5)
-                    return 5; // Level 5
-            }
-
-            return 5;
-        }
-
-        private static int GetAACHELevel(int samplingFrequency, int channelConfiguration, bool sbr)
-        {
-	        if (samplingFrequency <= 48000)
-	        {
-		        if (channelConfiguration <= 2)
-			        return sbr ? 3 : 2; // Level 2/3
-		        else if (channelConfiguration <= 5)
-			        return 4; // Level 4
-	        }
-	        else if (samplingFrequency <= 96000)
-	        {
-		        if (channelConfiguration <= 5)
-			        return 5; // Level 5
-	        }
-
-            return 5;
-        }
-
-        private static int GetAACHQLevel(int samplingFrequency, int channelConfiguration)
-        {
-	        if (samplingFrequency <= 22050)
-	        {
-		        if (channelConfiguration <= 2)
-			        return 1; // Level 1/5
-	        }
-	        else if (samplingFrequency <= 48000)
-	        {
-		        if (channelConfiguration <= 2)
-			        return 2; // Level 2/6
-		        else if (channelConfiguration <= 5)
-			        return 3; // Level 3/4/7/8
-	        }
-
-            return 8;
-        }
-
-        private static int GetAACProfileLevel(int samplingFrequency, int channelConfiguration, int profile = 2, bool sbr = false)
-        {
-            switch(profile)
-            {
-                case 2: // AAC_LC
-                    return GetAACLevel(samplingFrequency, channelConfiguration) - 1 + 0x28;
-
-                case 5: // AAC_SBR
-                    return GetAACHELevel(samplingFrequency, channelConfiguration, sbr) - 2 + 0x2C;
-
-                case 29: // AAC_PS
-                    return GetAACHELevel(samplingFrequency, channelConfiguration, sbr) - 2 + 0x30;
-
-                case 8: // AAC_CELP
-                    return GetAACHQLevel(samplingFrequency, channelConfiguration) - 1 + 0x0E;
-
-                default:
-                    return 1;
-            }
-        }
+        
 
         private RTSPConnection ConnectionByRtpTransport(IRtpTransport rtpTransport)
         {
@@ -603,8 +494,7 @@ namespace SharpRTSPServer
         // Feed in Raw SPS/PPS data - no 32 bit headers, no 00 00 00 01 headers
         public void FeedInRawSPSandPPS(byte[] sps_data, byte[] pps_data) // SPS data without any headers (00 00 00 01 or 32 bit lengths)
         {
-            _rawSPS = sps_data;
-            _rawPPS = pps_data;
+            VideoTrack.SetSPSandPPS(sps_data, pps_data);
         }
 
         // Feed in Raw NALs - no 32 bit headers, no 00 00 00 01 headers
@@ -618,7 +508,7 @@ namespace SharpRTSPServer
 
             // Build a list of 1 or more RTP packets
             // The last packet will have the M bit set to '1'
-            (List<Memory<byte>> rtp_packets, List<IMemoryOwner<byte>> memoryOwners) = PrepareVideoRtpPackets(nal_array, rtp_timestamp);
+            (List<Memory<byte>> rtp_packets, List<IMemoryOwner<byte>> memoryOwners) = PrepareVideoRtpPackets(nal_array, rtp_timestamp, VideoTrack.PayloadType);
 
             lock (_connectionList)
             {
@@ -709,7 +599,7 @@ namespace SharpRTSPServer
             }
         }
 
-        private static (List<Memory<byte>>, List<IMemoryOwner<byte>>) PrepareVideoRtpPackets(List<byte[]> nal_array, uint rtp_timestamp)
+        private static (List<Memory<byte>>, List<IMemoryOwner<byte>>) PrepareVideoRtpPackets(List<byte[]> nal_array, uint rtp_timestamp, int videoPayloadType)
         {
             List<Memory<byte>> rtp_packets = new List<Memory<byte>>();
             List<IMemoryOwner<byte>> memoryOwners = new List<IMemoryOwner<byte>>();
@@ -763,7 +653,7 @@ namespace SharpRTSPServer
                     RTPPacketUtil.WriteHeader(rtp_packet.Span,
                         RTPPacketUtil.RTP_VERSION,
                         rtpPadding,
-                        rtpHasExtension, rtp_csrc_count, last_nal, VIDEO_PAYLOAD_TYPE);
+                        rtpHasExtension, rtp_csrc_count, last_nal, videoPayloadType);
 
                     // sequence number and SSRC are set just before send
 
@@ -810,7 +700,7 @@ namespace SharpRTSPServer
                         const int rtp_csrc_count = 0;
 
                         RTPPacketUtil.WriteHeader(rtp_packet.Span, RTPPacketUtil.RTP_VERSION,
-                            rtpPadding, rtpHasExtension, rtp_csrc_count, last_nal && end_bit == 1, VIDEO_PAYLOAD_TYPE);
+                            rtpPadding, rtpHasExtension, rtp_csrc_count, last_nal && end_bit == 1, videoPayloadType);
 
                         // sequence number and SSRC are set just before send
                         RTPPacketUtil.WriteTS(rtp_packet.Span, rtp_timestamp);
@@ -856,10 +746,10 @@ namespace SharpRTSPServer
             header[1] = 0x10; // 16 bits size of the header
             header[2] = (byte)((frameLen >> 8) & 0xFF);
             header[3] = (byte)(frameLen & 0xFF);
-            FeedInAudioPacket(timestamp, header.Concat(aac_packet).ToArray());   
+            FeedInAudioPacket(timestamp, header.Concat(aac_packet).ToArray(), AudioTrack.PayloadType);   
         }
 
-        public void FeedInAudioPacket(uint timestamp, ReadOnlyMemory<byte> audio_packet)
+        public void FeedInAudioPacket(uint timestamp, ReadOnlyMemory<byte> audio_packet, int audioPayloadType)
         {
             CheckTimeouts(out _, out int currentRtspPlayCount);
 
@@ -891,7 +781,7 @@ namespace SharpRTSPServer
                 const bool rtpMarker = true; // always 1 as this is the last (and only) RTP packet for this audio timestamp
 
                 RTPPacketUtil.WriteHeader(rtp_packet.Span,
-                    RTPPacketUtil.RTP_VERSION, rtp_padding, rtpHasExtension, rtp_csrc_count, rtpMarker, AUDIO_PAYLOAD_TYPE_AAC);
+                    RTPPacketUtil.RTP_VERSION, rtp_padding, rtpHasExtension, rtp_csrc_count, rtpMarker, audioPayloadType);
 
                 // sequence number is set just before send
 
@@ -1091,6 +981,174 @@ namespace SharpRTSPServer
             BinaryPrimitives.WriteUInt32BigEndian(rtcpSenderReport.Slice(16), rtp_timestamp);
             BinaryPrimitives.WriteUInt32BigEndian(rtcpSenderReport.Slice(20), rtpPacketCount);
             BinaryPrimitives.WriteUInt32BigEndian(rtcpSenderReport.Slice(24), octetCount);
+        }
+    }
+
+    public interface ITrack
+    {
+        int PayloadType { get; }
+        StringBuilder BuildSDP(StringBuilder sdp);
+    }
+
+    public class H264Track : ITrack
+    {
+        public const string VideoCodec = "H264";
+
+        public int ID { get; set; } = 0;
+        public int ProfileIdc { get; set; } = 77; // Main Profile
+        public int ProfileIop { get; set; } = 0; // bit 7 (msb) is 0 so constrained_flag is false
+        public int Level { get; set; } = 42; // Level 4.2
+        public int VideoClock { get; set; } = 90000;
+
+        public byte[] SPS { get; set; }
+        public byte[] PPS { get; set; }
+
+        public int PayloadType => RTSPServer.DYNAMIC_PAYLOAD_TYPE + ID;
+
+        public H264Track(int profileIdc = 77, int profileIop = 0, int level = 42, int clock = 90000)
+        {
+            this.ProfileIdc = profileIdc;
+            this.ProfileIop = profileIop;
+            this.Level = level;
+            this.VideoClock = clock;
+        }
+
+        public void SetSPSandPPS(byte[] sps, byte[] pps)
+        {
+            this.SPS = sps;
+            this.PPS = pps;
+        }
+
+        public StringBuilder BuildSDP(StringBuilder sdp)
+        {
+            // Make the profile-level-id
+            // Eg a string of profile-level-id=42A01E is
+            // a Profile eg Constrained Baseline, Baseline, Extended, Main, High. This defines which features in H264 are used
+            // a Level eg 1,2,3 or 4. This defines a max resoution for the video. 2=up to SD, 3=upto 1080p. Decoders can then reserve sufficient RAM for frame buffers
+
+            string profile_level_id_str = ProfileIdc.ToString("X2") // convert to hex, padded to 2 characters
+                                        + ProfileIop.ToString("X2")
+                                        + Level.ToString("X2");
+
+            // Make the Base64 SPS and PPS
+            // raw_sps has no 0x00 0x00 0x00 0x01 or 32 bit size header
+            // raw_pps has no 0x00 0x00 0x00 0x01 or 32 bit size header
+            string sps_str = Convert.ToBase64String(SPS);
+            string pps_str = Convert.ToBase64String(PPS);
+
+            sdp.Append($"m=video 0 RTP/AVP {PayloadType}\n");
+            sdp.Append("a=control:trackID=0\n");
+            sdp.Append($"a=rtpmap:{PayloadType} {VideoCodec}/{VideoClock}\n");
+            sdp.Append($"a=fmtp:{PayloadType} profile-level-id=").Append(profile_level_id_str)
+                .Append("; sprop-parameter-sets=").Append(sps_str).Append(',').Append(pps_str).Append("\n");
+            return sdp;
+        }
+    }
+
+    public class AACTrack : ITrack
+    {
+        public int ID { get; set; } = 1;
+        public int SamplingRate { get; set; } = 22050;
+        public int Channels { get; set; } = 2;
+        public string ConfigDescriptor { get; set; } = "1390"; // hex
+
+        public int PayloadType => RTSPServer.DYNAMIC_PAYLOAD_TYPE + ID;
+
+        public AACTrack(int samplingRate, int channels, byte[] configDescriptor)
+        {
+            this.SamplingRate = samplingRate;
+            this.Channels = channels;
+            this.ConfigDescriptor = Utilities.ToHexString(configDescriptor);
+        }
+
+        public StringBuilder BuildSDP(StringBuilder sdp)
+        {
+            sdp.Append($"m=audio 0 RTP/AVP {PayloadType}\n"); // <---- Payload Type 0 means G711 ULAW, 96+ means dynamic payload type
+            sdp.Append("a=control:trackID=1\n");
+            sdp.Append($"a=rtpmap:{PayloadType} mpeg4-generic/{SamplingRate}/{Channels}\n");
+            sdp.Append($"a=fmtp:{PayloadType} profile-level-id={GetAACProfileLevel(SamplingRate, Channels)}; " +
+                $"config={ConfigDescriptor}; streamType=5; mode=AAC-hbr; objectType=64; sizeLength=13; indexLength=3; indexDeltaLength=3\n");
+            return sdp;
+        }
+
+        private static int GetAACLevel(int samplingFrequency, int channelConfiguration)
+        {
+            if (samplingFrequency <= 24000)
+            {
+                if (channelConfiguration <= 2)
+                    return 1; // AAC Profile, Level 1
+            }
+            else if (samplingFrequency <= 48000)
+            {
+                if (channelConfiguration <= 2)
+                    return 2; // Level 2
+                else if (channelConfiguration <= 5)
+                    return 4; // Level 4
+            }
+            else if (samplingFrequency <= 96000)
+            {
+                if (channelConfiguration <= 5)
+                    return 5; // Level 5
+            }
+
+            return 5;
+        }
+
+        private static int GetAACHELevel(int samplingFrequency, int channelConfiguration, bool sbr)
+        {
+            if (samplingFrequency <= 48000)
+            {
+                if (channelConfiguration <= 2)
+                    return sbr ? 3 : 2; // Level 2/3
+                else if (channelConfiguration <= 5)
+                    return 4; // Level 4
+            }
+            else if (samplingFrequency <= 96000)
+            {
+                if (channelConfiguration <= 5)
+                    return 5; // Level 5
+            }
+
+            return 5;
+        }
+
+        private static int GetAACHQLevel(int samplingFrequency, int channelConfiguration)
+        {
+            if (samplingFrequency <= 22050)
+            {
+                if (channelConfiguration <= 2)
+                    return 1; // Level 1/5
+            }
+            else if (samplingFrequency <= 48000)
+            {
+                if (channelConfiguration <= 2)
+                    return 2; // Level 2/6
+                else if (channelConfiguration <= 5)
+                    return 3; // Level 3/4/7/8
+            }
+
+            return 8;
+        }
+
+        private static int GetAACProfileLevel(int samplingFrequency, int channelConfiguration, int profile = 2, bool sbr = false)
+        {
+            switch (profile)
+            {
+                case 2: // AAC_LC
+                    return GetAACLevel(samplingFrequency, channelConfiguration) - 1 + 0x28;
+
+                case 5: // AAC_SBR
+                    return GetAACHELevel(samplingFrequency, channelConfiguration, sbr) - 2 + 0x2C;
+
+                case 29: // AAC_PS
+                    return GetAACHELevel(samplingFrequency, channelConfiguration, sbr) - 2 + 0x30;
+
+                case 8: // AAC_CELP
+                    return GetAACHQLevel(samplingFrequency, channelConfiguration) - 1 + 0x0E;
+
+                default:
+                    return 1;
+            }
         }
     }
 
