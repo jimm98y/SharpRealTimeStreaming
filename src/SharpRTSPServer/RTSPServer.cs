@@ -25,8 +25,8 @@ namespace SharpRTSPServer
 
     public class RTSPServer : IDisposable
     {
-        public H264Track VideoTrack { get; set; }
-        public AACTrack AudioTrack { get; set; }
+        public ITrack VideoTrack { get; set; }
+        public ITrack AudioTrack { get; set; }
 
         private const uint GLOBAL_SSRC = 0x4321FADE; // 8 hex digits
         private const int RTSP_TIMEOUT = 60; // 60 seconds
@@ -37,7 +37,6 @@ namespace SharpRTSPServer
         private CancellationTokenSource _stopping;
         private Thread _listenTread;
 
-        public const int AUDIO_PAYLOAD_TYPE_PCMU = 0; // = Hard Coded to PCMU audio
         public const int DYNAMIC_PAYLOAD_TYPE = 96; // Dynamic payload type base
 
         private readonly List<RTSPConnection> _connectionList = new List<RTSPConnection>(); // list of RTSP Listeners
@@ -414,7 +413,7 @@ namespace SharpRTSPServer
             // TODO. Check the requsted_url is valid. In this example we accept any RTSP URL
 
             // if the SPS and PPS are not defined yet, we have to return an error
-            if (VideoTrack == null || VideoTrack.SPS == null || VideoTrack.PPS == null)
+            if ((VideoTrack == null || !VideoTrack.IsReady) || (AudioTrack != null && !AudioTrack.IsReady))
             {
                 RtspResponse describe_response2 = message.CreateResponse();
                 describe_response2.ReturnCode = 400; // 400 Bad Request
@@ -438,8 +437,6 @@ namespace SharpRTSPServer
             // AUDIO
             AudioTrack?.BuildSDP(sdp);
 
-            // sdp.Append(media header info if we had AAC or other audio codec)
-
             byte[] sdp_bytes = Encoding.ASCII.GetBytes(sdp.ToString());
 
             // Create the reponse to DESCRIBE
@@ -452,8 +449,6 @@ namespace SharpRTSPServer
             describe_response.AdjustContentLength();
             listener.SendMessage(describe_response);
         }
-
-        
 
         private RTSPConnection ConnectionByRtpTransport(IRtpTransport rtpTransport)
         {
@@ -489,12 +484,6 @@ namespace SharpRTSPServer
                 }
                 current_rtsp_play_count = _connectionList.Count(c => c.play);
             }
-        }
-
-        // Feed in Raw SPS/PPS data - no 32 bit headers, no 00 00 00 01 headers
-        public void FeedInRawSPSandPPS(byte[] sps_data, byte[] pps_data) // SPS data without any headers (00 00 00 01 or 32 bit lengths)
-        {
-            VideoTrack.SetSPSandPPS(sps_data, pps_data);
         }
 
         // Feed in Raw NALs - no 32 bit headers, no 00 00 00 01 headers
@@ -804,7 +793,8 @@ namespace SharpRTSPServer
                         // The client may have only subscribed to Video. Check if the client wants audio
                         if (connection.audio.rtpChannel is null) continue;
 
-                        _logger.LogDebug("Sending audio session " + connection.session_id + " " + TransportLogName(connection.audio.rtpChannel) + " Timestamp(clock)=" + timestamp + ". RTP timestamp=" + rtp_timestamp + ". Sequence=" + connection.audio.sequenceNumber);
+                        _logger.LogDebug("Sending audio session " + connection.session_id + " " + TransportLogName(connection.audio.rtpChannel) + " Timestamp(clock)=" + timestamp + 
+                            ". RTP timestamp=" + rtp_timestamp + ". Sequence=" + connection.audio.sequenceNumber);
                         bool write_error = false;
 
                         if (connection.audio.must_send_rtcp_packet)
@@ -987,6 +977,7 @@ namespace SharpRTSPServer
     public interface ITrack
     {
         int PayloadType { get; }
+        bool IsReady { get; }
         StringBuilder BuildSDP(StringBuilder sdp);
     }
 
@@ -1003,6 +994,8 @@ namespace SharpRTSPServer
         public byte[] SPS { get; set; }
         public byte[] PPS { get; set; }
 
+        public bool IsReady {  get { return SPS != null && PPS != null; } }
+
         public int PayloadType => RTSPServer.DYNAMIC_PAYLOAD_TYPE + ID;
 
         public H264Track(int profileIdc = 77, int profileIop = 0, int level = 42, int clock = 90000)
@@ -1013,7 +1006,8 @@ namespace SharpRTSPServer
             this.VideoClock = clock;
         }
 
-        public void SetSPSandPPS(byte[] sps, byte[] pps)
+        // Feed in Raw SPS/PPS data - no 32 bit headers, no 00 00 00 01 headers
+        public void SetSPS_PPS(byte[] sps, byte[] pps)
         {
             this.SPS = sps;
             this.PPS = pps;
@@ -1026,9 +1020,9 @@ namespace SharpRTSPServer
             // a Profile eg Constrained Baseline, Baseline, Extended, Main, High. This defines which features in H264 are used
             // a Level eg 1,2,3 or 4. This defines a max resoution for the video. 2=up to SD, 3=upto 1080p. Decoders can then reserve sufficient RAM for frame buffers
 
-            string profile_level_id_str = ProfileIdc.ToString("X2") // convert to hex, padded to 2 characters
-                                        + ProfileIop.ToString("X2")
-                                        + Level.ToString("X2");
+            string profile_level_id_str = ProfileIdc.ToString("X2") + // convert to hex, padded to 2 characters
+                                          ProfileIop.ToString("X2") +
+                                          Level.ToString("X2");
 
             // Make the Base64 SPS and PPS
             // raw_sps has no 0x00 0x00 0x00 0x01 or 32 bit size header
@@ -1045,12 +1039,56 @@ namespace SharpRTSPServer
         }
     }
 
+    public class H265Track : ITrack
+    {
+        public const string VideoCodec = "H265";
+
+        public int ID { get; set; } = 0;
+        public int VideoClock { get; set; } = 90000;
+
+        public byte[] VPS { get; set; }
+        public byte[] SPS { get; set; }
+        public byte[] PPS { get; set; }
+
+        public bool IsReady { get { return VPS != null && SPS != null && PPS != null; } }
+
+        public int PayloadType => RTSPServer.DYNAMIC_PAYLOAD_TYPE + ID;
+
+        public H265Track(int clock = 90000)
+        {
+            this.VideoClock = clock;
+        }
+
+        // Feed in Raw VPS/SPS/PPS data - no 32 bit headers, no 00 00 00 01 headers
+        public void SetVPS_SPS_PPS(byte[] vps, byte[] sps, byte[] pps)
+        {
+            this.VPS = vps;
+            this.SPS = sps;
+            this.PPS = pps;
+        }
+
+        public StringBuilder BuildSDP(StringBuilder sdp)
+        {
+            string vps_str = Convert.ToBase64String(VPS);
+            string sps_str = Convert.ToBase64String(SPS);
+            string pps_str = Convert.ToBase64String(PPS);
+
+            sdp.Append($"m=video 0 RTP/AVP {PayloadType}\n");
+            sdp.Append("a=control:trackID=0\n");
+            sdp.Append($"a=rtpmap:{PayloadType} {VideoCodec}/{VideoClock}\n");
+            sdp.Append($"a=fmtp:{PayloadType} sprop-vps=").Append(vps_str).Append("; sprop-sps=").Append(sps_str).Append("; sprop-pps=").Append(pps_str).Append("\n");
+            return sdp;
+        }
+    }
+
     public class AACTrack : ITrack
     {
         public int ID { get; set; } = 1;
         public int SamplingRate { get; set; } = 22050;
         public int Channels { get; set; } = 2;
         public string ConfigDescriptor { get; set; } = "1390"; // hex
+
+        public bool IsReady { get { return !string.IsNullOrWhiteSpace(ConfigDescriptor); } }
 
         public int PayloadType => RTSPServer.DYNAMIC_PAYLOAD_TYPE + ID;
 

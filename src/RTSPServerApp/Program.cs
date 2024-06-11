@@ -42,7 +42,7 @@ using (var server = new RTSPServer(port, userName, password))
         }
     }
 
-    uint videoSampleDuration = 90000 / 24; // 24 fps
+    uint videoSampleDuration = 90000 / 24; // 24 fps TODO
     uint audioSampleDuration = 1024;
     var videoTrack = parsedMDAT[videoTrackId];
     int videoIndex = 0;
@@ -70,7 +70,7 @@ using (var server = new RTSPServer(port, userName, password))
     {
         if (videoIndex == 0)
         {
-            server.FeedInRawSPSandPPS(videoTrack[0][0], videoTrack[0][1]);
+            (server.VideoTrack as SharpRTSPServer.H264Track).SetSPS_PPS(videoTrack[0][0], videoTrack[0][1]);
             videoIndex++;
         }
         server.FeedInRawNAL((uint)videoIndex * videoSampleDuration, (List<byte[]>)videoTrack[videoIndex++ % videoTrack.Count]);
