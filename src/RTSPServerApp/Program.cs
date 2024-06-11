@@ -28,6 +28,8 @@ using (var server = new RTSPServer(port, userName, password))
     Dictionary<uint, IList<IList<byte[]>>> parsedMDAT;
     uint videoTrackId = 0;
     uint audioTrackId = 0;
+    SharpMp4.TrakBox trackBoxAAC = null;
+    SharpMp4.TrakBox trackBoxH264 = null;
     AudioSampleEntryBox audioTrackInfo;
 
     // frag_bunny.mp4 audio is not playable in VLC on Windows 11 (works on MacOS)
@@ -38,33 +40,29 @@ using (var server = new RTSPServer(port, userName, password))
             videoTrackId = fmp4.FindVideoTrackID().First();
             audioTrackId = fmp4.FindAudioTrackID().First();
             parsedMDAT = await fmp4.ParseMdatAsync();
-            audioTrackInfo = fmp4.FindAudioTracks().First().GetAudioSampleEntryBox();
+
+            trackBoxAAC = fmp4.FindAudioTracks().First();
+            trackBoxH264 = fmp4.FindVideoTracks().First();
+            audioTrackInfo = trackBoxAAC.GetAudioSampleEntryBox();
         }
     }
 
-    uint videoSampleDuration = 90000 / 24; // 24 fps TODO
-    uint audioSampleDuration = 1024;
+    uint videoSampleDuration = SharpRTSPServer.H264Track.DEFAULT_CLOCK / 24; // TODO 24 fps = timescale / sampleDuration = 600 / 25
+    uint audioSampleDuration = SharpMp4.AACTrack.AAC_SAMPLE_SIZE;
     var videoTrack = parsedMDAT[videoTrackId];
     int videoIndex = 0;
 
     var audioTrack = parsedMDAT[audioTrackId];
     int audioIndex = 0;
 
-    Timer _videoTimer = new Timer(videoSampleDuration * 1000 / 90000);
-    Timer _audioTimer = new Timer(audioSampleDuration * 1000 / 22050);
+    var audioConfigDescriptor = audioTrackInfo.GetAudioSpecificConfigDescriptor();
+    int audioSamplingRate = 22050; // audioConfigDescriptor.GetSamplingFrequency();
 
-    var esdsBox = audioTrackInfo.Children[0] as EsdsBox;
-    var decoderConfigDescriptor = esdsBox.ESDescriptor.Descriptors.Single(x => x is DecoderConfigDescriptor) as DecoderConfigDescriptor;
-    var audioConfigDescriptor = decoderConfigDescriptor.AudioSpecificConfig;
-    byte[] bAudioConfigDescriptor;
-    using (var ms = new MemoryStream())
-    {
-        await AudioSpecificConfigDescriptor.BuildAsync(ms, AudioSpecificConfigDescriptor.OBJECT_TYPE_INDICATION, 0, audioConfigDescriptor);
-        bAudioConfigDescriptor = ms.ToArray();
-    }
+    Timer _videoTimer = new Timer(videoSampleDuration * 1000 / videoSampleDuration);
+    Timer _audioTimer = new Timer(audioSampleDuration * 1000 / audioSamplingRate);
 
     server.VideoTrack = new SharpRTSPServer.H264Track();
-    server.AudioTrack = new SharpRTSPServer.AACTrack(22050, 2, bAudioConfigDescriptor);
+    server.AudioTrack = new SharpRTSPServer.AACTrack(audioSamplingRate, audioConfigDescriptor.ChannelConfiguration, await audioConfigDescriptor.ToBytes());
 
     _videoTimer.Elapsed += (s, e) =>
     {
