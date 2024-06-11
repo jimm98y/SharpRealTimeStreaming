@@ -1,12 +1,13 @@
-﻿using System.Text;
+﻿using System.Linq;
+using System.Text;
 
 namespace SharpRTSPServer
 {
     public class AACTrack : ITrack
     {
         public int ID { get; set; } = 1;
-        public int SamplingRate { get; set; } = 22050;
-        public int Channels { get; set; } = 2;
+        public int SamplingRate { get; set; } = 44100;
+        public int Channels { get; set; } = 1;
         public string ConfigDescriptor { get; set; } = "1390"; // hex
 
         public bool IsReady { get { return !string.IsNullOrWhiteSpace(ConfigDescriptor); } }
@@ -108,6 +109,18 @@ namespace SharpRTSPServer
                 default:
                     return 1;
             }
+        }
+
+        public static byte[] AppendAUHeader(byte[] frame)
+        {
+            // append AU header (required for AAC)
+            short frameLen = (short)(frame.Length << 3);
+            byte[] header = new byte[4];
+            header[0] = 0x00;
+            header[1] = 0x10; // 16 bits size of the header
+            header[2] = (byte)((frameLen >> 8) & 0xFF);
+            header[3] = (byte)(frameLen & 0xFF);
+            return header.Concat(frame).ToArray();
         }
     }
 }

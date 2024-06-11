@@ -727,19 +727,7 @@ namespace SharpRTSPServer
             _connectionList.Remove(connection);
         }
 
-        public void FeedInAACPacket(uint timestamp, byte[] aac_packet)
-        {
-            // append AU header (required for AAC)
-            short frameLen = (short)(aac_packet.Length << 3);
-            byte[] header = new byte[4];
-            header[0] = 0x00;
-            header[1] = 0x10; // 16 bits size of the header
-            header[2] = (byte)((frameLen >> 8) & 0xFF);
-            header[3] = (byte)(frameLen & 0xFF);
-            FeedInAudioPacket(timestamp, header.Concat(aac_packet).ToArray(), AudioTrack.PayloadType);   
-        }
-
-        public void FeedInAudioPacket(uint timestamp, ReadOnlyMemory<byte> audio_packet, int audioPayloadType)
+        public void FeedInAudioPacket(uint timestamp, ReadOnlyMemory<byte> audio_packet)
         {
             CheckTimeouts(out _, out int currentRtspPlayCount);
 
@@ -771,7 +759,7 @@ namespace SharpRTSPServer
                 const bool rtpMarker = true; // always 1 as this is the last (and only) RTP packet for this audio timestamp
 
                 RTPPacketUtil.WriteHeader(rtp_packet.Span,
-                    RTPPacketUtil.RTP_VERSION, rtp_padding, rtpHasExtension, rtp_csrc_count, rtpMarker, audioPayloadType);
+                    RTPPacketUtil.RTP_VERSION, rtp_padding, rtpHasExtension, rtp_csrc_count, rtpMarker, AudioTrack.PayloadType);
 
                 // sequence number is set just before send
 

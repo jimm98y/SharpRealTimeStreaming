@@ -80,7 +80,7 @@ using (var server = new RTSPServer(port, userName, password))
     };
     _audioTimer.Elapsed += (s, e) =>
     {
-        server.FeedInAACPacket((uint)audioIndex * audioSampleDuration, audioTrack[0][audioIndex++ % audioTrack[0].Count]);
+        server.FeedInAudioPacket((uint)audioIndex * audioSampleDuration, SharpRTSPServer.AACTrack.AppendAUHeader(audioTrack[0][audioIndex++ % audioTrack[0].Count]));
 
         if (audioIndex % audioTrack[0].Count == 0)
         {
