@@ -24,7 +24,7 @@ namespace SharpRTSPServer
         public StringBuilder BuildSDP(StringBuilder sdp)
         {
             sdp.Append($"m=audio 0 RTP/AVP {PayloadType}\n"); // <---- Payload Type 0 means G711 ULAW, 96+ means dynamic payload type
-            sdp.Append("a=control:trackID=1\n");
+            sdp.Append($"a=control:trackID={ID}\n");
             sdp.Append($"a=rtpmap:{PayloadType} mpeg4-generic/{SamplingRate}/{Channels}\n");
             sdp.Append($"a=fmtp:{PayloadType} profile-level-id={GetAACProfileLevel(SamplingRate, Channels)}; " +
                 $"config={ConfigDescriptor}; streamType=5; mode=AAC-hbr; objectType=64; sizeLength=13; indexLength=3; indexDeltaLength=3\n");
