@@ -771,7 +771,7 @@ namespace SharpRTSPClient
             }
 
             // Examine the SDP
-            _logger.LogDebug("Sdp:\n{sdp}", Encoding.UTF8.GetString(message.Data.Span.ToArray()));
+            _logger.LogDebug("SDP:\n{sdp}", Encoding.UTF8.GetString(message.Data.Span.ToArray()));
 
             SdpFile sdp_data;
             using(var ms = new MemoryStream(message.Data.Span.ToArray()))
@@ -808,7 +808,7 @@ namespace SharpRTSPClient
                     // extract h265 donl if available...
                     bool h265HasDonl = false;
 
-                    if ((rtpmap?.EncodingName?.ToUpper().Equals("H265") ?? false) && !string.IsNullOrEmpty(fmtp?.FormatParameter))
+                    if ((rtpmap?.EncodingName?.ToUpperInvariant().Equals("H265") ?? false) && !string.IsNullOrEmpty(fmtp?.FormatParameter))
                     {
                         var param = H265Parameters.Parse(fmtp.FormatParameter);
                         if (param.ContainsKey("sprop-max-don-diff") && int.TryParse(param["sprop-max-don-diff"], out int donl) && donl > 0)
@@ -827,7 +827,7 @@ namespace SharpRTSPClient
                     {
 
                         // found a valid codec
-                        payloadName = rtpmap.EncodingName.ToUpper();
+                        payloadName = rtpmap.EncodingName.ToUpperInvariant();
                         switch(payloadName)
                         {
                             case "H264":
@@ -893,7 +893,7 @@ namespace SharpRTSPClient
                         {
                             byte[] sps = sps_pps[0];
                             byte[] pps = sps_pps[1];
-                            streamConfigurationData = new H264StreamConfigurationData() { SPS = sps, PPS = pps };
+                            streamConfigurationData = new H264StreamConfigurationData(sps, pps);
                         }
                     }
                     else if (_videoPayloadProcessor is H265Payload && fmtp?.FormatParameter != null)
@@ -907,7 +907,7 @@ namespace SharpRTSPClient
                             byte[] vps = vps_sps_pps[0];
                             byte[] sps = vps_sps_pps[1];
                             byte[] pps = vps_sps_pps[2];
-                            streamConfigurationData = new H265StreamConfigurationData() { VPS = vps, SPS = sps, PPS = pps };
+                            streamConfigurationData = new H265StreamConfigurationData(vps, sps, pps);
                         }
                     }
 
@@ -967,7 +967,7 @@ namespace SharpRTSPClient
                     else
                     {
                         // dynamic payload type
-                        _audio_codec = rtpmap?.EncodingName?.ToUpper() ?? string.Empty;
+                        _audio_codec = rtpmap?.EncodingName?.ToUpperInvariant() ?? string.Empty;
                         switch(_audio_codec)
                         {
                             // Create AAC RTP Parser
@@ -975,7 +975,7 @@ namespace SharpRTSPClient
                             // Example fmtp is ""96 streamtype=5;profile-level-id=1;mode=AAC-hbr;sizelength=13;indexlength=3;indexdeltalength=3;config=1210"
                             case "MPEG4-GENERIC":
                                 {
-                                    if (fmtp?["mode"].ToLower() == "aac-hbr")
+                                    if (fmtp?["mode"].ToLowerInvariant() == "aac-hbr")
                                         _audioPayloadProcessor = new AACPayload(fmtp["config"]);
                                 }
                                 break;
@@ -1224,7 +1224,7 @@ namespace SharpRTSPClient
         public byte[] PPS { get; set; }
 
         public H265StreamConfigurationData()
-        {   }
+        { }
 
         public H265StreamConfigurationData(byte[] vps, byte[] sps, byte[] pps)
         {

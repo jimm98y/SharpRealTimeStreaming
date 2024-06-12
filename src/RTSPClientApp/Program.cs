@@ -2,6 +2,10 @@
 using SharpRTSPClient;
 using System;
 
+const string rtspUri = "rtsp://127.0.0.1:8554";
+const string userName = "admin";
+const string password = "password";
+
 using (RTSPClient client = new RTSPClient())
 {
     client.NewVideoStream += (sender, e) => Console.WriteLine(e.ToString());
@@ -9,7 +13,7 @@ using (RTSPClient client = new RTSPClient())
     client.NewAudioStream += (sender, e) => Console.WriteLine(e.ToString());
     client.ReceivedAudioData += (sender, e) => Console.Write("+");
 
-    client.Connect("rtsp://stream.strba.sk:1935/strba/VYHLAD_JAZERO.stream", RTSPClient.RTP_TRANSPORT.TCP);
+    client.Connect(rtspUri, RTSPClient.RTP_TRANSPORT.TCP, userName, password);
 
     Console.WriteLine("Press any key to exit");
     while (!Console.KeyAvailable)
