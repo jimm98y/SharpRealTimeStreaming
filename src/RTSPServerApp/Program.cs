@@ -29,9 +29,9 @@ using (var server = new RTSPServer(port, userName, password))
     Dictionary<uint, IList<IList<byte[]>>> parsedMDAT;
     uint videoTrackId = 0;
     uint audioTrackId = 0;
-    TrakBox trackBoxAAC = null;
-    TrakBox trackBoxH264 = null;
-    AudioSampleEntryBox audioSampleEntry;
+    TrakBox audioTrackBox = null;
+    TrakBox videoTrackBox = null;
+    AudioSampleEntryBox audioSampleEntry = null;
     double videoFrameRate = 24;
 
     // frag_bunny.mp4 audio is not playable in VLC on Windows 11 (works on MacOS)
@@ -39,64 +39,77 @@ using (var server = new RTSPServer(port, userName, password))
     {
         using (var fmp4 = await FragmentedMp4.ParseAsync(fs))
         {
-            videoTrackId = fmp4.FindVideoTrackID().First();
-            audioTrackId = fmp4.FindAudioTrackID().First();
+            videoTrackBox = fmp4.FindVideoTracks().FirstOrDefault();
+            audioTrackBox = fmp4.FindAudioTracks().FirstOrDefault();
+
             parsedMDAT = await fmp4.ParseMdatAsync();
 
-            trackBoxAAC = fmp4.FindAudioTracks().First();
-            audioSampleEntry = trackBoxAAC.GetAudioSampleEntryBox();
-
-            trackBoxH264 = fmp4.FindVideoTracks().First();
-            videoFrameRate = fmp4.CalculateFrameRate(trackBoxH264);
+            if (videoTrackBox != null)
+            {
+                videoTrackId = fmp4.FindVideoTrackID().First();
+                videoFrameRate = fmp4.CalculateFrameRate(videoTrackBox);
+            }
+            
+            if (audioTrackBox != null)
+            {
+                audioTrackId = fmp4.FindAudioTrackID().First();
+                audioSampleEntry = audioTrackBox.GetAudioSampleEntryBox();
+            }
         }
     }
 
-    int videoSamplingRate = SharpRTSPServer.H264Track.DEFAULT_CLOCK;
-    uint videoSampleDuration = (uint)(videoSamplingRate / videoFrameRate); 
-    uint audioSampleDuration = SharpMp4.AACTrack.AAC_SAMPLE_SIZE;
-    var videoTrack = parsedMDAT[videoTrackId];
     int videoIndex = 0;
-
-    var audioTrack = parsedMDAT[audioTrackId];
     int audioIndex = 0;
-    var audioConfigDescriptor = audioSampleEntry.GetAudioSpecificConfigDescriptor();
-    int audioSamplingRate = audioConfigDescriptor.GetSamplingFrequency();
+    Timer audioTimer = null;
+    Timer videoTimer = null;
 
-    Timer _videoTimer = new Timer(videoSampleDuration * 1000 / videoSamplingRate);
-    Timer _audioTimer = new Timer(audioSampleDuration * 1000 / audioSamplingRate);
-
-    var rtspVideoTrack = new SharpRTSPServer.H264Track();
-    var rtspAudioTrack = new SharpRTSPServer.AACTrack(audioSamplingRate, audioConfigDescriptor.ChannelConfiguration, await audioConfigDescriptor.ToBytes());
-    server.VideoTrack = rtspVideoTrack;
-    server.AudioTrack = rtspAudioTrack;
-
-    _videoTimer.Elapsed += (s, e) =>
+    if (videoTrackBox != null)
     {
-        if (videoIndex == 0)
+        var videoSamplingRate = SharpRTSPServer.H264Track.DEFAULT_CLOCK;
+        var videoSampleDuration = videoSamplingRate / videoFrameRate;
+        var videoTrack = parsedMDAT[videoTrackId];
+        var rtspVideoTrack = new SharpRTSPServer.H264Track();
+        server.VideoTrack = rtspVideoTrack;
+        videoTimer = new Timer(videoSampleDuration * 1000 / videoSamplingRate);
+        videoTimer.Elapsed += (s, e) =>
         {
-            rtspVideoTrack.SetSPS_PPS(videoTrack[0][0], videoTrack[0][1]);
-            videoIndex++;
-        }
+            if (videoIndex == 0)
+            {
+                rtspVideoTrack.SetSPS_PPS(videoTrack[0][0], videoTrack[0][1]);
+                videoIndex++;
+            }
 
-        server.FeedInRawNAL((uint)videoIndex * videoSampleDuration, (List<byte[]>)videoTrack[videoIndex++ % videoTrack.Count]);
+            server.FeedInRawNAL((uint)(videoIndex * videoSampleDuration), (List<byte[]>)videoTrack[videoIndex++ % videoTrack.Count]);
 
-        if (videoIndex % videoTrack.Count == 0)
-        {
-            Reset(out videoIndex, out audioIndex, _videoTimer, _audioTimer);
-        }
-    };
-    _audioTimer.Elapsed += (s, e) =>
+            if (videoIndex % videoTrack.Count == 0)
+            {
+                Reset(ref videoIndex, videoTimer, ref audioIndex, audioTimer);
+            }
+        };
+    }
+
+    if (audioTrackBox != null)
     {
-        server.FeedInAudioPacket((uint)audioIndex * audioSampleDuration, SharpRTSPServer.AACTrack.AppendAUHeader(audioTrack[0][audioIndex++ % audioTrack[0].Count]));
-
-        if (audioIndex % audioTrack[0].Count == 0)
+        var audioSampleDuration = SharpMp4.AACTrack.AAC_SAMPLE_SIZE;
+        var audioTrack = parsedMDAT[audioTrackId];
+        var audioConfigDescriptor = audioSampleEntry.GetAudioSpecificConfigDescriptor();
+        var audioSamplingRate = audioConfigDescriptor.GetSamplingFrequency();
+        var rtspAudioTrack = new SharpRTSPServer.AACTrack(audioSamplingRate, audioConfigDescriptor.ChannelConfiguration, await audioConfigDescriptor.ToBytes());
+        server.AudioTrack = rtspAudioTrack;
+        audioTimer = new Timer(audioSampleDuration * 1000 / audioSamplingRate);
+        audioTimer.Elapsed += (s, e) =>
         {
-            Reset(out videoIndex, out audioIndex, _videoTimer, _audioTimer);
-        }
-    };
+            server.FeedInAudioPacket((uint)(audioIndex * audioSampleDuration), SharpRTSPServer.AACTrack.AppendAUHeader(audioTrack[0][audioIndex++ % audioTrack[0].Count]));
 
-    _videoTimer.Start();
-    _audioTimer.Start();
+            if (audioIndex % audioTrack[0].Count == 0)
+            {
+                Reset(ref videoIndex, videoTimer, ref audioIndex, audioTimer);
+            }
+        };
+    }
+
+    videoTimer?.Start();
+    audioTimer?.Start();
 
     Console.WriteLine("Press any key to exit");
     while (!Console.KeyAvailable)
@@ -105,12 +118,12 @@ using (var server = new RTSPServer(port, userName, password))
     }
 }
 
-static void Reset(out int videoIndex, out int audioIndex, Timer _videoTimer, Timer _audioTimer)
+static void Reset(ref int videoIndex, Timer videoTimer, ref int audioIndex, Timer audioTimer)
 {
-    _videoTimer.Stop();
-    _audioTimer.Stop();
+    videoTimer?.Stop();
+    audioTimer?.Stop();
     videoIndex = 0;
     audioIndex = 0;
-    _videoTimer.Start();
-    _audioTimer.Start();
+    videoTimer?.Start();
+    audioTimer?.Start();
 }
