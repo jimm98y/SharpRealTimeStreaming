@@ -666,6 +666,9 @@ namespace SharpRTSPServer
                     nal_pointer++;
                     data_remaining--;
 
+                    // TODO: This fragmentation is only valid
+                    //  for H264 (https://www.rfc-editor.org/rfc/rfc6184#page-29),
+                    //  for H265 we need https://www.rfc-editor.org/rfc/rfc7798#section-4.4.3
                     while (data_remaining > 0)
                     {
                         int payload_size = Math.Min(packetMTU, data_remaining);
@@ -679,7 +682,7 @@ namespace SharpRTSPServer
 
                         // RTP Packet Header
                         // 0 - Version, P, X, CC, M, PT and Sequence Number
-                        //32 - Timestamp. H264 uses a 90kHz clock
+                        //32 - Timestamp. H264/H265 uses a 90kHz clock
                         //64 - SSRC
                         //96 - CSRCs (optional)
                         //nn - Extension ID and Length
