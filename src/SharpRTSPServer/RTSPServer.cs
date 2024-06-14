@@ -602,7 +602,7 @@ namespace SharpRTSPServer
                     last_nal = true; // last NAL in our nal_array
                 }
 
-                // The H264 Payload could be sent as one large RTP packet (assuming the receiver can handle it)
+                // The H264/H265 Payload could be sent as one large RTP packet (assuming the receiver can handle it)
                 // or as a Fragmented Data, split over several RTP packets with the same Timestamp.
                 bool fragmenting = false;
 
@@ -615,7 +615,11 @@ namespace SharpRTSPServer
                 // NOTE TO SELF... perhaps this was because the SDP did not have the extra packetization flag
                 //  fragmenting = false;
 
-                if (!fragmenting)
+                if (fragmenting && (track is IVideoTrack))
+                {
+                    ((IVideoTrack)track).FragmentNal(rtp_packets, memoryOwners, rtp_timestamp, raw_nal, last_nal, packetMTU);
+                }
+                else
                 {
                     // Put the whole NAL into one RTP packet.
                     // Note some receivers will have maximum buffers and be unable to handle large RTP packets.
@@ -646,103 +650,12 @@ namespace SharpRTSPServer
                         rtpHasExtension, rtp_csrc_count, last_nal, track.PayloadType);
 
                     // sequence number and SSRC are set just before send
-
                     RTPPacketUtil.WriteTS(rtp_packet.Span, rtp_timestamp);
 
                     // Now append the raw NAL
                     raw_nal.CopyTo(rtp_packet.Slice(12));
 
                     rtp_packets.Add(rtp_packet);
-                }
-                else
-                {
-                    int data_remaining = raw_nal.Length;
-                    int nal_pointer = 0;
-                    int start_bit = 1;
-                    int end_bit = 0;
-
-                    // consume first byte of the raw_nal. It is used in the FU header
-                    byte first_byte = raw_nal[0];
-                    nal_pointer++;
-                    data_remaining--;
-
-                    byte second_byte = 0;
-
-                    if (!(track is H264Track))
-                    {
-                        second_byte = raw_nal[1];
-                        nal_pointer++;
-                        data_remaining--;
-                    }
-
-                    // TODO: This fragmentation is only valid
-                    //  for H264 (https://www.rfc-editor.org/rfc/rfc6184#page-29),
-                    //  for H265 we need https://www.rfc-editor.org/rfc/rfc7798#section-4.4.3
-                    while (data_remaining > 0)
-                    {
-                        int payload_size = Math.Min(packetMTU, data_remaining);
-                        if (data_remaining == payload_size) end_bit = 1;
-
-                        // 12 is header size. 2 bytes for H264 FU-A header (3 bytes for H265). Then payload
-                        var fuHeader = track is H264Track ? 2 : 3;
-                        var destSize = 12 + fuHeader + payload_size;
-                        var owner = MemoryPool<byte>.Shared.Rent(destSize);
-                        memoryOwners.Add(owner);
-                        var rtp_packet = owner.Memory.Slice(0, destSize);
-
-                        // RTP Packet Header
-                        // 0 - Version, P, X, CC, M, PT and Sequence Number
-                        //32 - Timestamp. H264/H265 uses a 90kHz clock
-                        //64 - SSRC
-                        //96 - CSRCs (optional)
-                        //nn - Extension ID and Length
-                        //nn - Extension header
-
-                        const bool rtpPadding = false;
-                        const bool rtpHasExtension = false;
-                        const int rtp_csrc_count = 0;
-
-                        RTPPacketUtil.WriteHeader(rtp_packet.Span, RTPPacketUtil.RTP_VERSION,
-                            rtpPadding, rtpHasExtension, rtp_csrc_count, last_nal && end_bit == 1, track.PayloadType);
-
-                        // sequence number and SSRC are set just before send
-                        RTPPacketUtil.WriteTS(rtp_packet.Span, rtp_timestamp);
-
-                        // Now append the Fragmentation Header (with Start and End marker) and part of the raw_nal
-                        if (track is H264Track)
-                        {
-                            const byte f_bit = 0;
-                            byte nri = (byte)(first_byte >> 5 & 0x03); // Part of the 1st byte of the Raw NAL (NAL Reference ID)
-                            const byte type = 28; // FU-A Fragmentation
-
-                            rtp_packet.Span[12] = (byte)((f_bit << 7) + (nri << 5) + type);
-                            rtp_packet.Span[13] = (byte)((start_bit << 7) + (end_bit << 6) + (0 << 5) + (first_byte & 0x1F));
-
-                            raw_nal.AsSpan(nal_pointer, payload_size).CopyTo(rtp_packet.Slice(14).Span);
-                        }
-                        else
-                        {
-                            const byte f_bit = 0;
-                            byte nalType = (byte)((first_byte & 0x7E) >> 1);
-                            const byte type = 49; // FU Fragmentation
-
-                            // PayloadHdr
-                            rtp_packet.Span[12] = (byte)((f_bit << 7) | ((type << 1) & 0x7E) | (first_byte & 0x1));
-                            rtp_packet.Span[13] = second_byte;
-
-                            // FU header
-                            rtp_packet.Span[14] = (byte)((start_bit << 7) | (end_bit << 6) | nalType);
-
-                            raw_nal.AsSpan(nal_pointer, payload_size).CopyTo(rtp_packet.Slice(15).Span);
-                        }
-
-                        nal_pointer += payload_size;
-                        data_remaining -= payload_size;
-
-                        rtp_packets.Add(rtp_packet);
-
-                        start_bit = 0;
-                    }
                 }
             }
 
@@ -755,6 +668,7 @@ namespace SharpRTSPServer
             connection.video.rtpChannel?.Dispose();
             connection.video.rtpChannel = null;
             connection.audio.rtpChannel?.Dispose();
+            connection.audio.rtpChannel = null;
             connection.Listener.Dispose();
             _connectionList.Remove(connection);
         }
@@ -1001,6 +915,11 @@ namespace SharpRTSPServer
         bool IsReady { get; }
         StringBuilder BuildSDP(StringBuilder sdp);
     }   
+
+    public interface IVideoTrack : ITrack
+    {
+        void FragmentNal(List<Memory<byte>> rtp_packets, List<IMemoryOwner<byte>> memoryOwners, uint rtpTimestamp, byte[] rawNal, bool isLast, int packetMTU);
+    }
 
     public class CustomLoggerFactory : ILoggerFactory
     {

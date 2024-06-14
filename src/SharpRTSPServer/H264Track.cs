@@ -1,9 +1,11 @@
 ﻿using System;
+using System.Buffers;
+using System.Collections.Generic;
 using System.Text;
 
 namespace SharpRTSPServer
 {
-    public class H264Track : ITrack
+    public class H264Track : IVideoTrack
     {
         public const string VideoCodec = "H264";
         public const int DEFAULT_CLOCK = 90000;
@@ -59,6 +61,68 @@ namespace SharpRTSPServer
             sdp.Append($"a=fmtp:{PayloadType} profile-level-id=").Append(profile_level_id_str)
                 .Append("; sprop-parameter-sets=").Append(sps_str).Append(',').Append(pps_str).Append("\n");
             return sdp;
+        }
+
+        public void FragmentNal(List<Memory<byte>> rtp_packets, List<IMemoryOwner<byte>> memoryOwners, uint rtp_timestamp, byte[] raw_nal, bool last_nal, int packetMTU)
+        {
+            int data_remaining = raw_nal.Length;
+            int nal_pointer = 0;
+            int start_bit = 1;
+            int end_bit = 0;
+
+            // consume first byte of the raw_nal. It is used in the FU header
+            byte first_byte = raw_nal[0];
+            nal_pointer++;
+            data_remaining--;
+
+            //  For H264 (https://www.rfc-editor.org/rfc/rfc6184#page-29),
+            while (data_remaining > 0)
+            {
+                int payload_size = Math.Min(packetMTU, data_remaining);
+                if (data_remaining == payload_size) end_bit = 1;
+
+                // 12 is header size. 2 bytes for H264 FU-A header
+                var fuHeader = 2;
+                var destSize = 12 + fuHeader + payload_size;
+                var owner = MemoryPool<byte>.Shared.Rent(destSize);
+                memoryOwners.Add(owner);
+                var rtp_packet = owner.Memory.Slice(0, destSize);
+
+                // RTP Packet Header
+                // 0 - Version, P, X, CC, M, PT and Sequence Number
+                //32 - Timestamp. H264/H265 uses a 90kHz clock
+                //64 - SSRC
+                //96 - CSRCs (optional)
+                //nn - Extension ID and Length
+                //nn - Extension header
+
+                const bool rtpPadding = false;
+                const bool rtpHasExtension = false;
+                const int rtp_csrc_count = 0;
+
+                RTPPacketUtil.WriteHeader(rtp_packet.Span, RTPPacketUtil.RTP_VERSION,
+                    rtpPadding, rtpHasExtension, rtp_csrc_count, last_nal && end_bit == 1, PayloadType);
+
+                // sequence number and SSRC are set just before send
+                RTPPacketUtil.WriteTS(rtp_packet.Span, rtp_timestamp);
+
+                // Now append the Fragmentation Header (with Start and End marker) and part of the raw_nal
+                const byte f_bit = 0;
+                byte nri = (byte)(first_byte >> 5 & 0x03); // Part of the 1st byte of the Raw NAL (NAL Reference ID)
+                const byte type = 28; // FU-A Fragmentation
+
+                rtp_packet.Span[12] = (byte)((f_bit << 7) + (nri << 5) + type);
+                rtp_packet.Span[13] = (byte)((start_bit << 7) + (end_bit << 6) + (0 << 5) + (first_byte & 0x1F));
+
+                raw_nal.AsSpan(nal_pointer, payload_size).CopyTo(rtp_packet.Slice(14).Span);
+
+                nal_pointer += payload_size;
+                data_remaining -= payload_size;
+
+                rtp_packets.Add(rtp_packet);
+
+                start_bit = 0;
+            }
         }
     }
 }
