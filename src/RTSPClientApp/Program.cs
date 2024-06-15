@@ -13,7 +13,7 @@ using (RTSPClient client = new RTSPClient())
     client.NewAudioStream += (sender, e) => Console.WriteLine(e.ToString());
     client.ReceivedAudioData += (sender, e) => Console.Write("+");
 
-    client.Connect(rtspUri, RTSPClient.RTP_TRANSPORT.TCP, userName, password);
+    client.Connect(rtspUri, RTSPClient.RtpTransport.TCP, userName, password);
 
     Console.WriteLine("Press any key to exit");
     while (!Console.KeyAvailable)
