@@ -1,5 +1,4 @@
-﻿
-using SharpMp4;
+﻿using SharpMp4;
 using SharpRTSPServer;
 using System;
 using System.Collections.Generic;

@@ -1,5 +1,4 @@
-﻿
-using SharpRTSPClient;
+﻿using SharpRTSPClient;
 using System;
 
 const string rtspUri = "rtsp://127.0.0.1:8554";
@@ -13,7 +12,7 @@ using (RTSPClient client = new RTSPClient())
     client.NewAudioStream += (sender, e) => Console.WriteLine(e.ToString());
     client.ReceivedAudioData += (sender, e) => Console.Write("+");
 
-    client.Connect(rtspUri, RTSPClient.RtpTransport.TCP, userName, password);
+    client.Connect(rtspUri, RTPTransport.TCP, userName, password);
 
     Console.WriteLine("Press any key to exit");
     while (!Console.KeyAvailable)

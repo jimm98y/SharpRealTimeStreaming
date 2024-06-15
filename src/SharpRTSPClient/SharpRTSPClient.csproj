@@ -8,4 +8,30 @@
     <PackageReference Include="SharpRTSP" Version="1.4.3" />
   </ItemGroup>
 
+	<PropertyGroup>
+		<GeneratePackageOnBuild>True</GeneratePackageOnBuild>
+		<AllowUnsafeBlocks>True</AllowUnsafeBlocks>
+		<Nullable>disable</Nullable>
+		<Title>$(ProjectName)</Title>
+		<Version>0.0.1</Version>
+		<Authors>Lukas Volf</Authors>
+		<Copyright>MIT</Copyright>
+		<PackageProjectUrl>https://github.com/jimm98y/SharpRealTimeStreaming</PackageProjectUrl>
+		<PackageReadmeFile>README.md</PackageReadmeFile>
+		<RepositoryUrl>https://github.com/jimm98y/SharpRealTimeStreaming</RepositoryUrl>
+		<RepositoryType>git</RepositoryType>
+		<PackageTags>rtsp;rtp;video;streaming;h264;h265;aac;netstandard20</PackageTags>
+		<NeutralLanguage>en-US</NeutralLanguage>
+		<AssemblyVersion>1.0.0</AssemblyVersion>
+		<FileVersion>$(Version)</FileVersion>
+		<PackageLicenseExpression>MIT</PackageLicenseExpression>
+		<Description>Simple RTSP client. Supports H264, H265 and AAC.</Description>
+	</PropertyGroup>
+	<ItemGroup>
+		<None Include="..\..\README.md">
+			<Pack>True</Pack>
+			<PackagePath>\</PackagePath>
+		</None>
+	</ItemGroup>
+
 </Project>

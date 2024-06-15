@@ -14,6 +14,20 @@ using System.Text;
 
 namespace SharpRTSPClient
 {
+    public enum RTPTransport
+    {
+        UDP,
+        TCP,
+        MULTICAST
+    }
+
+    public enum MediaRequest
+    {
+        VIDEO_ONLY,
+        AUDIO_ONLY,
+        VIDEO_AND_AUDIO
+    }
+
     /// <summary>
     /// RTSP client.
     /// </summary>
@@ -40,20 +54,6 @@ namespace SharpRTSPClient
 
         public bool AutoPlay { get; set; } = true;
 
-        public enum RtpTransport 
-        { 
-            UDP, 
-            TCP, 
-            MULTICAST 
-        };
-
-        public enum MediaRequest 
-        { 
-            VIDEO_ONLY, 
-            AUDIO_ONLY, 
-            VIDEO_AND_AUDIO
-        };
-
         private enum RtspStatus { WaitingToConnect, Connecting, ConnectFailed, Connected };
 
         private IRtspTransport _rtspSocket; // RTSP connection
@@ -61,7 +61,7 @@ namespace SharpRTSPClient
         
         // this wraps around a the RTSP tcpSocket stream
         private RtspListener _rtspClient;
-        private RtpTransport _rtpTransport = RtpTransport.UDP; // Mode, either RTP over UDP or RTP over TCP using the RTSP socket
+        private RTPTransport _rtpTransport = RTPTransport.UDP; // Mode, either RTP over UDP or RTP over TCP using the RTSP socket
 
         private IRtpTransport _videoRtpTransport;
         private IRtpTransport _audioRtpTransport;
@@ -131,12 +131,12 @@ namespace SharpRTSPClient
         /// Connect.
         /// </summary>
         /// <param name="url">URL to connect to.</param>
-        /// <param name="rtpTransport">Type of the RTP transport <see cref="RtpTransport"/>.</param>
+        /// <param name="rtpTransport">Type of the RTP transport <see cref="RTPTransport"/>.</param>
         /// <param name="username">User name.</param>
         /// <param name="password">Password.</param>
         /// <param name="mediaRequest">Media request type <see cref="MediaRequest>."/></param>
         /// <param name="playbackSession">Playback session.</param>
-        public void Connect(string url, RtpTransport rtpTransport, string username = null, string password = null, MediaRequest mediaRequest = MediaRequest.VIDEO_AND_AUDIO, bool playbackSession = false)
+        public void Connect(string url, RTPTransport rtpTransport, string username = null, string password = null, MediaRequest mediaRequest = MediaRequest.VIDEO_AND_AUDIO, bool playbackSession = false)
         {
             RtspUtils.RegisterUri();
 
@@ -213,14 +213,14 @@ namespace SharpRTSPClient
             // If the RTP transport is MULTICAST, we have to wait for the SETUP message to get the Multicast Address from the RTSP server
             this._rtpTransport = rtpTransport;
             
-            if (rtpTransport == RtpTransport.UDP)
+            if (rtpTransport == RTPTransport.UDP)
             {
                 // give a range of 500 pairs (1000 addresses) to try incase some address are in use
                 _videoRtpTransport = new UDPSocket(50000, 51000); 
                 _audioRtpTransport = new UDPSocket(50000, 51000);
             }
 
-            if (rtpTransport == RtpTransport.TCP)
+            if (rtpTransport == RTPTransport.TCP)
             {
                 int nextFreeRtpChannel = 0;
                 _videoRtpTransport = new RtpTcpTransport(_rtspClient)
@@ -1118,14 +1118,14 @@ namespace SharpRTSPClient
             {
                 // Server interleaves the RTP packets over the RTSP connection
                 // Example for TCP mode (RTP over RTSP)   Transport: RTP/AVP/TCP;interleaved=0-1
-                case RtpTransport.TCP:
+                case RTPTransport.TCP:
                     return new RtspTransport()
                     {
                         LowerTransport = RtspTransport.LowerTransportType.TCP,
                         // Eg Channel 0 for RTP video data. Channel 1 for RTCP status reports
                         Interleaved = (transport as RtpTcpTransport)?.Channels ?? throw new ApplicationException("TCP transport asked and no tcp channel allocated"),
                     };
-                case RtpTransport.UDP:
+                case RTPTransport.UDP:
                     return new RtspTransport()
                     {
                         LowerTransport = RtspTransport.LowerTransportType.UDP,
@@ -1135,7 +1135,7 @@ namespace SharpRTSPClient
                 // Server sends the RTP packets to a Pair of UDP ports (one for data, one for rtcp control messages)
                 // using Multicast Address and Ports that are in the reply to the SETUP message
                 // Example for MULTICAST mode     Transport: RTP/AVP;multicast
-                case RtpTransport.MULTICAST:
+                case RTPTransport.MULTICAST:
                     return new RtspTransport()
                     {
                         LowerTransport = RtspTransport.LowerTransportType.UDP,
@@ -1221,11 +1221,6 @@ namespace SharpRTSPClient
 
     public interface IStreamConfigurationData
     { }
-
-    public interface IVideoStreamConfigurationData : IStreamConfigurationData
-    {
-        IEnumerable<byte[]> GetNALUs();
-    }
 
     public class SimpleDataEventArgs : EventArgs
     {

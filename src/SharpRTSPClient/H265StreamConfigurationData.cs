@@ -1,8 +1,6 @@
-﻿using System.Collections.Generic;
-
-namespace SharpRTSPClient
+﻿namespace SharpRTSPClient
 {
-    public class H265StreamConfigurationData : IVideoStreamConfigurationData
+    public class H265StreamConfigurationData : IStreamConfigurationData
     {
         public byte[] VPS { get; set; }
         public byte[] SPS { get; set; }
@@ -21,11 +19,6 @@ namespace SharpRTSPClient
         public override string ToString()
         {
             return $"VPS: {Utilities.ToHexString(VPS)}\r\nSPS: {Utilities.ToHexString(SPS)}\r\nPPS: {Utilities.ToHexString(PPS)}";
-        }
-
-        public IEnumerable<byte[]> GetNALUs()
-        {
-            return new byte[][] { VPS, SPS, PPS };
         }
     }
 }
