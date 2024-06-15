@@ -1,9 +1,11 @@
-﻿using SharpRTSPClient;
+﻿using Microsoft.Extensions.Configuration;
+using SharpRTSPClient;
 using System;
 
-const string rtspUri = "rtsp://127.0.0.1:8554";
-const string userName = "admin";
-const string password = "password";
+IConfiguration config = new ConfigurationBuilder().AddJsonFile("appsettings.json").Build();
+string rtspUri = config["Uri"];
+string userName = config["UserName"];
+string password = config["Password"];
 
 using (RTSPClient client = new RTSPClient())
 {

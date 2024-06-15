@@ -1,4 +1,5 @@
-﻿using SharpMp4;
+﻿using Microsoft.Extensions.Configuration;
+using SharpMp4;
 using SharpRTSPServer;
 using System;
 using System.Collections.Generic;
@@ -6,12 +7,12 @@ using System.IO;
 using System.Linq;
 using System.Timers;
 
-// TODO config file
-const string hostName = "127.0.0.1";
-const ushort port = 8554;
-const string fileName = "frag_bunny.mp4";
-const string userName = "admin";
-const string password = "password";
+IConfiguration config = new ConfigurationBuilder().AddJsonFile("appsettings.json").Build();
+string hostName = config["HostName"];
+ushort port = ushort.Parse(config["Port"]);
+string fileName = config["FilePath"];
+string userName = config["UserName"];
+string password = config["Password"];
 
 using (var server = new RTSPServer(port, userName, password))
 {
@@ -20,9 +21,7 @@ using (var server = new RTSPServer(port, userName, password))
     uint audioTrackId = 0;
     TrakBox audioTrackBox = null;
     TrakBox videoTrackBox = null;
-    AudioSampleEntryBox audioSampleEntry = null;
     double videoFrameRate = 0;
-    int audioSamplingRate = 0;
 
     // frag_bunny.mp4 audio is not playable in VLC on Windows 11 (works on MacOS)
     using (Stream fs = new BufferedStream(new FileStream(fileName, FileMode.Open, FileAccess.Read, FileShare.Read)))
@@ -62,14 +61,17 @@ using (var server = new RTSPServer(port, userName, password))
             if (audioTrackBox != null)
             {
                 audioTrackId = fmp4.FindAudioTrackID().First();
-                audioSampleEntry = audioTrackBox.GetAudioSampleEntryBox();
 
-                var aac = audioTrackBox.GetMdia().GetMinf().GetStbl().GetStsd().Children.FirstOrDefault(x => x.Type == AudioSampleEntryBox.TYPE3) as AudioSampleEntryBox;
-                if (aac != null)
+                var audioSampleEntry = audioTrackBox.GetAudioSampleEntryBox();
+                if (audioSampleEntry.Type == AudioSampleEntryBox.TYPE3) // AAC
                 {
                     var audioConfigDescriptor = audioSampleEntry.GetAudioSpecificConfigDescriptor();
-                    audioSamplingRate = audioConfigDescriptor.GetSamplingFrequency();
+                    int audioSamplingRate = audioConfigDescriptor.GetSamplingFrequency();
                     server.AudioTrack = new SharpRTSPServer.AACTrack(await audioConfigDescriptor.ToBytes(), audioSamplingRate, audioConfigDescriptor.ChannelConfiguration);
+                }
+                else
+                { 
+                    // unsupported audio
                 }
             }
         }
@@ -114,7 +116,7 @@ using (var server = new RTSPServer(port, userName, password))
     {
         var audioSampleDuration = SharpMp4.AACTrack.AAC_SAMPLE_SIZE;
         var audioTrack = parsedMDAT[audioTrackId];
-        audioTimer = new Timer(audioSampleDuration * 1000 / audioSamplingRate);
+        audioTimer = new Timer(audioSampleDuration * 1000 / (server.AudioTrack as SharpRTSPServer.AACTrack).SamplingRate);
         audioTimer.Elapsed += (s, e) =>
         {
             server.FeedInRawAudioSamples((uint)(audioIndex * audioSampleDuration), new List<byte[]>() { audioTrack[0][audioIndex++ % audioTrack[0].Count] });
