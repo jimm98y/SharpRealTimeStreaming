@@ -44,12 +44,12 @@ namespace SharpRTSPClient
         public event EventHandler<SimpleDataEventArgs> ReceivedAudioData;
 
         public bool ProcessRTCP { get; set; } = true; // answer RTCP
-        public event ReceivedRTCPDelegate RawRtcpMessageReceived;
-        public delegate void ReceivedRTCPDelegate(byte[] rtcp, bool isVideo);
+        public event EventHandler<RawDataEventArgs> ReceivedRawVideoRTCP;
+        public event EventHandler<RawDataEventArgs> ReceivedRawAudioRTCP;
 
         public bool ProcessRTP { get; set; } = true;
-        public event ReceivedRTPDelegate RawRtpMessageReceived;
-        public delegate void ReceivedRTPDelegate(byte[] rtp, bool isVideo);
+        public event EventHandler<RawDataEventArgs> ReceivedRawVideoRTP;
+        public event EventHandler<RawDataEventArgs> ReceivedRawAudioRTP;
 
         public bool AutoPlay { get; set; } = true;
 
@@ -419,7 +419,7 @@ namespace SharpRTSPClient
                     return;
                 }
 
-                RawRtpMessageReceived?.Invoke(data.Data.ToArray(), true);
+                ReceivedRawVideoRTP?.Invoke(this, new RawDataEventArgs(data.Data));
 
                 if (!ProcessRTP)
                 {
@@ -459,7 +459,7 @@ namespace SharpRTSPClient
                     return; 
                 }
 
-                RawRtpMessageReceived?.Invoke(data.Data.ToArray(), false);
+                ReceivedRawAudioRTP?.Invoke(this, new RawDataEventArgs(data.Data));
 
                 if (!ProcessRTP)
                 {
@@ -491,7 +491,7 @@ namespace SharpRTSPClient
 
             using (var data = e.Data)
             {
-                RawRtcpMessageReceived?.Invoke(data.Data.ToArray(), true);
+                ReceivedRawVideoRTCP?.Invoke(this, new RawDataEventArgs(data.Data));
 
                 if (!ProcessRTCP)
                     return;
@@ -513,7 +513,7 @@ namespace SharpRTSPClient
 
             using (var data = e.Data)
             {
-                RawRtcpMessageReceived?.Invoke(data.Data.ToArray(), true);
+                ReceivedRawAudioRTCP?.Invoke(this, new RawDataEventArgs(data.Data));
 
                 if (!ProcessRTCP)
                     return;
@@ -1236,6 +1236,21 @@ namespace SharpRTSPClient
         public override string ToString()
         {
             return $"{TimeStamp}: Data {Data.Count()}";
+        }
+    }
+
+    public class RawDataEventArgs : EventArgs
+    {
+        public RawDataEventArgs(ReadOnlyMemory<byte> data)
+        {
+            Data = data;
+        }
+
+        public ReadOnlyMemory<byte> Data { get; }
+
+        public override string ToString()
+        {
+            return $"Data {Data.Length}";
         }
     }
 
