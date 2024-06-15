@@ -38,7 +38,6 @@ namespace SharpRTSPClient
         private readonly ILogger _logger;
         private readonly ILoggerFactory _loggerFactory;
 
-        // Events that applications can receive
         public event EventHandler<NewStreamEventArgs> NewVideoStream;
         public event EventHandler<NewStreamEventArgs> NewAudioStream;
         public event EventHandler<SimpleDataEventArgs> ReceivedVideoData;
@@ -289,7 +288,7 @@ namespace SharpRTSPClient
         }
 
         /// <summary>
-        /// Play.
+        /// Start playing.
         /// </summary>
         /// <exception cref="InvalidOperationException"></exception>
         public void Play()
@@ -362,7 +361,7 @@ namespace SharpRTSPClient
         }
 
         /// <summary>
-        /// Stop.
+        /// Stop playing.
         /// </summary>
         public void Stop()
         {

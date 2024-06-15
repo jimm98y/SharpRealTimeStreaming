@@ -6,22 +6,89 @@ using System.Text;
 
 namespace SharpRTSPServer
 {
+    /// <summary>
+    /// AAC track.
+    /// </summary>
     public class AACTrack : ITrack
     {
+        /// <summary>
+        /// Track ID.
+        /// </summary>
         public int ID { get; set; } = 1;
+
+        /// <summary>
+        /// Sampling rate.
+        /// </summary>
         public int SamplingRate { get; set; } = 44100;
+
+        /// <summary>
+        /// Number of channels.
+        /// </summary>
         public int Channels { get; set; } = 1;
-        public string ConfigDescriptor { get; set; } = "1390"; // hex
 
-        public bool IsReady { get { return !string.IsNullOrWhiteSpace(ConfigDescriptor); } }
+        /// <summary>
+        /// AAC configuration descriptor.
+        /// </summary>
+        public byte[] ConfigDescriptor { get; set; }
 
-        public int PayloadType => RTSPServer.DYNAMIC_PAYLOAD_TYPE + ID;
+        /// <summary>
+        /// Is the track ready?
+        /// </summary>
+        public bool IsReady { get { return ConfigDescriptor != null && ConfigDescriptor.Length > 0; } }
 
-        public AACTrack(int samplingRate, int channels, byte[] configDescriptor)
+        private int _payloadType = -1;
+
+        /// <summary>
+        /// Payload type. AAC uses a dynamic payload type, which by default we calculate as 96 + track ID.
+        /// </summary>
+        public int PayloadType
+        {
+            get
+            {
+                if (_payloadType < 0)
+                {
+                    return RTSPServer.DYNAMIC_PAYLOAD_TYPE + ID;
+                }
+                else
+                {
+                    return _payloadType;
+                }
+            }
+            set
+            {
+                _payloadType = value;
+            }
+        }
+
+        /// <summary>
+        /// Ctor.
+        /// </summary>
+        /// <param name="samplingRate">Audio sampling rate.</param>
+        /// <param name="channels">Number of audio channels.</param>
+        public AACTrack(int samplingRate, int channels)
         {
             this.SamplingRate = samplingRate;
             this.Channels = channels;
-            this.ConfigDescriptor = Utilities.ToHexString(configDescriptor);
+        }
+
+        /// <summary>
+        /// Ctor.
+        /// </summary>
+        /// <param name="configDescriptor">AAC configuration descriptor.</param>
+        /// <param name="samplingRate">Audio sampling rate.</param>
+        /// <param name="channels">Number of audio channels.</param>
+        public AACTrack(byte[] configDescriptor, int samplingRate, int channels) : this(samplingRate, channels)
+        {
+            SetConfigDescriptor(configDescriptor);
+        }
+
+        /// <summary>
+        /// Set the AAC configuration Descriptor.
+        /// </summary>
+        /// <param name="configDescriptor">AAC Configuration Descriptor.</param>
+        public void SetConfigDescriptor(byte[] configDescriptor)
+        {
+            this.ConfigDescriptor = configDescriptor;
         }
 
         public StringBuilder BuildSDP(StringBuilder sdp)
@@ -30,11 +97,11 @@ namespace SharpRTSPServer
             sdp.Append($"a=control:trackID={ID}\n");
             sdp.Append($"a=rtpmap:{PayloadType} mpeg4-generic/{SamplingRate}/{Channels}\n");
             sdp.Append($"a=fmtp:{PayloadType} profile-level-id={GetAACProfileLevel(SamplingRate, Channels)}; " +
-                $"config={ConfigDescriptor}; streamType=5; mode=AAC-hbr; objectType=64; sizeLength=13; indexLength=3; indexDeltaLength=3\n");
+                $"config={Utilities.ToHexString(ConfigDescriptor)}; streamType=5; mode=AAC-hbr; objectType=64; sizeLength=13; indexLength=3; indexDeltaLength=3\n");
             return sdp;
         }
 
-        public (List<Memory<byte>>, List<IMemoryOwner<byte>>) PrepareRtpPackets(List<byte[]> samples, uint rtpTimestamp)
+        public (List<Memory<byte>>, List<IMemoryOwner<byte>>) CreateRtpPackets(List<byte[]> samples, uint rtpTimestamp)
         {
             List<Memory<byte>> rtpPackets = new List<Memory<byte>>();
             List<IMemoryOwner<byte>> memoryOwners = new List<IMemoryOwner<byte>>();

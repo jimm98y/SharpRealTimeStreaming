@@ -13,7 +13,7 @@ namespace SharpRTSPServer
 
         public bool IsReady { get { return true; } }
 
-        public int PayloadType => 0;
+        public int PayloadType { get; set; } = 0;
 
         public StringBuilder BuildSDP(StringBuilder sdp)
         {
@@ -23,7 +23,7 @@ namespace SharpRTSPServer
             return sdp;
         }
 
-        public (List<Memory<byte>>, List<IMemoryOwner<byte>>) PrepareRtpPackets(List<byte[]> samples, uint rtpTimestamp)
+        public (List<Memory<byte>>, List<IMemoryOwner<byte>>) CreateRtpPackets(List<byte[]> samples, uint rtpTimestamp)
         {
             List<Memory<byte>> rtpPackets = new List<Memory<byte>>();
             List<IMemoryOwner<byte>> memoryOwners = new List<IMemoryOwner<byte>>();
@@ -62,7 +62,7 @@ namespace SharpRTSPServer
 
         public bool IsReady { get { return true; } }
 
-        public int PayloadType => 8;
+        public int PayloadType { get; set; } = 8;
 
         public StringBuilder BuildSDP(StringBuilder sdp)
         {
@@ -72,7 +72,7 @@ namespace SharpRTSPServer
             return sdp;
         }
 
-        public (List<Memory<byte>>, List<IMemoryOwner<byte>>) PrepareRtpPackets(List<byte[]> samples, uint rtpTimestamp)
+        public (List<Memory<byte>>, List<IMemoryOwner<byte>>) CreateRtpPackets(List<byte[]> samples, uint rtpTimestamp)
         {
             List<Memory<byte>> rtpPackets = new List<Memory<byte>>();
             List<IMemoryOwner<byte>> memoryOwners = new List<IMemoryOwner<byte>>();

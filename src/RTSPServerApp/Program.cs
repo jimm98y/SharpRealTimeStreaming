@@ -15,17 +15,6 @@ const string password = "password";
 
 using (var server = new RTSPServer(port, userName, password))
 {
-    try
-    {
-        server.StartListen();
-    }
-    catch (Exception ex)
-    {
-        Console.WriteLine(ex.ToString());
-    }
-
-    Console.WriteLine($"RTSP URL is rtsp://{userName}:{password}@{hostName}:{port}");
-
     Dictionary<uint, IList<IList<byte[]>>> parsedMDAT;
     uint videoTrackId = 0;
     uint audioTrackId = 0;
@@ -75,11 +64,11 @@ using (var server = new RTSPServer(port, userName, password))
         {
             if (videoIndex == 0)
             {
-                rtspVideoTrack.SetSPS_PPS(videoTrack[0][0], videoTrack[0][1]);
+                rtspVideoTrack.SetParameterSets(videoTrack[0][0], videoTrack[0][1]);
                 videoIndex++;
             }
 
-            server.FeedInRawNAL((uint)(videoIndex * videoSampleDuration), (List<byte[]>)videoTrack[videoIndex++ % videoTrack.Count]);
+            server.FeedInRawVideoSamples((uint)(videoIndex * videoSampleDuration), (List<byte[]>)videoTrack[videoIndex++ % videoTrack.Count]);
 
             if (videoIndex % videoTrack.Count == 0)
             {
@@ -94,12 +83,13 @@ using (var server = new RTSPServer(port, userName, password))
         var audioTrack = parsedMDAT[audioTrackId];
         var audioConfigDescriptor = audioSampleEntry.GetAudioSpecificConfigDescriptor();
         var audioSamplingRate = audioConfigDescriptor.GetSamplingFrequency();
-        var rtspAudioTrack = new SharpRTSPServer.AACTrack(audioSamplingRate, audioConfigDescriptor.ChannelConfiguration, await audioConfigDescriptor.ToBytes());
+        var rtspAudioTrack = new SharpRTSPServer.AACTrack(audioSamplingRate, audioConfigDescriptor.ChannelConfiguration);
+        rtspAudioTrack.SetConfigDescriptor(await audioConfigDescriptor.ToBytes());
         server.AudioTrack = rtspAudioTrack;
         audioTimer = new Timer(audioSampleDuration * 1000 / audioSamplingRate);
         audioTimer.Elapsed += (s, e) =>
         {
-            server.FeedInAudioPacket((uint)(audioIndex * audioSampleDuration), audioTrack[0][audioIndex++ % audioTrack[0].Count]);
+            server.FeedInRawAudioSamples((uint)(audioIndex * audioSampleDuration), new List<byte[]>() { audioTrack[0][audioIndex++ % audioTrack[0].Count] });
 
             if (audioIndex % audioTrack[0].Count == 0)
             {
@@ -107,6 +97,17 @@ using (var server = new RTSPServer(port, userName, password))
             }
         };
     }
+
+    try
+    {
+        server.StartListen();
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine(ex.ToString());
+    }
+
+    Console.WriteLine($"RTSP URL is rtsp://{userName}:{password}@{hostName}:{port}");
 
     videoTimer?.Start();
     audioTimer?.Start();
