@@ -44,12 +44,12 @@ namespace SharpRTSPClient
         public event EventHandler<SimpleDataEventArgs> ReceivedAudioData;
 
         public bool ProcessRTCP { get; set; } = true; // answer RTCP
-        public event EventHandler<RawDataEventArgs> ReceivedRawVideoRTCP;
-        public event EventHandler<RawDataEventArgs> ReceivedRawAudioRTCP;
+        public event EventHandler<RawRtcpDataEventArgs> ReceivedRawVideoRTCP;
+        public event EventHandler<RawRtcpDataEventArgs> ReceivedRawAudioRTCP;
 
         public bool ProcessRTP { get; set; } = true;
-        public event EventHandler<RawDataEventArgs> ReceivedRawVideoRTP;
-        public event EventHandler<RawDataEventArgs> ReceivedRawAudioRTP;
+        public event EventHandler<RawRtpDataEventArgs> ReceivedRawVideoRTP;
+        public event EventHandler<RawRtpDataEventArgs> ReceivedRawAudioRTP;
 
         public bool AutoPlay { get; set; } = true;
 
@@ -419,7 +419,22 @@ namespace SharpRTSPClient
                     return;
                 }
 
-                ReceivedRawVideoRTP?.Invoke(this, new RawDataEventArgs(data.Data));
+                ReceivedRawVideoRTP?.Invoke(this,
+                    new RawRtpDataEventArgs(
+                        data.Data,
+                        rtpPacket.CsrcCount,
+                        rtpPacket.ExtensionHeaderId,
+                        rtpPacket.HasPadding,
+                        rtpPacket.IsMarker,
+                        rtpPacket.IsWellFormed,
+                        rtpPacket.PayloadSize,
+                        rtpPacket.PayloadType,
+                        rtpPacket.SequenceNumber,
+                        rtpPacket.Ssrc,
+                        rtpPacket.Timestamp,
+                        rtpPacket.Version
+                        )
+                    );
 
                 if (!ProcessRTP)
                 {
@@ -436,7 +451,7 @@ namespace SharpRTSPClient
                 {
                     if (nalUnits.Any())
                     {
-                        ReceivedVideoData?.Invoke(this, new SimpleDataEventArgs(nalUnits.Data, nalUnits.ClockTimestamp));
+                        ReceivedVideoData?.Invoke(this, new SimpleDataEventArgs(nalUnits.Data, nalUnits.ClockTimestamp, nalUnits.RtpTimestamp));
                     }
                 }
             }
@@ -459,7 +474,22 @@ namespace SharpRTSPClient
                     return; 
                 }
 
-                ReceivedRawAudioRTP?.Invoke(this, new RawDataEventArgs(data.Data));
+                ReceivedRawAudioRTP?.Invoke(this,
+                   new RawRtpDataEventArgs(
+                        data.Data,
+                        rtpPacket.CsrcCount,
+                        rtpPacket.ExtensionHeaderId,
+                        rtpPacket.HasPadding,
+                        rtpPacket.IsMarker,
+                        rtpPacket.IsWellFormed,
+                        rtpPacket.PayloadSize,
+                        rtpPacket.PayloadType,
+                        rtpPacket.SequenceNumber,
+                        rtpPacket.Ssrc,
+                        rtpPacket.Timestamp,
+                        rtpPacket.Version
+                        )
+                   );
 
                 if (!ProcessRTP)
                 {
@@ -476,7 +506,7 @@ namespace SharpRTSPClient
                 {
                     if (audioFrames.Any())
                     {
-                        ReceivedAudioData?.Invoke(this, new SimpleDataEventArgs(audioFrames.Data, audioFrames.ClockTimestamp));
+                        ReceivedAudioData?.Invoke(this, new SimpleDataEventArgs(audioFrames.Data, audioFrames.ClockTimestamp, audioFrames.RtpTimestamp));
                     }
                 }
             }
@@ -491,7 +521,7 @@ namespace SharpRTSPClient
 
             using (var data = e.Data)
             {
-                ReceivedRawVideoRTCP?.Invoke(this, new RawDataEventArgs(data.Data));
+                ReceivedRawVideoRTCP?.Invoke(this, new RawRtcpDataEventArgs(data.Data));
 
                 if (!ProcessRTCP)
                     return;
@@ -513,7 +543,7 @@ namespace SharpRTSPClient
 
             using (var data = e.Data)
             {
-                ReceivedRawAudioRTCP?.Invoke(this, new RawDataEventArgs(data.Data));
+                ReceivedRawAudioRTCP?.Invoke(this, new RawRtcpDataEventArgs(data.Data));
 
                 if (!ProcessRTCP)
                     return;
@@ -1224,24 +1254,75 @@ namespace SharpRTSPClient
 
     public class SimpleDataEventArgs : EventArgs
     {
-        public SimpleDataEventArgs(IEnumerable<ReadOnlyMemory<byte>> data, DateTime timeStamp)
+        public SimpleDataEventArgs(IEnumerable<ReadOnlyMemory<byte>> data, DateTime timestamp, uint rtpTimestamp)
         {
             Data = data;
-            TimeStamp = timeStamp;
+            Timestamp = timestamp;
+            RtpTimestamp = rtpTimestamp;    
         }
 
-        public DateTime TimeStamp { get; }
+        public DateTime Timestamp { get; }
+        public uint RtpTimestamp { get; }
         public IEnumerable<ReadOnlyMemory<byte>> Data { get; }
 
         public override string ToString()
         {
-            return $"{TimeStamp}: Data {Data.Count()}";
+            return $"{Timestamp}: Data {Data.Count()}";
         }
     }
 
-    public class RawDataEventArgs : EventArgs
+    public class RawRtpDataEventArgs : EventArgs
     {
-        public RawDataEventArgs(ReadOnlyMemory<byte> data)
+        public ReadOnlyMemory<byte> Data { get; }
+        public int CsrcCount { get; }
+        public int? ExtensionHeaderId { get; }
+        public bool HasPadding { get; }
+        public bool IsMarker { get; }
+        public bool IsWellFormed { get; }
+        public int PayloadSize { get; }
+        public int PayloadType { get; }
+        public int SequenceNumber { get; }
+        public uint Ssrc { get; }
+        public uint Timestamp { get; }
+        public int Version { get; }
+
+        public RawRtpDataEventArgs(
+            ReadOnlyMemory<byte> data,
+            int csrcCount,
+            int? extensionHeaderId, 
+            bool hasPadding, 
+            bool isMarker, 
+            bool isWellFormed, 
+            int payloadSize, 
+            int payloadType,
+            int sequenceNumber, 
+            uint ssrc, 
+            uint timestamp,
+            int version)
+        {
+            Data = data;
+            CsrcCount = csrcCount;
+            ExtensionHeaderId = extensionHeaderId;
+            HasPadding = hasPadding;
+            IsMarker = isMarker;
+            IsWellFormed = isWellFormed;
+            PayloadSize = payloadSize;
+            PayloadType = payloadType;
+            SequenceNumber = sequenceNumber;
+            Ssrc = ssrc;
+            Timestamp = timestamp;
+            Version = version;
+        }
+
+        public override string ToString()
+        {
+            return $"RTP {Timestamp}: Data {Data.Length}";
+        }
+    }
+
+    public class RawRtcpDataEventArgs : EventArgs
+    {
+        public RawRtcpDataEventArgs(ReadOnlyMemory<byte> data)
         {
             Data = data;
         }
