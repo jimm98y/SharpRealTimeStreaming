@@ -1093,7 +1093,8 @@ namespace SharpRTSPClient
             {
                 string sdpControl = attrib.Value;
 
-                if (sdpControl.StartsWith("rtsp://", StringComparison.OrdinalIgnoreCase) || 
+                if (sdpControl.StartsWith("rtsp://", StringComparison.OrdinalIgnoreCase) ||
+                    sdpControl.StartsWith("rtsps://", StringComparison.OrdinalIgnoreCase) ||
                     sdpControl.StartsWith("http://", StringComparison.OrdinalIgnoreCase))
                 {
                     // the "track" or "stream id"

@@ -64,6 +64,8 @@ namespace SharpRTSPServer
         private readonly NetworkCredential _credentials;
         private readonly Authentication _authentication;
 
+        public bool IsRTSPS { get; set; } = false;
+
         /// <summary>
         /// Initializes a new instance of the <see cref="RTSPServer"/> class.
         /// </summary>
@@ -128,7 +130,18 @@ namespace SharpRTSPServer
                     _logger.LogDebug("Connection from {remoteEndPoint}", oneClient.Client.RemoteEndPoint);
 
                     // Hand the incoming TCP connection over to the RTSP classes
-                    var rtspSocket = new RtspTcpTransport(oneClient);
+                    RtspTcpTransport rtspSocket;
+
+                    if (IsRTSPS)
+                    {
+                        // TODO: untested
+                        rtspSocket = new RtspTcpTlsTransport(oneClient);
+                    }
+                    else
+                    {
+                        rtspSocket = new RtspTcpTransport(oneClient);
+                    }
+
                     RtspListener newListener = new RtspListener(rtspSocket, _loggerFactory.CreateLogger<RtspListener>());
                     newListener.MessageReceived += RTSPMessageReceived;
 
