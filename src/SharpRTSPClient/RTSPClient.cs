@@ -1000,7 +1000,7 @@ namespace SharpRTSPClient
                             
                             // Add SETUP message to list of mesages to send
                             _setupMessages.Enqueue(setupMessage);
-                            NewVideoStream?.Invoke(this, new NewStreamEventArgs(payloadName, streamConfigurationData));
+                            NewVideoStream?.Invoke(this, new NewStreamEventArgs(media.PayloadType, payloadName, streamConfigurationData));
                         }
                         break;
                     }
@@ -1097,7 +1097,7 @@ namespace SharpRTSPClient
                             }
                             // Add SETUP message to list of mesages to send
                             _setupMessages.Enqueue(setupMessage);
-                            NewAudioStream?.Invoke(this, new NewStreamEventArgs(_audioCodec, streamConfigurationData));
+                            NewAudioStream?.Invoke(this, new NewStreamEventArgs(media.PayloadType, _audioCodec, streamConfigurationData));
                         }
                         break;
                     }
@@ -1234,12 +1234,14 @@ namespace SharpRTSPClient
 
     public class NewStreamEventArgs : EventArgs
     {
-        public NewStreamEventArgs(string streamType, IStreamConfigurationData streamConfigurationData)
+        public NewStreamEventArgs(int payloadType, string streamType, IStreamConfigurationData streamConfigurationData)
         {
+            PayloadType = payloadType;
             StreamType = streamType;
             StreamConfigurationData = streamConfigurationData;
         }
 
+        public int PayloadType { get; }
         public string StreamType { get; }
         public IStreamConfigurationData StreamConfigurationData { get; }
 
