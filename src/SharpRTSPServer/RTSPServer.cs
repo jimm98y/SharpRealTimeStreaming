@@ -525,7 +525,7 @@ namespace SharpRTSPServer
         /// <summary>
         /// Feed in Raw video samples (for H264/H265 this expects NALUs).
         /// </summary>
-        /// <param name="rtpTimestamp">Timestamp.</param>
+        /// <param name="rtpTimestamp">Timestamp in the RTP timescale units.</param>
         /// <param name="samples">Array of NALUs.</param>
         public void FeedInRawVideoSamples(uint rtpTimestamp, List<byte[]> samples)
         {
@@ -598,6 +598,11 @@ namespace SharpRTSPServer
             }
         }
 
+        /// <summary>
+        /// Feed in Raw audio samples (for AAC this expects a single frame).
+        /// </summary>
+        /// <param name="rtpTimestamp">Timestamp in the RTP timescale units.</param>
+        /// <param name="samples">Array of frames.</param>
         public void FeedInRawAudioSamples(uint rtpTimestamp, List<byte[]> samples)
         {
             CheckTimeouts(out _, out int currentRtspPlayCount);
@@ -838,6 +843,11 @@ namespace SharpRTSPServer
 
     public interface ITrack
     {
+        /// <summary>
+        /// Codec name.
+        /// </summary>
+        string Codec { get; }
+
         /// <summary>
         /// Track ID. Used to identify the track in the SDP.
         /// </summary>

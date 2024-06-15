@@ -5,24 +5,60 @@ using System.Text;
 
 namespace SharpRTSPServer
 {
+    /// <summary>
+    /// G711 PCMU (U-LAW) track.
+    /// </summary>
     public class PCMUTrack : ITrack
     {
+        /// <summary>
+        /// PCMU Audio Codec name.
+        /// </summary>
+        public string Codec => "PCMU";
+
+        /// <summary>
+        /// Track ID. Used to identify the track in the SDP.
+        /// </summary>
         public int ID { get; set; } = 1;
+
+        /// <summary>
+        /// Sampling rate.
+        /// </summary>
         public int SamplingRate { get; } = 8000;
+
+        /// <summary>
+        /// Number of channels. 1 for Mono.
+        /// </summary>
         public int Channels { get; } = 1;
 
+        /// <summary>
+        /// Is the track ready?
+        /// </summary>
         public bool IsReady { get { return true; } }
 
+        /// <summary>
+        /// Payload type. PCMU uses static payload type 0.
+        /// </summary>
         public int PayloadType { get; set; } = 0;
 
+        /// <summary>
+        /// Build the SDP for this track.
+        /// </summary>
+        /// <param name="sdp">SDP <see cref="StringBuilder"/>.</param>
+        /// <returns><see cref="StringBuilder"/>.</returns>
         public StringBuilder BuildSDP(StringBuilder sdp)
         {
-            sdp.Append($"m=audio 0 RTP/AVP {PayloadType}\n"); // <---- Payload Type 0 means G711 ULAW
+            sdp.Append($"m=audio 0 RTP/AVP {PayloadType}\n");
             sdp.Append($"a=control:trackID={ID}\n");
-            sdp.Append($"a=rtpmap:{PayloadType} PCMU/{SamplingRate}\n");
+            sdp.Append($"a=rtpmap:{PayloadType} {Codec}/{SamplingRate}\n");
             return sdp;
         }
 
+        /// <summary>
+        /// Creates RTP packets.
+        /// </summary>
+        /// <param name="samples">An array of PCMU fragments. By default single fragment is expected.</param>
+        /// <param name="rtpTimestamp">RTP timestamp in the timescale of the track.</param>
+        /// <returns>RTP packets.</returns>
         public (List<Memory<byte>>, List<IMemoryOwner<byte>>) CreateRtpPackets(List<byte[]> samples, uint rtpTimestamp)
         {
             List<Memory<byte>> rtpPackets = new List<Memory<byte>>();
@@ -54,24 +90,60 @@ namespace SharpRTSPServer
         }
     }
 
+    /// <summary>
+    /// G711 PCMA (A-LAW) track.
+    /// </summary>
     public class PCMATrack : ITrack
     {
+        /// <summary>
+        /// PCMA Audio Codec name.
+        /// </summary>
+        public string Codec => "PCMA";
+
+        /// <summary>
+        /// Track ID. Used to identify the track in the SDP.
+        /// </summary>
         public int ID { get; set; } = 1;
+
+        /// <summary>
+        /// Sampling rate.
+        /// </summary>
         public int SamplingRate { get; } = 8000;
+
+        /// <summary>
+        /// Number of channels. 1 for Mono.
+        /// </summary>
         public int Channels { get; } = 1;
 
+        /// <summary>
+        /// Is the track ready?
+        /// </summary>
         public bool IsReady { get { return true; } }
 
+        /// <summary>
+        /// Payload type. PCMA uses static payload type 8.
+        /// </summary>
         public int PayloadType { get; set; } = 8;
 
+        /// <summary>
+        /// Build the SDP for this track.
+        /// </summary>
+        /// <param name="sdp">SDP <see cref="StringBuilder"/>.</param>
+        /// <returns><see cref="StringBuilder"/>.</returns>
         public StringBuilder BuildSDP(StringBuilder sdp)
         {
-            sdp.Append($"m=audio 0 RTP/AVP {PayloadType}\n"); // <---- Payload Type 8 means G711 ALAW
+            sdp.Append($"m=audio 0 RTP/AVP {PayloadType}\n");
             sdp.Append($"a=control:trackID={ID}\n");
-            sdp.Append($"a=rtpmap:{PayloadType} PCMA/{SamplingRate}\n");
+            sdp.Append($"a=rtpmap:{PayloadType} {Codec}/{SamplingRate}\n");
             return sdp;
         }
 
+        /// <summary>
+        /// Creates RTP packets.
+        /// </summary>
+        /// <param name="samples">An array of PCMA fragments. By default single fragment is expected.</param>
+        /// <param name="rtpTimestamp">RTP timestamp in the timescale of the track.</param>
+        /// <returns>RTP packets.</returns>
         public (List<Memory<byte>>, List<IMemoryOwner<byte>>) CreateRtpPackets(List<byte[]> samples, uint rtpTimestamp)
         {
             List<Memory<byte>> rtpPackets = new List<Memory<byte>>();

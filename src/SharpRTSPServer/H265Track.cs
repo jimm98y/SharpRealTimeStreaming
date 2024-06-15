@@ -13,7 +13,7 @@ namespace SharpRTSPServer
         /// <summary>
         /// H265 Video Codec name.
         /// </summary>
-        public const string VideoCodec = "H265";
+        public string Codec => "H265";
 
         /// <summary>
         /// Default video track clock rate.
@@ -121,7 +121,7 @@ namespace SharpRTSPServer
 
             sdp.Append($"m=video 0 RTP/AVP {PayloadType}\n");
             sdp.Append($"a=control:trackID={ID}\n");
-            sdp.Append($"a=rtpmap:{PayloadType} {VideoCodec}/{VideoClock}\n");
+            sdp.Append($"a=rtpmap:{PayloadType} {Codec}/{VideoClock}\n");
             sdp.Append($"a=fmtp:{PayloadType} sprop-vps=").Append(vps_str).Append("; sprop-sps=").Append(sps_str).Append("; sprop-pps=").Append(pps_str).Append("\n");
             return sdp;
         }

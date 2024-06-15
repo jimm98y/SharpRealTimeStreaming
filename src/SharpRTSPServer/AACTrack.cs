@@ -12,7 +12,12 @@ namespace SharpRTSPServer
     public class AACTrack : ITrack
     {
         /// <summary>
-        /// Track ID.
+        /// AAC Audio Codec name.
+        /// </summary>
+        public string Codec => "mpeg4-generic";
+
+        /// <summary>
+        /// Track ID. Used to identify the track in the SDP.
         /// </summary>
         public int ID { get; set; } = 1;
 
@@ -22,7 +27,7 @@ namespace SharpRTSPServer
         public int SamplingRate { get; set; } = 44100;
 
         /// <summary>
-        /// Number of channels.
+        /// Number of channels. 1 for Mono, 2 for Stereo, ...
         /// </summary>
         public int Channels { get; set; } = 1;
 
@@ -91,16 +96,27 @@ namespace SharpRTSPServer
             this.ConfigDescriptor = configDescriptor;
         }
 
+        /// <summary>
+        /// Build the SDP for this track.
+        /// </summary>
+        /// <param name="sdp">SDP <see cref="StringBuilder"/>.</param>
+        /// <returns><see cref="StringBuilder"/>.</returns>
         public StringBuilder BuildSDP(StringBuilder sdp)
         {
             sdp.Append($"m=audio 0 RTP/AVP {PayloadType}\n"); // <---- Payload Type 0 means G711 ULAW, 96+ means dynamic payload type
             sdp.Append($"a=control:trackID={ID}\n");
-            sdp.Append($"a=rtpmap:{PayloadType} mpeg4-generic/{SamplingRate}/{Channels}\n");
+            sdp.Append($"a=rtpmap:{PayloadType} {Codec}/{SamplingRate}/{Channels}\n");
             sdp.Append($"a=fmtp:{PayloadType} profile-level-id={GetAACProfileLevel(SamplingRate, Channels)}; " +
                 $"config={Utilities.ToHexString(ConfigDescriptor)}; streamType=5; mode=AAC-hbr; objectType=64; sizeLength=13; indexLength=3; indexDeltaLength=3\n");
             return sdp;
         }
 
+        /// <summary>
+        /// Creates RTP packets.
+        /// </summary>
+        /// <param name="samples">An array of AAC fragments. By default single fragment is expected.</param>
+        /// <param name="rtpTimestamp">RTP timestamp in the timescale of the track.</param>
+        /// <returns>RTP packets.</returns>
         public (List<Memory<byte>>, List<IMemoryOwner<byte>>) CreateRtpPackets(List<byte[]> samples, uint rtpTimestamp)
         {
             List<Memory<byte>> rtpPackets = new List<Memory<byte>>();
