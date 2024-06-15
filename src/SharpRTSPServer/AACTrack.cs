@@ -1,4 +1,7 @@
-﻿using System.Linq;
+﻿using System;
+using System.Buffers;
+using System.Collections.Generic;
+using System.Linq;
 using System.Text;
 
 namespace SharpRTSPServer
@@ -29,6 +32,55 @@ namespace SharpRTSPServer
             sdp.Append($"a=fmtp:{PayloadType} profile-level-id={GetAACProfileLevel(SamplingRate, Channels)}; " +
                 $"config={ConfigDescriptor}; streamType=5; mode=AAC-hbr; objectType=64; sizeLength=13; indexLength=3; indexDeltaLength=3\n");
             return sdp;
+        }
+
+        public (List<Memory<byte>>, List<IMemoryOwner<byte>>) PrepareRtpPackets(List<byte[]> samples, uint rtpTimestamp)
+        {
+            List<Memory<byte>> rtpPackets = new List<Memory<byte>>();
+            List<IMemoryOwner<byte>> memoryOwners = new List<IMemoryOwner<byte>>();
+
+            for (int i = 0; i < samples.Count; i++)
+            {
+                // append AU header (required for AAC)
+                var audioPacket = AppendAUHeader(samples[i]);
+
+                // Put the whole Audio Packet into one RTP packet.
+                // 12 is header size when there are no CSRCs or extensions
+                var size = 12 + audioPacket.Length;
+                var owner = MemoryPool<byte>.Shared.Rent(size);
+                memoryOwners.Add(owner);
+
+                var rtpPacket = owner.Memory.Slice(0, size);
+
+                const bool rtpPadding = false;
+                const bool rtpHasExtension = false;
+                int rtpCsrcCount = 0;
+                const bool rtpMarker = true; // always 1 as this is the last (and only) RTP packet for this audio timestamp
+
+                RTPPacketUtil.WriteHeader(rtpPacket.Span,
+                    RTPPacketUtil.RTP_VERSION, rtpPadding, rtpHasExtension, rtpCsrcCount, rtpMarker, PayloadType);
+
+                // sequence number is set just before send
+                RTPPacketUtil.WriteTS(rtpPacket.Span, rtpTimestamp);
+
+                // Now append the audio packet
+                audioPacket.CopyTo(rtpPacket.Slice(12));
+
+                rtpPackets.Add(rtpPacket);
+            }
+
+            return (rtpPackets, memoryOwners);
+        }
+
+        private static byte[] AppendAUHeader(byte[] frame)
+        {
+            short frameLen = (short)(frame.Length << 3);
+            byte[] header = new byte[4];
+            header[0] = 0x00;
+            header[1] = 0x10; // 16 bits size of the header
+            header[2] = (byte)((frameLen >> 8) & 0xFF);
+            header[3] = (byte)(frameLen & 0xFF);
+            return header.Concat(frame).ToArray();
         }
 
         private static int GetAACLevel(int samplingFrequency, int channelConfiguration)
@@ -109,18 +161,6 @@ namespace SharpRTSPServer
                 default:
                     return 1;
             }
-        }
-
-        public static byte[] AppendAUHeader(byte[] frame)
-        {
-            // append AU header (required for AAC)
-            short frameLen = (short)(frame.Length << 3);
-            byte[] header = new byte[4];
-            header[0] = 0x00;
-            header[1] = 0x10; // 16 bits size of the header
-            header[2] = (byte)((frameLen >> 8) & 0xFF);
-            header[3] = (byte)(frameLen & 0xFF);
-            return header.Concat(frame).ToArray();
         }
     }
 }

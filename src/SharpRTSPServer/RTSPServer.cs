@@ -3,7 +3,6 @@ using Rtsp;
 using Rtsp.Messages;
 using System;
 using System.Buffers;
-using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.Contracts;
@@ -477,7 +476,9 @@ namespace SharpRTSPServer
 
         private RTSPConnection ConnectionByRtpTransport(IRtpTransport rtpTransport)
         {
-            if (rtpTransport is null) return null;
+            if (rtpTransport == null) 
+                return null;
+
             lock (_connectionList)
             {
                 return _connectionList.Find(c => c.Video.RtpChannel == rtpTransport || c.Audio.RtpChannel == rtpTransport);
@@ -486,7 +487,9 @@ namespace SharpRTSPServer
 
         private RTSPConnection ConnectionBySessionId(string sessionId)
         {
-            if (sessionId is null) return null;
+            if (sessionId == null) 
+                return null;
+
             lock (_connectionList)
             {
                 return _connectionList.Find(c => c.SessionId == sessionId);
@@ -534,7 +537,7 @@ namespace SharpRTSPServer
 
             // Build a list of 1 or more RTP packets
             // The last packet will have the M bit set to '1'
-            (List<Memory<byte>> rtpPackets, List<IMemoryOwner<byte>> memoryOwners) = PrepareVideoRtpPackets(nalArray, rtpTimestamp, VideoTrack);
+            (List<Memory<byte>> rtpPackets, List<IMemoryOwner<byte>> memoryOwners) = VideoTrack.PrepareRtpPackets(nalArray, rtpTimestamp);
 
             lock (_connectionList)
             {
@@ -545,7 +548,7 @@ namespace SharpRTSPServer
                     if (!connection.Play) 
                         continue;
 
-                    if (connection.Video.RtpChannel is null) 
+                    if (connection.Video.RtpChannel == null) 
                         continue;
 
                     _logger.LogDebug("Sending video session {sessionId} {TransportLogName} Timestamp(clock)={timestamp}. RTP timestamp={rtpTimestamp}. Sequence={sequenceNumber}",
@@ -560,14 +563,14 @@ namespace SharpRTSPServer
                     }
 
                     // There could be more than 1 RTP packet (if the data is fragmented)
-                    foreach (var rtp_packet in rtpPackets)
+                    foreach (var rtpPacket in rtpPackets)
                     {
                         // Add the specific data for each transmission
-                        RTPPacketUtil.WriteSequenceNumber(rtp_packet.Span, connection.Video.SequenceNumber);
+                        RTPPacketUtil.WriteSequenceNumber(rtpPacket.Span, connection.Video.SequenceNumber);
                         connection.Video.SequenceNumber++;
 
                         // Add the specific SSRC for each transmission
-                        RTPPacketUtil.WriteSSRC(rtp_packet.Span, connection.SSRC);
+                        RTPPacketUtil.WriteSSRC(rtpPacket.Span, connection.SSRC);
 
                         Debug.Assert(connection.Video.RtpChannel != null, "If connection.video.rptChannel is null here the program did not handle well connection problem");
                         try
@@ -575,7 +578,7 @@ namespace SharpRTSPServer
                             // send the whole NAL. ** We could fragment the RTP packet into smaller chuncks that fit within the MTU
                             // Send to the IP address of the Client
                             // Send to the UDP Port the Client gave us in the SETUP command
-                            connection.Video.RtpChannel.WriteToDataPort(rtp_packet.Span);
+                            connection.Video.RtpChannel.WriteToDataPort(rtpPacket.Span);
                         }
                         catch (Exception e)
                         {
@@ -596,7 +599,7 @@ namespace SharpRTSPServer
             }
         }
 
-        private bool SendRTCP(uint rtp_timestamp, RTSPConnection connection, RTPStream stream)
+        private bool SendRTCP(uint rtpTimestamp, RTSPConnection connection, RTPStream stream)
         {
             using (var rtcp_owner = MemoryPool<byte>.Shared.Rent(28))
             {
@@ -605,7 +608,7 @@ namespace SharpRTSPServer
                 const int reportCount = 0; // an empty report
                 int length = (rtcpSenderReport.Length / 4) - 1; // num 32 bit words minus 1
                 RTCPUtils.WriteRTCPHeader(rtcpSenderReport, RTCPUtils.RTCP_VERSION, hasPadding, reportCount, RTCPUtils.RTCP_PACKET_TYPE_SENDER_REPORT, length, connection.SSRC);
-                RTCPUtils.WriteSenderReport(rtcpSenderReport, DateTime.UtcNow, rtp_timestamp, stream.RtpPacketCount, stream.OctetCount);
+                RTCPUtils.WriteSenderReport(rtcpSenderReport, DateTime.UtcNow, rtpTimestamp, stream.RtpPacketCount, stream.OctetCount);
 
                 try
                 {
@@ -626,79 +629,6 @@ namespace SharpRTSPServer
             }
         }
 
-        private static (List<Memory<byte>>, List<IMemoryOwner<byte>>) PrepareVideoRtpPackets(List<byte[]> nalArray, uint rtpTimestamp, ITrack track)
-        {
-            List<Memory<byte>> rtpPackets = new List<Memory<byte>>();
-            List<IMemoryOwner<byte>> memoryOwners = new List<IMemoryOwner<byte>>();
-            for (int x = 0; x < nalArray.Count; x++)
-            {
-                var raw_nal = nalArray[x];
-                bool last_nal = false;
-                if (x == nalArray.Count - 1)
-                {
-                    last_nal = true; // last NAL in our nal_array
-                }
-
-                // The H264/H265 Payload could be sent as one large RTP packet (assuming the receiver can handle it)
-                // or as a Fragmented Data, split over several RTP packets with the same Timestamp.
-                bool fragmenting = false;
-
-                int packetMTU = 1400; // 65535; 
-                packetMTU += -8 - 20 - 16; // -8 for UDP header, -20 for IP header, -16 normal RTP header len. ** LESS RTP EXTENSIONS !!!
-
-                if (raw_nal.Length > packetMTU)
-                {
-                    fragmenting = true;
-                }
-
-                // INDIGO VISION DOES NOT SUPPORT FRAGMENTATION. Send as one jumbo RTP packet and let OS split over MTUs.
-                // NOTE TO SELF... perhaps this was because the SDP did not have the extra packetization flag
-                //  fragmenting = false;
-                if (fragmenting && (track is IVideoTrack))
-                {
-                    ((IVideoTrack)track).FragmentNal(rtpPackets, memoryOwners, rtpTimestamp, raw_nal, last_nal, packetMTU);
-                }
-                else
-                {
-                    // Put the whole NAL into one RTP packet.
-                    // Note some receivers will have maximum buffers and be unable to handle large RTP packets.
-                    // Also with RTP over RTSP there is a limit of 65535 bytes for the RTP packet.
-
-                    // 12 is header size when there are no CSRCs or extensions
-                    var owner = MemoryPool<byte>.Shared.Rent(12 + raw_nal.Length);
-                    memoryOwners.Add(owner);
-                    var rtp_packet = owner.Memory.Slice(0, 12 + raw_nal.Length);
-
-                    // RTP Packet Header
-                    // 0 - Version, P, X, CC, M, PT and Sequence Number
-                    //32 - Timestamp. H264 uses a 90kHz clock
-                    //64 - SSRC
-                    //96 - CSRCs (optional)
-                    //nn - Extension ID and Length
-                    //nn - Extension header
-
-                    const bool rtpPadding = false;
-                    const bool rtpHasExtension = false;
-                    const int rtp_csrc_count = 0;
-
-                    RTPPacketUtil.WriteHeader(rtp_packet.Span,
-                        RTPPacketUtil.RTP_VERSION,
-                        rtpPadding,
-                        rtpHasExtension, rtp_csrc_count, last_nal, track.PayloadType);
-
-                    // sequence number and SSRC are set just before send
-                    RTPPacketUtil.WriteTS(rtp_packet.Span, rtpTimestamp);
-
-                    // Now append the raw NAL
-                    raw_nal.CopyTo(rtp_packet.Slice(12));
-
-                    rtpPackets.Add(rtp_packet);
-                }
-            }
-
-            return (rtpPackets, memoryOwners);
-        }
-
         private void RemoveSession(RTSPConnection connection)
         {
             connection.Play = false; // stop sending data
@@ -714,96 +644,77 @@ namespace SharpRTSPServer
         {
             CheckTimeouts(out _, out int currentRtspPlayCount);
 
-            // Console.WriteLine(current_rtsp_count + " RTSP clients connected. " + current_rtsp_play_count + " RTSP clients in PLAY mode");
+            if (currentRtspPlayCount == 0)
+                return;
 
-            if (currentRtspPlayCount == 0) return;
+            uint rtpTimestamp = timestamp;
 
-            uint rtp_timestamp = timestamp;
+            // Build a list of 1 or more RTP packets
+            // The last packet will have the M bit set to '1'
+            (List<Memory<byte>> rtpPackets, List<IMemoryOwner<byte>> memoryOwners) = AudioTrack.PrepareRtpPackets(new List<byte[]>() { audioPacket.ToArray() }, rtpTimestamp);
 
-            // Put the whole Audio Packet into one RTP packet.
-            // 12 is header size when there are no CSRCs or extensions
-            var size = 12 + audioPacket.Length;
-            using (var owner = MemoryPool<byte>.Shared.Rent(size))
+            lock (_connectionList)
             {
-                var rtp_packet = owner.Memory.Slice(0, size);
-
-                // RTP Packet Header
-                // 0 - Version, P, X, CC, M, PT and Sequence Number
-                //32 - Timestamp. H264 uses a 90kHz clock
-                //64 - SSRC
-                //96 - CSRCs (optional)
-                //nn - Extension ID and Length
-                //nn - Extension header
-
-                const bool rtp_padding = false;
-                const bool rtpHasExtension = false;
-                int rtp_csrc_count = 0;
-                const bool rtpMarker = true; // always 1 as this is the last (and only) RTP packet for this audio timestamp
-
-                RTPPacketUtil.WriteHeader(rtp_packet.Span,
-                    RTPPacketUtil.RTP_VERSION, rtp_padding, rtpHasExtension, rtp_csrc_count, rtpMarker, AudioTrack.PayloadType);
-
-                // sequence number is set just before send
-                RTPPacketUtil.WriteTS(rtp_packet.Span, rtp_timestamp);
-
-                // Now append the audio packet
-                audioPacket.CopyTo(rtp_packet.Slice(12));
-
-                lock (_connectionList)
+                // Go through each RTSP connection and output the NAL on the Video Session
+                foreach (RTSPConnection connection in _connectionList.ToArray()) // ToArray makes a temp copy of the list. This lets us delete items in the foreach eg when there is Write Error
                 {
-                    // Go through each RTSP connection and output the NAL on the Video Session
-                    foreach (RTSPConnection connection in _connectionList.ToArray()) // ToArray makes a temp copy of the list. This lets us delete items in the foreach eg when there is Write Error
+                    // Only process Sessions in Play Mode
+                    if (!connection.Play) 
+                        continue;
+
+                    // The client may have only subscribed to Video. Check if the client wants audio
+                    if (connection.Audio.RtpChannel is null) 
+                        continue;
+
+                    _logger.LogDebug($"Sending audio session {connection.SessionId} {TransportLogName(connection.Audio.RtpChannel)} " +
+                        $"Timestamp(clock)={timestamp}. RTP timestamp={rtpTimestamp}. Sequence={connection.Audio.SequenceNumber}");
+                    bool write_error = false;
+
+                    if (connection.Audio.MustSendRtcpPacket)
                     {
-                        // Only process Sessions in Play Mode
-                        if (!connection.Play) continue;
-
-                        // The client may have only subscribed to Video. Check if the client wants audio
-                        if (connection.Audio.RtpChannel is null) continue;
-
-                        _logger.LogDebug($"Sending audio session {connection.SessionId} {TransportLogName(connection.Audio.RtpChannel)} " +
-                            $"Timestamp(clock)={timestamp}. RTP timestamp={rtp_timestamp}. Sequence={connection.Audio.SequenceNumber}");
-                        bool write_error = false;
-
-                        if (connection.Audio.MustSendRtcpPacket)
+                        if (!SendRTCP(rtpTimestamp, connection, connection.Audio))
                         {
-                            if (!SendRTCP(rtp_timestamp, connection, connection.Audio))
-                            {
-                                RemoveSession(connection);
-                            }
-                        }
-
-                        // There could be more than 1 RTP packet (if the data is fragmented)
-                        {
-                            // Add the specific data for each transmission
-                            RTPPacketUtil.WriteSequenceNumber(rtp_packet.Span, connection.Audio.SequenceNumber);
-                            connection.Audio.SequenceNumber++;
-
-                            // Add the specific SSRC for each transmission
-                            RTPPacketUtil.WriteSSRC(rtp_packet.Span, connection.SSRC);
-
-                            try
-                            {
-                                // send the whole RTP packet
-                                connection.Audio.RtpChannel.WriteToDataPort(rtp_packet.Span);
-                            }
-                            catch (Exception e)
-                            {
-                                _logger.LogWarning(e, "UDP Write Exception");
-                                _logger.LogWarning("Error writing to listener {address}", connection.Listener.RemoteAdress);
-                                write_error = true;
-                            }
-                        }
-
-                        if (write_error)
-                        {
-                            Console.WriteLine("Removing session " + connection.SessionId + " due to write error");
                             RemoveSession(connection);
                         }
-
-                        connection.Audio.RtpPacketCount++;
-                        connection.Audio.OctetCount += (uint)audioPacket.Length; // QUESTION - Do I need to include the RTP header bytes/fragmenting bytes
                     }
+
+                    // There could be more than 1 RTP packet (if the data is fragmented)
+                    foreach (var rtpPacket in rtpPackets)
+                    {
+                        // Add the specific data for each transmission
+                        RTPPacketUtil.WriteSequenceNumber(rtpPacket.Span, connection.Audio.SequenceNumber);
+                        connection.Audio.SequenceNumber++;
+
+                        // Add the specific SSRC for each transmission
+                        RTPPacketUtil.WriteSSRC(rtpPacket.Span, connection.SSRC);
+
+                        try
+                        {
+                            // send the whole RTP packet
+                            connection.Audio.RtpChannel.WriteToDataPort(rtpPacket.Span);
+                        }
+                        catch (Exception e)
+                        {
+                            _logger.LogWarning(e, "UDP Write Exception");
+                            _logger.LogWarning("Error writing to listener {address}", connection.Listener.RemoteAdress);
+                            write_error = true;
+                        }
+                    }
+
+                    if (write_error)
+                    {
+                        Console.WriteLine("Removing session " + connection.SessionId + " due to write error");
+                        RemoveSession(connection);
+                    }
+
+                    connection.Audio.RtpPacketCount++;
+                    connection.Audio.OctetCount += (uint)audioPacket.Length; // QUESTION - Do I need to include the RTP header bytes/fragmenting bytes
                 }
+            }
+
+            foreach (var owner in memoryOwners)
+            {
+                owner.Dispose();
             }
         }
 
@@ -881,87 +792,13 @@ namespace SharpRTSPServer
         }
     }
 
-    internal static class RTPPacketUtil
-    {
-        public const int RTP_VERSION = 2;
-
-        public static void WriteHeader(
-            Span<byte> rtpPacket, 
-            int rtpVersion,
-            bool rtpPadding,
-            bool rtpExtension,
-            int rtpCsrcCount, 
-            bool rtpMarker,
-            int rtpPayloadType)
-        {
-            rtpPacket[0] = (byte)((rtpVersion << 6) | ((rtpPadding ? 1 : 0) << 5) | ((rtpExtension ? 1 : 0) << 4) | rtpCsrcCount);
-            rtpPacket[1] = (byte)(((rtpMarker ? 1 : 0) << 7) | (rtpPayloadType & 0x7F));
-        }
-
-        public static void WriteSequenceNumber(Span<byte> rtpPacket, ushort sequenceId)
-        {
-            BinaryPrimitives.WriteUInt16BigEndian(rtpPacket.Slice(2), sequenceId);
-        }
-
-        public static void WriteTS(Span<byte> rtp_packet, uint ts)
-        {
-            BinaryPrimitives.WriteUInt32BigEndian(rtp_packet.Slice(4), ts);
-        }
-
-        public static void WriteSSRC(Span<byte> rtp_packet, uint ssrc)
-        {
-            BinaryPrimitives.WriteUInt32BigEndian(rtp_packet.Slice(8), ssrc);
-        }
-    }
-
-    internal static class RTCPUtils
-    {
-        public const int RTCP_VERSION = 2;
-        public const int RTCP_PACKET_TYPE_SENDER_REPORT = 200;
-
-        public static void WriteRTCPHeader(Span<byte> rtcp_sender_report, int version, bool hasPadding, int reportCount, int packetType, int length, uint ssrc)
-        {
-            rtcp_sender_report[0] = (byte)((version << 6) + ((hasPadding ? 1 : 0) << 5) + reportCount);
-            rtcp_sender_report[1] = (byte)packetType;
-            BinaryPrimitives.WriteUInt16BigEndian(rtcp_sender_report.Slice(2), (ushort)length);
-            BinaryPrimitives.WriteUInt32BigEndian(rtcp_sender_report.Slice(4), ssrc);
-        }
-
-        public static void WriteSenderReport(Span<byte> rtcpSenderReport, DateTime now, uint rtp_timestamp, uint rtpPacketCount, uint octetCount)
-        {
-            // Bytes 8, 9, 10, 11 and 12,13,14,15 are the Wall Clock
-            // Bytes 16,17,18,19 are the RTP payload timestamp
-
-            // NTP Most Signigicant Word is relative to 0h, 1 Jan 1900
-            // This will wrap around in 2036
-            DateTime ntp_start_time = new DateTime(1900, 1, 1, 0, 0, 0, DateTimeKind.Utc);
-
-            TimeSpan tmpTime = now - ntp_start_time;
-            double totalSeconds = tmpTime.TotalSeconds; // Seconds and fractions of a second
-
-            uint ntp_msw_seconds = (uint)Math.Truncate(totalSeconds); // whole number of seconds
-            uint ntp_lsw_fractions = (uint)(totalSeconds % 1 * uint.MaxValue); // fractional part, scaled between 0 and MaxInt
-
-            // cross check...   double ntp = ntp_msw_seconds + (ntp_lsw_fractions / UInt32.MaxValue);
-            BinaryPrimitives.WriteUInt32BigEndian(rtcpSenderReport.Slice(8), ntp_msw_seconds);
-            BinaryPrimitives.WriteUInt32BigEndian(rtcpSenderReport.Slice(12), ntp_lsw_fractions);
-            BinaryPrimitives.WriteUInt32BigEndian(rtcpSenderReport.Slice(16), rtp_timestamp);
-            BinaryPrimitives.WriteUInt32BigEndian(rtcpSenderReport.Slice(20), rtpPacketCount);
-            BinaryPrimitives.WriteUInt32BigEndian(rtcpSenderReport.Slice(24), octetCount);
-        }
-    }
-
     public interface ITrack
     {
         int ID { get; set; }
         int PayloadType { get; }
         bool IsReady { get; }
         StringBuilder BuildSDP(StringBuilder sdp);
-    }   
-
-    public interface IVideoTrack : ITrack
-    {
-        void FragmentNal(List<Memory<byte>> rtp_packets, List<IMemoryOwner<byte>> memoryOwners, uint rtpTimestamp, byte[] rawNal, bool isLast, int packetMTU);
+        (List<Memory<byte>>, List<IMemoryOwner<byte>>) PrepareRtpPackets(List<byte[]> samples, uint rtpTimestamp);
     }
 
     public class CustomLoggerFactory : ILoggerFactory

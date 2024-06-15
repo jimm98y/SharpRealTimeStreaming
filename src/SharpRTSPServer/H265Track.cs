@@ -5,7 +5,7 @@ using System.Text;
 
 namespace SharpRTSPServer
 {
-    public class H265Track : IVideoTrack
+    public class H265Track : ITrack
     {
         public const string VideoCodec = "H265";
         public const int DEFAULT_CLOCK = 90000;
@@ -47,74 +47,142 @@ namespace SharpRTSPServer
             return sdp;
         }
 
-        public void FragmentNal(List<Memory<byte>> rtp_packets, List<IMemoryOwner<byte>> memoryOwners, uint rtp_timestamp, byte[] raw_nal, bool last_nal, int packetMTU)
+        public (List<Memory<byte>>, List<IMemoryOwner<byte>>) PrepareRtpPackets(List<byte[]> nalArray, uint rtpTimestamp)
         {
-            int data_remaining = raw_nal.Length;
-            int nal_pointer = 0;
-            int start_bit = 1;
-            int end_bit = 0;
-
-            // consume first byte of the raw_nal. It is used in the FU header
-            byte first_byte = raw_nal[0];
-            nal_pointer++;
-            data_remaining--;
-
-            byte second_byte = raw_nal[1];
-            nal_pointer++;
-            data_remaining--;
-
-            // For H265 we need https://www.rfc-editor.org/rfc/rfc7798#section-4.4.3
-            while (data_remaining > 0)
+            List<Memory<byte>> rtpPackets = new List<Memory<byte>>();
+            List<IMemoryOwner<byte>> memoryOwners = new List<IMemoryOwner<byte>>();
+            for (int x = 0; x < nalArray.Count; x++)
             {
-                int payload_size = Math.Min(packetMTU, data_remaining);
-                if (data_remaining == payload_size) end_bit = 1;
+                var rawNal = nalArray[x];
+                bool lastNal = false;
+                if (x == nalArray.Count - 1)
+                {
+                    lastNal = true; // last NAL in our nal_array
+                }
 
-                // 12 is header size. 3 bytes for H265 FU-A header
-                var fuHeader = 3;
-                var destSize = 12 + fuHeader + payload_size;
-                var owner = MemoryPool<byte>.Shared.Rent(destSize);
-                memoryOwners.Add(owner);
-                var rtp_packet = owner.Memory.Slice(0, destSize);
+                // The H264/H265 Payload could be sent as one large RTP packet (assuming the receiver can handle it)
+                // or as a Fragmented Data, split over several RTP packets with the same Timestamp.
+                bool fragmenting = false;
 
-                // RTP Packet Header
-                // 0 - Version, P, X, CC, M, PT and Sequence Number
-                //32 - Timestamp. H264/H265 uses a 90kHz clock
-                //64 - SSRC
-                //96 - CSRCs (optional)
-                //nn - Extension ID and Length
-                //nn - Extension header
+                int packetMTU = 1400; // 65535; 
+                packetMTU += -8 - 20 - 16; // -8 for UDP header, -20 for IP header, -16 normal RTP header len. ** LESS RTP EXTENSIONS !!!
 
-                const bool rtpPadding = false;
-                const bool rtpHasExtension = false;
-                const int rtp_csrc_count = 0;
+                if (rawNal.Length > packetMTU)
+                {
+                    fragmenting = true;
+                }
 
-                RTPPacketUtil.WriteHeader(rtp_packet.Span, RTPPacketUtil.RTP_VERSION,
-                    rtpPadding, rtpHasExtension, rtp_csrc_count, last_nal && end_bit == 1, PayloadType);
+                // INDIGO VISION DOES NOT SUPPORT FRAGMENTATION. Send as one jumbo RTP packet and let OS split over MTUs.
+                // NOTE TO SELF... perhaps this was because the SDP did not have the extra packetization flag
+                //  fragmenting = false;
+                if (fragmenting)
+                {
+                    int dataRemaining = rawNal.Length;
+                    int nalPointer = 0;
+                    int startBit = 1;
+                    int endBit = 0;
 
-                // sequence number and SSRC are set just before send
-                RTPPacketUtil.WriteTS(rtp_packet.Span, rtp_timestamp);
+                    // consume first byte of the raw_nal. It is used in the FU header
+                    byte firstByte = rawNal[0];
+                    nalPointer++;
+                    dataRemaining--;
 
-                // Now append the Fragmentation Header (with Start and End marker) and part of the raw_nal
-                const byte f_bit = 0;
-                byte nalType = (byte)((first_byte & 0x7E) >> 1);
-                const byte type = 49; // FU Fragmentation
+                    byte secondByte = rawNal[1];
+                    nalPointer++;
+                    dataRemaining--;
 
-                // PayloadHdr
-                rtp_packet.Span[12] = (byte)((f_bit << 7) | ((type << 1) & 0x7E) | (first_byte & 0x1));
-                rtp_packet.Span[13] = second_byte;
+                    // For H265 we need https://www.rfc-editor.org/rfc/rfc7798#section-4.4.3
+                    while (dataRemaining > 0)
+                    {
+                        int payloadSize = Math.Min(packetMTU, dataRemaining);
+                        if (dataRemaining == payloadSize) endBit = 1;
 
-                // FU header
-                rtp_packet.Span[14] = (byte)((start_bit << 7) | (end_bit << 6) | nalType);
+                        // 12 is header size. 3 bytes for H265 FU-A header
+                        var fuHeader = 3;
+                        var destSize = 12 + fuHeader + payloadSize;
+                        var owner = MemoryPool<byte>.Shared.Rent(destSize);
+                        memoryOwners.Add(owner);
+                        var rtpPacket = owner.Memory.Slice(0, destSize);
 
-                raw_nal.AsSpan(nal_pointer, payload_size).CopyTo(rtp_packet.Slice(15).Span);
+                        // RTP Packet Header
+                        // 0 - Version, P, X, CC, M, PT and Sequence Number
+                        //32 - Timestamp. H264/H265 uses a 90kHz clock
+                        //64 - SSRC
+                        //96 - CSRCs (optional)
+                        //nn - Extension ID and Length
+                        //nn - Extension header
 
-                nal_pointer += payload_size;
-                data_remaining -= payload_size;
+                        const bool rtpPadding = false;
+                        const bool rtpHasExtension = false;
+                        const int rtpCsrcCount = 0;
 
-                rtp_packets.Add(rtp_packet);
+                        RTPPacketUtil.WriteHeader(rtpPacket.Span, RTPPacketUtil.RTP_VERSION,
+                            rtpPadding, rtpHasExtension, rtpCsrcCount, lastNal && endBit == 1, PayloadType);
 
-                start_bit = 0;
+                        // sequence number and SSRC are set just before send
+                        RTPPacketUtil.WriteTS(rtpPacket.Span, rtpTimestamp);
+
+                        // Now append the Fragmentation Header (with Start and End marker) and part of the raw_nal
+                        const byte fBit = 0;
+                        byte nalType = (byte)((firstByte & 0x7E) >> 1);
+                        const byte type = 49; // FU Fragmentation
+
+                        // PayloadHdr
+                        rtpPacket.Span[12] = (byte)((fBit << 7) | ((type << 1) & 0x7E) | (firstByte & 0x1));
+                        rtpPacket.Span[13] = secondByte;
+
+                        // FU header
+                        rtpPacket.Span[14] = (byte)((startBit << 7) | (endBit << 6) | nalType);
+
+                        rawNal.AsSpan(nalPointer, payloadSize).CopyTo(rtpPacket.Slice(15).Span);
+
+                        nalPointer += payloadSize;
+                        dataRemaining -= payloadSize;
+
+                        rtpPackets.Add(rtpPacket);
+
+                        startBit = 0;
+                    }
+                }
+                else
+                {
+                    // Put the whole NAL into one RTP packet.
+                    // Note some receivers will have maximum buffers and be unable to handle large RTP packets.
+                    // Also with RTP over RTSP there is a limit of 65535 bytes for the RTP packet.
+
+                    // 12 is header size when there are no CSRCs or extensions
+                    var owner = MemoryPool<byte>.Shared.Rent(12 + rawNal.Length);
+                    memoryOwners.Add(owner);
+                    var rtpPacket = owner.Memory.Slice(0, 12 + rawNal.Length);
+
+                    // RTP Packet Header
+                    // 0 - Version, P, X, CC, M, PT and Sequence Number
+                    //32 - Timestamp. H264 uses a 90kHz clock
+                    //64 - SSRC
+                    //96 - CSRCs (optional)
+                    //nn - Extension ID and Length
+                    //nn - Extension header
+
+                    const bool rtpPadding = false;
+                    const bool rtpHasExtension = false;
+                    const int rtpCsrcCount = 0;
+
+                    RTPPacketUtil.WriteHeader(rtpPacket.Span,
+                        RTPPacketUtil.RTP_VERSION,
+                        rtpPadding,
+                        rtpHasExtension, rtpCsrcCount, lastNal, PayloadType);
+
+                    // sequence number and SSRC are set just before send
+                    RTPPacketUtil.WriteTS(rtpPacket.Span, rtpTimestamp);
+
+                    // Now append the raw NAL
+                    rawNal.CopyTo(rtpPacket.Slice(12));
+
+                    rtpPackets.Add(rtpPacket);
+                }
             }
+
+            return (rtpPackets, memoryOwners);
         }
     }
 }

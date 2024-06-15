@@ -7,11 +7,12 @@ using System.IO;
 using System.Linq;
 using System.Timers;
 
+// TODO config file
+const string hostName = "127.0.0.1";
+const ushort port = 8554;
+const string fileName = "frag_bunny.mp4";
 const string userName = "admin";
 const string password = "password";
-const string hostName = "127.0.0.1";
-const string fileName = "frag_bunny.mp4";
-const ushort port = 8554;
 
 using (var server = new RTSPServer(port, userName, password))
 {
@@ -99,7 +100,7 @@ using (var server = new RTSPServer(port, userName, password))
         audioTimer = new Timer(audioSampleDuration * 1000 / audioSamplingRate);
         audioTimer.Elapsed += (s, e) =>
         {
-            server.FeedInAudioPacket((uint)(audioIndex * audioSampleDuration), SharpRTSPServer.AACTrack.AppendAUHeader(audioTrack[0][audioIndex++ % audioTrack[0].Count]));
+            server.FeedInAudioPacket((uint)(audioIndex * audioSampleDuration), audioTrack[0][audioIndex++ % audioTrack[0].Count]);
 
             if (audioIndex % audioTrack[0].Count == 0)
             {
