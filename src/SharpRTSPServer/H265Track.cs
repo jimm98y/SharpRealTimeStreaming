@@ -122,7 +122,7 @@ namespace SharpRTSPServer
             sdp.Append($"m=video 0 RTP/AVP {PayloadType}\n");
             sdp.Append($"a=control:trackID={ID}\n");
             sdp.Append($"a=rtpmap:{PayloadType} {Codec}/{VideoClock}\n");
-            sdp.Append($"a=fmtp:{PayloadType} sprop-vps=").Append(vps_str).Append("; sprop-sps=").Append(sps_str).Append("; sprop-pps=").Append(pps_str).Append("\n");
+            sdp.Append($"a=fmtp:{PayloadType} sprop-vps={vps_str}; sprop-sps={sps_str}; sprop-pps={pps_str}\n");
             return sdp;
         }
 

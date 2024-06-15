@@ -93,7 +93,7 @@ namespace SharpRTSPServer
         /// Ctor.
         /// </summary>
         /// <param name="profileIdc">H264 Profile IDC. Default value is 77.</param>
-        /// <param name="profileIop">H264 Profile IOP. Default value is 0.</param>
+        /// <param name="profileIop">H264 Profile IOP. Default value is 0. See https://www.rfc-editor.org/rfc/rfc6184#page-41.</param>
         /// <param name="level">H264 Level. Default value is 42.</param>
         /// <param name="clock">H264 clock. Default value is 90000.</param>
         public H264Track(int profileIdc = 77, int profileIop = 0, int level = 42, int clock = DEFAULT_CLOCK)
@@ -110,7 +110,7 @@ namespace SharpRTSPServer
         /// <param name="sps">Sequence Parameter Set (SPS).</param>
         /// <param name="pps">Picture Parameter Set (PPS).</param>
         /// <param name="profileIdc">H264 Profile IDC. Default value is 77.</param>
-        /// <param name="profileIop">H264 Profile IOP. Default value is 0.</param>
+        /// <param name="profileIop">H264 Profile IOP. Default value is 0. See https://www.rfc-editor.org/rfc/rfc6184#page-41.</param>
         /// <param name="level">H264 Level. Default value is 42.</param>
         /// <param name="clock">H264 clock. Default value is 90000.</param>
         public H264Track(byte[] sps, byte[] pps, int profileIdc = 77, int profileIop = 0, int level = 42, int clock = DEFAULT_CLOCK) : this(profileIdc, profileIop, level, clock)
@@ -144,17 +144,13 @@ namespace SharpRTSPServer
                                        ProfileIop.ToString("X2") +
                                        Level.ToString("X2");
 
-            // Make the Base64 SPS and PPS
-            // raw_sps has no 0x00 0x00 0x00 0x01 or 32 bit size header
-            // raw_pps has no 0x00 0x00 0x00 0x01 or 32 bit size header
             string spsStr = Convert.ToBase64String(SPS);
             string ppsStr = Convert.ToBase64String(PPS);
 
             sdp.Append($"m=video 0 RTP/AVP {PayloadType}\n");
             sdp.Append($"a=control:trackID={ID}\n");
             sdp.Append($"a=rtpmap:{PayloadType} {Codec}/{VideoClock}\n");
-            sdp.Append($"a=fmtp:{PayloadType} profile-level-id=").Append(profileLevelIdStr)
-                .Append("; sprop-parameter-sets=").Append(spsStr).Append(',').Append(ppsStr).Append("\n");
+            sdp.Append($"a=fmtp:{PayloadType} profile-level-id={profileLevelIdStr}; sprop-parameter-sets={spsStr},{ppsStr}\n");
             return sdp;
         }
 
