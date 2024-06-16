@@ -574,6 +574,7 @@ namespace SharpRTSPServer
                         }
                     }
 
+                    bool writeError = false;
                     // There could be more than 1 RTP packet (if the data is fragmented)
                     foreach (var rtpPacket in rtpPackets)
                     {
@@ -590,18 +591,34 @@ namespace SharpRTSPServer
                             // send the whole NAL. ** We could fragment the RTP packet into smaller chuncks that fit within the MTU
                             // Send to the IP address of the Client
                             // Send to the UDP Port the Client gave us in the SETUP command
-                            connection.Video.RtpChannel.WriteToDataPort(rtpPacket.Span);
+                            var channel = connection.Video.RtpChannel;
+                            if (channel != null)
+                            {
+                                channel.WriteToDataPort(rtpPacket.Span);
+                            }
+                            else
+                            {
+                                writeError = true;
+                            }
                         }
                         catch (Exception e)
                         {
-                            Console.WriteLine("UDP Write Exception " + e);
-                            Console.WriteLine("Error writing to listener " + connection.Listener.RemoteAdress);
-                            Console.WriteLine("Removing session " + connection.SessionId + " due to write error");
-                            RemoveSession(connection);
+                            _logger.LogWarning("UDP Write Exception " + e);
+                            writeError = true;
                             break; // exit out of foreach loop
                         }
                     }
-                    connection.Video.OctetCount += (uint)samples.Sum(nal => nal.Length); // QUESTION - Do I need to include the RTP header bytes/fragmenting bytes
+
+                    if (writeError)
+                    {
+                        _logger.LogWarning("Error writing to listener " + connection.Listener.RemoteAdress);
+                        _logger.LogWarning("Removing session " + connection.SessionId + " due to write error");
+                        RemoveSession(connection);
+                    }
+                    else
+                    {
+                        connection.Video.OctetCount += (uint)samples.Sum(nal => nal.Length); // QUESTION - Do I need to include the RTP header bytes/fragmenting bytes
+                    }
                 }
             }
 
@@ -642,7 +659,6 @@ namespace SharpRTSPServer
 
                     _logger.LogDebug("Sending audio session {sessionId} {TransportLogName} RTP timestamp={rtpTimestamp}. Sequence={sequenceNumber}",
                          connection.SessionId, TransportLogName(connection.Audio.RtpChannel), rtpTimestamp, connection.Audio.SequenceNumber);
-                    bool writeError = false;
 
                     if (connection.Audio.MustSendRtcpPacket)
                     {
@@ -652,6 +668,7 @@ namespace SharpRTSPServer
                         }
                     }
 
+                    bool writeError = false;
                     // There could be more than 1 RTP packet (if the data is fragmented)
                     foreach (var rtpPacket in rtpPackets)
                     {
@@ -665,24 +682,35 @@ namespace SharpRTSPServer
                         try
                         {
                             // send the whole RTP packet
-                            connection.Audio.RtpChannel.WriteToDataPort(rtpPacket.Span);
+                            var channel = connection.Audio.RtpChannel;
+                            if (channel != null)
+                            {
+                                channel.WriteToDataPort(rtpPacket.Span);
+                            }
+                            else
+                            {
+                                writeError = true;
+                            }
                         }
                         catch (Exception e)
                         {
                             _logger.LogWarning(e, "UDP Write Exception");
-                            _logger.LogWarning("Error writing to listener {address}", connection.Listener.RemoteAdress);
                             writeError = true;
+                            break;
                         }
                     }
 
                     if (writeError)
                     {
-                        Console.WriteLine("Removing session " + connection.SessionId + " due to write error");
+                        _logger.LogWarning("Error writing to listener {address}", connection.Listener.RemoteAdress);
+                        _logger.LogWarning("Removing session " + connection.SessionId + " due to write error");
                         RemoveSession(connection);
                     }
-
-                    connection.Audio.RtpPacketCount++;
-                    connection.Audio.OctetCount += (uint)samples.Sum(frame => frame.Length); // QUESTION - Do I need to include the RTP header bytes/fragmenting bytes
+                    else
+                    {
+                        connection.Audio.RtpPacketCount++;
+                        connection.Audio.OctetCount += (uint)samples.Sum(frame => frame.Length); // QUESTION - Do I need to include the RTP header bytes/fragmenting bytes
+                    }
                 }
             }
 
