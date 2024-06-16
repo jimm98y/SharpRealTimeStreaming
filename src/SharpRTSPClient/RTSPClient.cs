@@ -174,7 +174,7 @@ namespace SharpRTSPClient
                 _credentials = new NetworkCredential();
             }
 
-            // We can ask the RTSP server for Video, Audio or both. If we don't want audio we don't need to SETUP the audio channal or receive it
+            // We can ask the RTSP server for Video, Audio or both. If we don't want audio we don't need to SETUP the audio channel or receive it
             _clientWantsVideo = (mediaRequest is MediaRequest.VIDEO_ONLY || mediaRequest is MediaRequest.VIDEO_AND_AUDIO);
             _clientWantsAudio = (mediaRequest is MediaRequest.AUDIO_ONLY || mediaRequest is MediaRequest.VIDEO_AND_AUDIO);
 
