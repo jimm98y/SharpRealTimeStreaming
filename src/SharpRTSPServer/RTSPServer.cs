@@ -585,7 +585,7 @@ namespace SharpRTSPServer
                         // Add the specific SSRC for each transmission
                         RTPPacketUtil.WriteSSRC(rtpPacket.Span, connection.SSRC);
 
-                        Debug.Assert(connection.Video.RtpChannel != null, "If connection.video.rptChannel is null here the program did not handle well connection problem");
+                        //Debug.Assert(connection.Video.RtpChannel != null, "If connection.video.rptChannel is null here the program did not handle well connection problem");
                         try
                         {
                             // send the whole NAL. ** We could fragment the RTP packet into smaller chuncks that fit within the MTU
