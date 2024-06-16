@@ -110,6 +110,18 @@ namespace SharpRTSPClient
         /// </summary>
         public uint AudioSSRC { get; set; } = (uint)_rand.Next(20000, 29999);
 
+        static RTSPClient()
+        {
+            try
+            {
+                RtspUtils.RegisterUri();
+            }
+            catch(Exception ex)
+            {
+                if(Log.ErrorEnabled) Log.Error(ex.Message);
+            }
+        }
+
         /// <summary>
         /// Default ctor.
         /// </summary>
@@ -137,8 +149,6 @@ namespace SharpRTSPClient
         /// <param name="playbackSession">Playback session.</param>
         public void Connect(string url, RTPTransport rtpTransport, string username = null, string password = null, MediaRequest mediaRequest = MediaRequest.VIDEO_AND_AUDIO, bool playbackSession = false)
         {
-            RtspUtils.RegisterUri();
-
             _logger.LogDebug("Connecting to {url} ", url);
             _uri = new Uri(url);
 
