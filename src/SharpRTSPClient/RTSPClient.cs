@@ -442,7 +442,8 @@ namespace SharpRTSPClient
                         rtpPacket.SequenceNumber,
                         rtpPacket.Ssrc,
                         rtpPacket.Timestamp,
-                        rtpPacket.Version
+                        rtpPacket.Version,
+                        CalculatePayloadStart(rtpPacket)
                         )
                     );
 
@@ -465,6 +466,13 @@ namespace SharpRTSPClient
                     }
                 }
             }
+        }
+
+        private static int CalculatePayloadStart(RtpPacket rtpPacket)
+        {
+            // Note: e.PayloadSize includes also extensions and is incorrect for RTP forwarding,
+            //  we have to calculate the correct size using 12 + e.CsrcCount * 4
+            return 12 + rtpPacket.CsrcCount * 4;
         }
 
         private void AudioRtpDataReceived(object sender, RtspDataEventArgs e)
@@ -497,7 +505,8 @@ namespace SharpRTSPClient
                         rtpPacket.SequenceNumber,
                         rtpPacket.Ssrc,
                         rtpPacket.Timestamp,
-                        rtpPacket.Version
+                        rtpPacket.Version,
+                        CalculatePayloadStart(rtpPacket)
                         )
                    );
 
@@ -1297,6 +1306,7 @@ namespace SharpRTSPClient
         public uint Ssrc { get; }
         public uint Timestamp { get; }
         public int Version { get; }
+        public int PayloadStart { get; }
 
         public RawRtpDataEventArgs(
             ReadOnlyMemory<byte> data,
@@ -1310,7 +1320,8 @@ namespace SharpRTSPClient
             int sequenceNumber, 
             uint ssrc, 
             uint timestamp,
-            int version)
+            int version,
+            int payloadStart)
         {
             Data = data;
             CsrcCount = csrcCount;
@@ -1324,6 +1335,7 @@ namespace SharpRTSPClient
             Ssrc = ssrc;
             Timestamp = timestamp;
             Version = version;
+            PayloadStart = payloadStart;
         }
 
         public override string ToString()
