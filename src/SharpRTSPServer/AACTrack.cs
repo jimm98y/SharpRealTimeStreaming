@@ -9,17 +9,17 @@ namespace SharpRTSPServer
     /// <summary>
     /// AAC track.
     /// </summary>
-    public class AACTrack : ITrack
+    public class AACTrack : TrackBase
     {
         /// <summary>
         /// AAC Audio Codec name.
         /// </summary>
-        public string Codec => "mpeg4-generic";
+        public override string Codec => "mpeg4-generic";
 
         /// <summary>
         /// Track ID. Used to identify the track in the SDP.
         /// </summary>
-        public int ID { get; set; } = 1;
+        public override int ID { get; set; } = 1;
 
         /// <summary>
         /// Sampling rate.
@@ -39,14 +39,14 @@ namespace SharpRTSPServer
         /// <summary>
         /// Is the track ready?
         /// </summary>
-        public bool IsReady { get { return ConfigDescriptor != null && ConfigDescriptor.Length > 0; } }
+        public override bool IsReady { get { return ConfigDescriptor != null && ConfigDescriptor.Length > 0; } }
 
         private int _payloadType = -1;
 
         /// <summary>
         /// Payload type. AAC uses a dynamic payload type, which by default we calculate as 96 + track ID.
         /// </summary>
-        public int PayloadType
+        public override int PayloadType
         {
             get
             {
@@ -101,7 +101,7 @@ namespace SharpRTSPServer
         /// </summary>
         /// <param name="sdp">SDP <see cref="StringBuilder"/>.</param>
         /// <returns><see cref="StringBuilder"/>.</returns>
-        public StringBuilder BuildSDP(StringBuilder sdp)
+        public override StringBuilder BuildSDP(StringBuilder sdp)
         {
             sdp.Append($"m=audio 0 RTP/AVP {PayloadType}\n"); // <---- Payload Type 0 means G711 ULAW, 96+ means dynamic payload type
             sdp.Append($"a=control:trackID={ID}\n");
@@ -117,7 +117,7 @@ namespace SharpRTSPServer
         /// <param name="samples">An array of AAC fragments. By default single fragment is expected.</param>
         /// <param name="rtpTimestamp">RTP timestamp in the timescale of the track.</param>
         /// <returns>RTP packets.</returns>
-        public (List<Memory<byte>>, List<IMemoryOwner<byte>>) CreateRtpPackets(List<byte[]> samples, uint rtpTimestamp)
+        public override (List<Memory<byte>>, List<IMemoryOwner<byte>>) CreateRtpPackets(List<byte[]> samples, uint rtpTimestamp)
         {
             List<Memory<byte>> rtpPackets = new List<Memory<byte>>();
             List<IMemoryOwner<byte>> memoryOwners = new List<IMemoryOwner<byte>>();

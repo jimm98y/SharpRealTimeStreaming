@@ -26,7 +26,7 @@ namespace SharpRTSPServer
     /// <remarks>
     /// Stream with ffmpeg: ffmpeg.exe -re -stream_loop -1 -i frag_bunny.mp4 -vcodec copy -an -f rtp rtp://127.0.0.1:11111 -vn -acodec copy -f rtp rtp://127.0.0.1:11113
     /// </remarks>
-    public class RTSPServer : IDisposable
+    public class RTSPServer : IRtpSender, IDisposable
     {
         /// <summary>
         /// Dynamic RTP payload type.
@@ -40,12 +40,12 @@ namespace SharpRTSPServer
         /// <summary>
         /// Video track. Must be set before starting the server.
         /// </summary>
-        public ITrack VideoTrack { get; set; }
+        private ITrack VideoTrack;
 
         /// <summary>
         /// Audio track.
         /// </summary>
-        public ITrack AudioTrack { get; set; }
+        private ITrack AudioTrack;
 
         /// <summary>
         /// SSRC.
@@ -109,6 +109,24 @@ namespace SharpRTSPServer
             _serverListener = new TcpListener(IPAddress.Any, portNumber);
             _loggerFactory = loggerFactory;
             _logger = loggerFactory.CreateLogger<RTSPServer>();
+        }
+
+        public void AddVideoTrack(ITrack track)
+        {
+            if (track != null)
+            {
+                track.Sink = this;
+            }
+            this.VideoTrack = track;
+        }
+
+        public void AddAudioTrack(ITrack track)
+        {
+            if (track != null)
+            {
+                track.Sink = this;
+            }
+            this.AudioTrack = track;
         }
 
         /// <summary>
@@ -544,65 +562,17 @@ namespace SharpRTSPServer
             }
         }
 
-        /// <summary>
-        /// Feed in Raw video samples (for H264/H265 this expects NALUs).
-        /// </summary>
-        /// <param name="rtpTimestamp">Timestamp in the RTP timescale units.</param>
-        /// <param name="samples">Array of NALUs.</param>
-        public void FeedInRawVideoSamples(uint rtpTimestamp, List<byte[]> samples)
-        {
-            CheckTimeouts(out int currentRtspCount, out int currentRtspPlayCount);
-
-            if (currentRtspPlayCount == 0)
-                return;
-
-            // Build a list of 1 or more RTP packets
-            // The last packet will have the M bit set to '1'
-            (List<Memory<byte>> rtpPackets, List<IMemoryOwner<byte>> memoryOwners) = VideoTrack.CreateRtpPackets(samples, rtpTimestamp);
-
-            FeedInRawVideoRTP(rtpTimestamp, rtpPackets);
-
-            foreach (var owner in memoryOwners)
-            {
-                owner.Dispose();
-            }
-        }
-
-        /// <summary>
-        /// Feed in Raw audio samples (for AAC this expects a single frame).
-        /// </summary>
-        /// <param name="rtpTimestamp">Timestamp in the RTP timescale units.</param>
-        /// <param name="samples">Array of frames.</param>
-        public void FeedInRawAudioSamples(uint rtpTimestamp, List<byte[]> samples)
+        public bool CanAcceptNewSamples()
         {
             CheckTimeouts(out _, out int currentRtspPlayCount);
 
             if (currentRtspPlayCount == 0)
-                return;
+                return false;
 
-            // Build a list of 1 or more RTP packets
-            // The last packet will have the M bit set to '1'
-            (List<Memory<byte>> rtpPackets, List<IMemoryOwner<byte>> memoryOwners) = AudioTrack.CreateRtpPackets(samples, rtpTimestamp);
-
-            FeedInRawAudioRTP(rtpTimestamp, rtpPackets);
-
-            foreach (var owner in memoryOwners)
-            {
-                owner.Dispose();
-            }
+            return true;
         }
 
-        public void FeedInRawVideoRTP(uint rtpTimestamp, List<Memory<byte>> rtpPackets)
-        {
-            SendRTP(RTSPConnection.VIDEO, rtpTimestamp, rtpPackets);
-        }
-
-        public void FeedInRawAudioRTP(uint rtpTimestamp, List<Memory<byte>> rtpPackets)
-        {
-            SendRTP(RTSPConnection.AUDIO, rtpTimestamp, rtpPackets);
-        }
-
-        private void SendRTP(int streamType, uint rtpTimestamp, List<Memory<byte>> rtpPackets)
+        public void FeedInRawRTP(int streamType, uint rtpTimestamp, List<Memory<byte>> rtpPackets)
         {
             if (streamType != 0 && streamType != 1)
                 throw new ArgumentException("Invalid streamType! Video = 0, Audio = 1");
@@ -867,8 +837,16 @@ namespace SharpRTSPServer
         }
     }
 
+    public interface IRtpSender
+    {
+        void FeedInRawRTP(int streamType, uint rtpTimestamp, List<Memory<byte>> rtpPackets);
+        bool CanAcceptNewSamples();
+    }
+
     public interface ITrack
     {
+        IRtpSender Sink { get; set; }
+
         /// <summary>
         /// Codec name.
         /// </summary>
@@ -903,6 +881,8 @@ namespace SharpRTSPServer
         /// <param name="rtpTimestamp">RTP timestamp in the timescale of the track.</param>
         /// <returns>RTP packets.</returns>
         (List<Memory<byte>>, List<IMemoryOwner<byte>>) CreateRtpPackets(List<byte[]> samples, uint rtpTimestamp);
+        
+        void FeedInRawSamples(uint rtpTimestamp, List<byte[]> samples);
     }
 
     public class CustomLoggerFactory : ILoggerFactory

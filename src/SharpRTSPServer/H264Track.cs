@@ -8,12 +8,12 @@ namespace SharpRTSPServer
     /// <summary>
     /// H264 video track.
     /// </summary>
-    public class H264Track : ITrack
+    public class H264Track : TrackBase
     {
         /// <summary>
         /// H264 Video Codec name.
         /// </summary>
-        public string Codec => "H264";
+        public override string Codec => "H264";
 
         /// <summary>
         /// Default video track clock rate.
@@ -23,7 +23,7 @@ namespace SharpRTSPServer
         /// <summary>
         /// Track ID. Used to identify the track in the SDP.
         /// </summary>
-        public int ID { get; set; } = 0;
+        public override int ID { get; set; } = 0;
 
         /// <summary>
         /// H264 Profile IDC. Default value is 77 (Main Profile).
@@ -63,14 +63,14 @@ namespace SharpRTSPServer
         /// <summary>
         /// Is the track ready?
         /// </summary>
-        public bool IsReady { get { return SPS != null && PPS != null; } }
+        public override bool IsReady { get { return SPS != null && PPS != null; } }
 
         private int _payloadType = -1;
 
         /// <summary>
         /// Payload type. H264 uses a dynamic payload type, which by default we calculate as 96 + track ID.
         /// </summary>
-        public int PayloadType
+        public override int PayloadType
         {
             get 
             {
@@ -134,7 +134,7 @@ namespace SharpRTSPServer
         /// </summary>
         /// <param name="sdp">SDP <see cref="StringBuilder"/>.</param>
         /// <returns><see cref="StringBuilder"/>.</returns>
-        public StringBuilder BuildSDP(StringBuilder sdp)
+        public override StringBuilder BuildSDP(StringBuilder sdp)
         {
             // Make the profile-level-id
             // Eg a string of profile-level-id=42A01E is
@@ -160,7 +160,7 @@ namespace SharpRTSPServer
         /// <param name="samples">An array of H264 NALUs.</param>
         /// <param name="rtpTimestamp">RTP timestamp in the timescale of the track.</param>
         /// <returns>RTP packets.</returns>
-        public (List<Memory<byte>>, List<IMemoryOwner<byte>>) CreateRtpPackets(List<byte[]> samples, uint rtpTimestamp)
+        public override (List<Memory<byte>>, List<IMemoryOwner<byte>>) CreateRtpPackets(List<byte[]> samples, uint rtpTimestamp)
         {
             List<Memory<byte>> rtpPackets = new List<Memory<byte>>();
             List<IMemoryOwner<byte>> memoryOwners = new List<IMemoryOwner<byte>>();

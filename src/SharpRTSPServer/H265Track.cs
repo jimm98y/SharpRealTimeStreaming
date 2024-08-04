@@ -8,12 +8,12 @@ namespace SharpRTSPServer
     /// <summary>
     /// H265 video track.
     /// </summary>
-    public class H265Track : ITrack
+    public class H265Track : TrackBase
     {
         /// <summary>
         /// H265 Video Codec name.
         /// </summary>
-        public string Codec => "H265";
+        public override string Codec => "H265";
 
         /// <summary>
         /// Default video track clock rate.
@@ -23,7 +23,7 @@ namespace SharpRTSPServer
         /// <summary>
         /// Track ID. Used to identify the track in the SDP.
         /// </summary>
-        public int ID { get; set; } = 0;
+        public override int ID { get; set; } = 0;
 
         /// <summary>
         /// Video clock rate. Default value is 90000.
@@ -53,14 +53,14 @@ namespace SharpRTSPServer
         /// <summary>
         /// Is the track ready?
         /// </summary>
-        public bool IsReady { get { return VPS != null && SPS != null && PPS != null; } }
+        public override bool IsReady { get { return VPS != null && SPS != null && PPS != null; } }
 
         private int _payloadType = -1;
 
         /// <summary>
         /// Payload type. H264 uses a dynamic payload type, which by default we calculate as 96 + track ID.
         /// </summary>
-        public int PayloadType
+        public override int PayloadType
         {
             get
             {
@@ -113,7 +113,7 @@ namespace SharpRTSPServer
             this.PPS = pps;
         }
 
-        public StringBuilder BuildSDP(StringBuilder sdp)
+        public override StringBuilder BuildSDP(StringBuilder sdp)
         {
             string vps_str = Convert.ToBase64String(VPS);
             string sps_str = Convert.ToBase64String(SPS);
@@ -132,7 +132,7 @@ namespace SharpRTSPServer
         /// <param name="samples">An array of H265 NALUs.</param>
         /// <param name="rtpTimestamp">RTP timestamp in the timescale of the track.</param>
         /// <returns>RTP packets.</returns>
-        public (List<Memory<byte>>, List<IMemoryOwner<byte>>) CreateRtpPackets(List<byte[]> samples, uint rtpTimestamp)
+        public override (List<Memory<byte>>, List<IMemoryOwner<byte>>) CreateRtpPackets(List<byte[]> samples, uint rtpTimestamp)
         {
             List<Memory<byte>> rtpPackets = new List<Memory<byte>>();
             List<IMemoryOwner<byte>> memoryOwners = new List<IMemoryOwner<byte>>();
