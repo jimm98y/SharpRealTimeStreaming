@@ -64,6 +64,7 @@ namespace SharpRTSPServer
         private CancellationTokenSource _stopping;
         private Thread _listenTread;
         private int _sessionHandle = 1;
+        private string _sdp = null;
         private readonly NetworkCredential _credentials;
         private readonly Authentication _authentication;
 
@@ -496,6 +497,9 @@ namespace SharpRTSPServer
 
         private string GenerateSDP()
         {
+            if(!string.IsNullOrEmpty(_sdp))
+                return _sdp; // sdp
+
             StringBuilder sdp = new StringBuilder();
 
             // Generate the SDP
@@ -740,6 +744,11 @@ namespace SharpRTSPServer
                 StopListen();
                 _stopping?.Dispose();
             }
+        }
+
+        public void OverrideSDP(string sdp)
+        {
+            this._sdp = sdp;
         }
 
         #endregion // IDisposable

@@ -24,7 +24,7 @@ namespace SharpRTSPServer
 
         public abstract (List<Memory<byte>>, List<IMemoryOwner<byte>>) CreateRtpPackets(List<byte[]> samples, uint rtpTimestamp);
 
-        public void FeedInRawSamples(uint rtpTimestamp, List<byte[]> samples)
+        public virtual void FeedInRawSamples(uint rtpTimestamp, List<byte[]> samples)
         {
             if (Sink == null)
                 throw new InvalidOperationException("Sink is null!!!");
