@@ -9,6 +9,12 @@ using System.Threading.Tasks;
 
 namespace SharpRTSPServer
 {
+    public enum ProxyTrackType : int
+    {
+        Video = 0, 
+        Audio = 1
+    }
+
     public class ProxyTrack : TrackBase
     {
         public override string Codec => "PROXY";
@@ -27,9 +33,9 @@ namespace SharpRTSPServer
 
         public Uri Uri { get; }
 
-        public ProxyTrack(int id, string uri)
+        public ProxyTrack(ProxyTrackType type, string uri)
         {
-            this.ID = id;
+            this.ID = (int)type;
             this.Uri = new Uri(uri, UriKind.Absolute);
             Connect(this.Uri);
         }

@@ -7,6 +7,9 @@ Simple RTSP client that supports H264, H265 for video and AAC for audio.
 ## SharpRTSPServer
 Simple RTSP server that supports H264, H265 for video and AAC, PCMU and PCMA for audio. 
 
+## FFmpeg RTSP Server
+Sample RTSP server for ffmpeg RTP streams. Fully configurable in appsettings.json.
+
 ## Remarks
 Still work in progress, APIs are subject to change.
 
