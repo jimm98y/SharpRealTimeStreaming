@@ -7,6 +7,12 @@ namespace SharpRTSPServer
     {
         public const int RTP_VERSION = 2;
 
+        public static uint ReadRtpTimestamp(byte[] data)
+        {
+            uint rtpTimestamp = ((uint)data[4] << 24) + (uint)(data[5] << 16) + (uint)(data[6] << 8) + data[7];
+            return rtpTimestamp;
+        }
+
         public static void WriteHeader(
             Span<byte> rtpPacket,
             int rtpVersion,

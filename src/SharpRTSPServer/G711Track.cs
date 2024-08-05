@@ -8,17 +8,17 @@ namespace SharpRTSPServer
     /// <summary>
     /// G711 PCMU (U-LAW) track.
     /// </summary>
-    public class PCMUTrack : ITrack
+    public class PCMUTrack : TrackBase
     {
         /// <summary>
         /// PCMU Audio Codec name.
         /// </summary>
-        public string Codec => "PCMU";
+        public override string Codec => "PCMU";
 
         /// <summary>
         /// Track ID. Used to identify the track in the SDP.
         /// </summary>
-        public int ID { get; set; } = 1;
+        public override int ID { get; set; } = 1;
 
         /// <summary>
         /// Sampling rate.
@@ -33,19 +33,19 @@ namespace SharpRTSPServer
         /// <summary>
         /// Is the track ready?
         /// </summary>
-        public bool IsReady { get { return true; } }
+        public override bool IsReady { get { return true; } }
 
         /// <summary>
         /// Payload type. PCMU uses static payload type 0.
         /// </summary>
-        public int PayloadType { get; set; } = 0;
+        public override int PayloadType { get; set; } = 0;
 
         /// <summary>
         /// Build the SDP for this track.
         /// </summary>
         /// <param name="sdp">SDP <see cref="StringBuilder"/>.</param>
         /// <returns><see cref="StringBuilder"/>.</returns>
-        public StringBuilder BuildSDP(StringBuilder sdp)
+        public override StringBuilder BuildSDP(StringBuilder sdp)
         {
             sdp.Append($"m=audio 0 RTP/AVP {PayloadType}\n");
             sdp.Append($"a=control:trackID={ID}\n");
@@ -59,7 +59,7 @@ namespace SharpRTSPServer
         /// <param name="samples">An array of PCMU fragments. By default single fragment is expected.</param>
         /// <param name="rtpTimestamp">RTP timestamp in the timescale of the track.</param>
         /// <returns>RTP packets.</returns>
-        public (List<Memory<byte>>, List<IMemoryOwner<byte>>) CreateRtpPackets(List<byte[]> samples, uint rtpTimestamp)
+        public override (List<Memory<byte>>, List<IMemoryOwner<byte>>) CreateRtpPackets(List<byte[]> samples, uint rtpTimestamp)
         {
             List<Memory<byte>> rtpPackets = new List<Memory<byte>>();
             List<IMemoryOwner<byte>> memoryOwners = new List<IMemoryOwner<byte>>();
@@ -93,17 +93,17 @@ namespace SharpRTSPServer
     /// <summary>
     /// G711 PCMA (A-LAW) track.
     /// </summary>
-    public class PCMATrack : ITrack
+    public class PCMATrack : TrackBase
     {
         /// <summary>
         /// PCMA Audio Codec name.
         /// </summary>
-        public string Codec => "PCMA";
+        public override string Codec => "PCMA";
 
         /// <summary>
         /// Track ID. Used to identify the track in the SDP.
         /// </summary>
-        public int ID { get; set; } = 1;
+        public override int ID { get; set; } = 1;
 
         /// <summary>
         /// Sampling rate.
@@ -118,19 +118,19 @@ namespace SharpRTSPServer
         /// <summary>
         /// Is the track ready?
         /// </summary>
-        public bool IsReady { get { return true; } }
+        public override bool IsReady { get { return true; } }
 
         /// <summary>
         /// Payload type. PCMA uses static payload type 8.
         /// </summary>
-        public int PayloadType { get; set; } = 8;
+        public override int PayloadType { get; set; } = 8;
 
         /// <summary>
         /// Build the SDP for this track.
         /// </summary>
         /// <param name="sdp">SDP <see cref="StringBuilder"/>.</param>
         /// <returns><see cref="StringBuilder"/>.</returns>
-        public StringBuilder BuildSDP(StringBuilder sdp)
+        public override StringBuilder BuildSDP(StringBuilder sdp)
         {
             sdp.Append($"m=audio 0 RTP/AVP {PayloadType}\n");
             sdp.Append($"a=control:trackID={ID}\n");
@@ -144,7 +144,7 @@ namespace SharpRTSPServer
         /// <param name="samples">An array of PCMA fragments. By default single fragment is expected.</param>
         /// <param name="rtpTimestamp">RTP timestamp in the timescale of the track.</param>
         /// <returns>RTP packets.</returns>
-        public (List<Memory<byte>>, List<IMemoryOwner<byte>>) CreateRtpPackets(List<byte[]> samples, uint rtpTimestamp)
+        public override (List<Memory<byte>>, List<IMemoryOwner<byte>>) CreateRtpPackets(List<byte[]> samples, uint rtpTimestamp)
         {
             List<Memory<byte>> rtpPackets = new List<Memory<byte>>();
             List<IMemoryOwner<byte>> memoryOwners = new List<IMemoryOwner<byte>>();

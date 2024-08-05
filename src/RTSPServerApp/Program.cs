@@ -23,6 +23,9 @@ using (var server = new RTSPServer(port, userName, password))
     TrakBox videoTrackBox = null;
     double videoFrameRate = 0;
 
+    ITrack rtspVideoTrack = null;
+    ITrack rtspAudioTrack = null;
+
     // frag_bunny.mp4 audio is not playable in VLC on Windows 11 (works on MacOS)
     using (Stream fs = new BufferedStream(new FileStream(fileName, FileMode.Open, FileAccess.Read, FileShare.Read)))
     {
@@ -42,14 +45,16 @@ using (var server = new RTSPServer(port, userName, password))
                 if (h264VisualSample != null)
                 {
                     var avcC = (h264VisualSample.Children.First(x => x.Type == AvcConfigurationBox.TYPE) as AvcConfigurationBox).AvcDecoderConfigurationRecord;
-                    server.VideoTrack = new SharpRTSPServer.H264Track(avcC.AvcProfileIndication, 0, avcC.AvcLevelIndication);
+                    rtspVideoTrack = new SharpRTSPServer.H264Track(avcC.AvcProfileIndication, 0, avcC.AvcLevelIndication);
+                    server.AddVideoTrack(rtspVideoTrack);
                 }
                 else
                 {
                     var h265VisualSample = videoTrackBox.GetMdia().GetMinf().GetStbl().GetStsd().Children.FirstOrDefault(x => x.Type == VisualSampleEntryBox.TYPE6 || x.Type == VisualSampleEntryBox.TYPE7) as VisualSampleEntryBox;
                     if(h265VisualSample != null)
                     {
-                        server.VideoTrack = new SharpRTSPServer.H265Track();
+                        rtspVideoTrack = new SharpRTSPServer.H265Track();
+                        server.AddVideoTrack(rtspVideoTrack);
                     }
                     else
                     {
@@ -67,7 +72,8 @@ using (var server = new RTSPServer(port, userName, password))
                 {
                     var audioConfigDescriptor = audioSampleEntry.GetAudioSpecificConfigDescriptor();
                     int audioSamplingRate = audioConfigDescriptor.GetSamplingFrequency();
-                    server.AudioTrack = new SharpRTSPServer.AACTrack(await audioConfigDescriptor.ToBytes(), audioSamplingRate, audioConfigDescriptor.ChannelConfiguration);
+                    rtspAudioTrack = new SharpRTSPServer.AACTrack(await audioConfigDescriptor.ToBytes(), audioSamplingRate, audioConfigDescriptor.ChannelConfiguration);
+                    server.AddAudioTrack(rtspAudioTrack);
                 }
                 else
                 { 
@@ -92,18 +98,18 @@ using (var server = new RTSPServer(port, userName, password))
         {
             if (videoIndex == 0)
             {
-                if (server.VideoTrack is SharpRTSPServer.H264Track h264VideoTrack)
+                if (rtspVideoTrack is SharpRTSPServer.H264Track h264VideoTrack)
                 {
                     h264VideoTrack.SetParameterSets(videoTrack[0][0], videoTrack[0][1]);
                 }
-                else if (server.VideoTrack is SharpRTSPServer.H265Track h265VideoTrack)
+                else if (rtspVideoTrack is SharpRTSPServer.H265Track h265VideoTrack)
                 {
                     h265VideoTrack.SetParameterSets(videoTrack[0][0], videoTrack[0][1], videoTrack[0][2]);
                 }
                 videoIndex++;
             }
 
-            server.FeedInRawVideoSamples((uint)(videoIndex * videoSampleDuration), (List<byte[]>)videoTrack[videoIndex++ % videoTrack.Count]);
+            rtspVideoTrack.FeedInRawSamples((uint)(videoIndex * videoSampleDuration), (List<byte[]>)videoTrack[videoIndex++ % videoTrack.Count]);
 
             if (videoIndex % videoTrack.Count == 0)
             {
@@ -116,10 +122,10 @@ using (var server = new RTSPServer(port, userName, password))
     {
         var audioSampleDuration = SharpMp4.AACTrack.AAC_SAMPLE_SIZE;
         var audioTrack = parsedMDAT[audioTrackId];
-        audioTimer = new Timer(audioSampleDuration * 1000 / (server.AudioTrack as SharpRTSPServer.AACTrack).SamplingRate);
+        audioTimer = new Timer(audioSampleDuration * 1000 / (rtspAudioTrack as SharpRTSPServer.AACTrack).SamplingRate);
         audioTimer.Elapsed += (s, e) =>
         {
-            server.FeedInRawAudioSamples((uint)(audioIndex * audioSampleDuration), new List<byte[]>() { audioTrack[0][audioIndex++ % audioTrack[0].Count] });
+            rtspAudioTrack.FeedInRawSamples((uint)(audioIndex * audioSampleDuration), new List<byte[]>() { audioTrack[0][audioIndex++ % audioTrack[0].Count] });
 
             if (audioIndex % audioTrack[0].Count == 0)
             {
