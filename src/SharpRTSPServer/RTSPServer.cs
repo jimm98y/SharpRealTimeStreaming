@@ -1,11 +1,13 @@
 ﻿using Microsoft.Extensions.Logging;
 using Rtsp;
 using Rtsp.Messages;
+using Rtsp.Sdp;
 using System;
 using System.Buffers;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.Contracts;
+using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
@@ -746,8 +748,38 @@ namespace SharpRTSPServer
             }
         }
 
-        public void OverrideSDP(string sdp)
+        public void OverrideSDP(string sdp, bool mungleSDP = true)
         {
+            if (mungleSDP)
+            {
+                if (!sdp.Contains("a=control:"))
+                {
+                    StringBuilder builder = new StringBuilder();
+                    int mediaIndex = 0;
+
+                    // we have to fill in the trackID to identify the session in RTSP
+                    using (var textReader = new StringReader(sdp))
+                    {
+                        while(true)
+                        {
+                            string line = textReader.ReadLine();
+
+                            if (line == null)
+                                break;
+
+                            builder.AppendLine(line);
+
+                            if(line.StartsWith("m="))
+                            {
+                                builder.AppendLine($"a=control:trackID={mediaIndex++}");
+                            }
+                        }
+                    }
+
+                    sdp = builder.ToString();
+                }
+            }
+
             this._sdp = sdp;
         }
 

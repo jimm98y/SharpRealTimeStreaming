@@ -14,23 +14,6 @@ using (var server = new RTSPServer(port, userName, password))
     server.AddVideoTrack(new ProxyTrack(0, "rtp://127.0.0.1:11111"));
     server.AddAudioTrack(new ProxyTrack(1, "rtp://127.0.0.1:11113"));
     // original
-    //string sdp =
-    //    "v=0\r\n" +
-    //    "o=- 0 0 IN IP4 127.0.0.1\r\n" +
-    //    "s=No Name\r\n" +
-    //    "t=0 0\r\n" +
-    //    "a=tool:libavformat 60.3.100\r\n" +
-    //    "m=video 11111 RTP/AVP 96\r\n" +
-    //    "c=IN IP4 127.0.0.1\r\n" +
-    //    "b=AS:587\r\n" +
-    //    "a=rtpmap:96 H264/90000\r\n" +
-    //    "a=fmtp:96 packetization-mode=1; sprop-parameter-sets=Z2QAHqzZQKAv+WagwCDW4AAAAwAgAAAGAeLFssA=,aOvjyyLA; profile-level-id=64001E\r\n" +
-    //    "m=audio 11113 RTP/AVP 97\r\n" +
-    //    "c=IN IP4 127.0.0.1\r\n" +
-    //    "b=AS:69\r\n" +
-    //    "a=rtpmap:97 MPEG4-GENERIC/44100/1\r\n" +
-    //    "a=fmtp:97 profile-level-id=1;mode=AAC-hbr;sizelength=13;indexlength=3;indexdeltalength=3; config=120856E500\r\n\r\n";
-
     string sdp =
         "v=0\r\n" +
         "o=- 0 0 IN IP4 127.0.0.1\r\n" +
@@ -38,19 +21,17 @@ using (var server = new RTSPServer(port, userName, password))
         "t=0 0\r\n" +
         "a=tool:libavformat 60.3.100\r\n" +
         "m=video 11111 RTP/AVP 96\r\n" +
-        "a=control:trackID=0\n" + // TODO: add this
         "c=IN IP4 127.0.0.1\r\n" +
         "b=AS:587\r\n" +
         "a=rtpmap:96 H264/90000\r\n" +
         "a=fmtp:96 packetization-mode=1; sprop-parameter-sets=Z2QAHqzZQKAv+WagwCDW4AAAAwAgAAAGAeLFssA=,aOvjyyLA; profile-level-id=64001E\r\n" +
         "m=audio 11113 RTP/AVP 97\r\n" +
-        "a=control:trackID=1\n" + // TODO: add this
         "c=IN IP4 127.0.0.1\r\n" +
         "b=AS:69\r\n" +
         "a=rtpmap:97 MPEG4-GENERIC/44100/1\r\n" +
-        "a=fmtp:97 profile-level-id=1;mode=AAC-hbr;sizelength=13;indexlength=3;indexdeltalength=3; config=120856E500\r\n\r\n";
+        "a=fmtp:97 profile-level-id=1;mode=AAC-hbr;sizelength=13;indexlength=3;indexdeltalength=3; config=120856E500\r\n\r\n";    
 
-    server.OverrideSDP(sdp);
+    server.OverrideSDP(sdp, true);
 
     try
     {
