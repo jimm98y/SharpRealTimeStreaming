@@ -513,7 +513,7 @@ namespace SharpRTSPServer
             sdp.Append("c=IN IP4 0.0.0.0\n");
 
             // VIDEO
-            VideoTrack.BuildSDP(sdp);
+            VideoTrack?.BuildSDP(sdp);
 
             // AUDIO
             AudioTrack?.BuildSDP(sdp);
@@ -745,6 +745,18 @@ namespace SharpRTSPServer
             {
                 StopListen();
                 _stopping?.Dispose();
+
+                if(VideoTrack is IDisposable disposableVideoTrack)
+                {
+                    disposableVideoTrack.Dispose();
+                    VideoTrack = null;
+                }
+
+                if (AudioTrack is IDisposable disposableAudioTrack)
+                {
+                    disposableAudioTrack.Dispose();
+                    AudioTrack = null;
+                }
             }
         }
 
@@ -826,9 +838,6 @@ namespace SharpRTSPServer
         /// </summary>
         public class RTSPConnection
         {
-            public const int VIDEO = 0;
-            public const int AUDIO = 1;
-
             /// <summary>
             /// RTSP conneciton listener.
             /// </summary>
@@ -855,12 +864,12 @@ namespace SharpRTSPServer
             /// <summary>
             /// Video stream.
             /// </summary>
-            public RTPStream Video { get { return Streams[0]; } }
+            public RTPStream Video { get { return Streams[(int)TrackType.Video]; } }
 
             /// <summary>
             /// Audio stream.
             /// </summary>
-            public RTPStream Audio { get { return Streams[1]; } }
+            public RTPStream Audio { get { return Streams[(int)TrackType.Audio]; } }
 
             public RTPStream[] Streams { get; } = new RTPStream[]
             {
@@ -1045,5 +1054,11 @@ namespace SharpRTSPServer
             return Convert.ToHexString(data);
 #endif
         }
+    }
+
+    public enum TrackType : int
+    {
+        Video = 0,
+        Audio = 1
     }
 }

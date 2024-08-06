@@ -9,13 +9,7 @@ using System.Threading.Tasks;
 
 namespace SharpRTSPServer
 {
-    public enum ProxyTrackType : int
-    {
-        Video = 0, 
-        Audio = 1
-    }
-
-    public class ProxyTrack : TrackBase
+    public class ProxyTrack : TrackBase, IDisposable
     {
         public override string Codec => "PROXY";
 
@@ -23,6 +17,8 @@ namespace SharpRTSPServer
         public override int PayloadType { get; set; }
 
         private bool _isReady = false;
+        private bool _disposedValue;
+
         public override bool IsReady
         { 
             get 
@@ -33,7 +29,7 @@ namespace SharpRTSPServer
 
         public Uri Uri { get; }
 
-        public ProxyTrack(ProxyTrackType type, string uri)
+        public ProxyTrack(TrackType type, string uri)
         {
             this.ID = (int)type;
             this.Uri = new Uri(uri, UriKind.Absolute);
@@ -59,25 +55,53 @@ namespace SharpRTSPServer
         {
             await Task.Run(() =>
             {
-                UdpClient udpClient = new UdpClient(uri.Port);
-                IPEndPoint remoteEndPoint = new IPEndPoint(IPAddress.Parse(uri.Host), 0);
-                _isReady = true;
-
-                while (true)
+                try
                 {
-                    try
+                    using (UdpClient udpClient = new UdpClient(uri.Port))
                     {
-                        byte[] rtp = udpClient.Receive(ref remoteEndPoint);
-                        uint rtpTimestamp = RTPPacketUtil.ReadRtpTimestamp(rtp);
-                        Sink.FeedInRawRTP(ID, rtpTimestamp, new List<Memory<byte>>() { rtp });
-                        //Debug.WriteLine($"This message was sent from {remoteEndPoint.Address} on their port number {remoteEndPoint.Port}");
-                    }
-                    catch (Exception e)
-                    {
-                        Debug.WriteLine(e.ToString());
+                        IPEndPoint remoteEndPoint = new IPEndPoint(IPAddress.Parse(uri.Host), 0);
+                        _isReady = true;
+
+                        while (_isReady)
+                        {
+                            try
+                            {
+                                byte[] rtp = udpClient.Receive(ref remoteEndPoint);
+                                uint rtpTimestamp = RTPPacketUtil.ReadTS(rtp);
+                                Sink.FeedInRawRTP(ID, rtpTimestamp, new List<Memory<byte>>() { rtp });
+                            }
+                            catch (Exception e)
+                            {
+                                Debug.WriteLine(e.ToString());
+                            }
+                        }
                     }
                 }
+                catch(Exception ee)
+                {
+                    Debug.WriteLine(ee.ToString());
+                    _isReady = false;
+                }
             });
+        }
+
+        protected virtual void Dispose(bool disposing)
+        {
+            if (!_disposedValue)
+            {
+                if(disposing)
+                {
+                    _isReady = false;
+                }
+
+                _disposedValue = true;
+            }
+        }
+
+        public void Dispose()
+        {
+            Dispose(disposing: true);
+            GC.SuppressFinalize(this);
         }
     }
 }

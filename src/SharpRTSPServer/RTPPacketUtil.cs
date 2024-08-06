@@ -7,12 +7,6 @@ namespace SharpRTSPServer
     {
         public const int RTP_VERSION = 2;
 
-        public static uint ReadRtpTimestamp(byte[] data)
-        {
-            uint rtpTimestamp = ((uint)data[4] << 24) + (uint)(data[5] << 16) + (uint)(data[6] << 8) + data[7];
-            return rtpTimestamp;
-        }
-
         public static void WriteHeader(
             Span<byte> rtpPacket,
             int rtpVersion,
@@ -31,14 +25,20 @@ namespace SharpRTSPServer
             BinaryPrimitives.WriteUInt16BigEndian(rtpPacket.Slice(2), sequenceId);
         }
 
-        public static void WriteTS(Span<byte> rtp_packet, uint ts)
-        {
-            BinaryPrimitives.WriteUInt32BigEndian(rtp_packet.Slice(4), ts);
-        }
-
         public static void WriteSSRC(Span<byte> rtp_packet, uint ssrc)
         {
             BinaryPrimitives.WriteUInt32BigEndian(rtp_packet.Slice(8), ssrc);
+        }
+
+        public static uint ReadTS(byte[] data)
+        {
+            uint rtpTimestamp = ((uint)data[4] << 24) + (uint)(data[5] << 16) + (uint)(data[6] << 8) + data[7];
+            return rtpTimestamp;
+        }
+
+        public static void WriteTS(Span<byte> rtp_packet, uint ts)
+        {
+            BinaryPrimitives.WriteUInt32BigEndian(rtp_packet.Slice(4), ts);
         }
     }
 }

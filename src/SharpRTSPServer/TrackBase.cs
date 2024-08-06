@@ -32,7 +32,7 @@ namespace SharpRTSPServer
             if (!Sink.CanAcceptNewSamples())
                 return;
 
-            if (ID != 0 && ID != 1)
+            if (ID != (int)TrackType.Video && ID != (int)TrackType.Audio)
                 throw new ArgumentOutOfRangeException("ID must be 0 for video or 1 for audio");
 
             (List<Memory<byte>> rtpPackets, List<IMemoryOwner<byte>> memoryOwners) = CreateRtpPackets(samples, rtpTimestamp);

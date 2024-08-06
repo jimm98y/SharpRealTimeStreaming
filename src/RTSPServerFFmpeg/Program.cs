@@ -59,10 +59,10 @@ if (string.IsNullOrEmpty(videoUri) && string.IsNullOrEmpty(audioUri))
 using (var server = new RTSPServer(port, userName, password))
 {
     if (!string.IsNullOrEmpty(videoUri))
-        server.AddVideoTrack(new ProxyTrack(ProxyTrackType.Video, videoUri));
+        server.AddVideoTrack(new ProxyTrack(TrackType.Video, videoUri));
 
     if (!string.IsNullOrEmpty(audioUri))
-        server.AddAudioTrack(new ProxyTrack(ProxyTrackType.Audio, audioUri));
+        server.AddAudioTrack(new ProxyTrack(TrackType.Audio, audioUri));
 
     server.OverrideSDP(sdp, true);
 
