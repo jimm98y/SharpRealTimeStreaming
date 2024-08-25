@@ -1,10 +1,14 @@
 ﻿using Microsoft.Extensions.Configuration;
 using SharpRTSPServer;
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Net;
+using System.Net.Sockets;
 using System.Text;
 using System.Threading;
+using System.Threading.Tasks;
 
 IConfiguration config = new ConfigurationBuilder().AddJsonFile("appsettings.json").Build();
 string hostName = config["HostName"];
@@ -58,35 +62,88 @@ if (string.IsNullOrEmpty(videoUri) && string.IsNullOrEmpty(audioUri))
 
 using (var server = new RTSPServer(port, userName, password))
 {
-    if (!string.IsNullOrEmpty(videoUri))
-        server.AddVideoTrack(new ProxyTrack(TrackType.Video, videoUri));
-
-    if (!string.IsNullOrEmpty(audioUri))
-        server.AddAudioTrack(new ProxyTrack(TrackType.Audio, audioUri));
-
-    server.OverrideSDP(sdp, true);
-
-    try
+    using (CancellationTokenSource cts = new CancellationTokenSource())
     {
-        server.StartListen();
-    }
-    catch (Exception ex)
-    {
-        Console.WriteLine(ex.ToString());
-    }
+        ProxyTrack videoTrack = null;
+        ProxyTrack audioTrack = null;
+        Task videoTask = null;
+        Task audioTask = null;
 
-    Console.WriteLine($"RTSP URL is rtsp://{userName}:{password}@{hostName}:{port}");
+        if (!string.IsNullOrEmpty(videoUri))
+        {
+            videoTrack = new ProxyTrack(TrackType.Video);
+            videoTask = RunUdpClient(videoTrack, new Uri(videoUri, UriKind.Absolute), cts.Token);
+            server.AddVideoTrack(videoTrack);
+        }
 
-    Console.WriteLine("Press any key to exit");
-    while (!Console.KeyAvailable)
-    {
-        Thread.Sleep(250); 
-    }
+        if (!string.IsNullOrEmpty(audioUri))
+        {
+            audioTrack = new ProxyTrack(TrackType.Audio);
+            audioTask = RunUdpClient(audioTrack, new Uri(audioUri, UriKind.Absolute), cts.Token);
+            server.AddAudioTrack(audioTrack);
+        }
 
-    if (process != null)
-    {
-        process.Kill();
+        server.OverrideSDP(sdp, true);
+
+        videoTrack?.Start();
+        audioTrack?.Start();
+
+        try
+        {
+            server.StartListen();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine(ex.ToString());
+        }
+
+        Console.WriteLine($"RTSP URL is rtsp://{userName}:{password}@{hostName}:{port}");
+
+        Console.WriteLine("Press any key to exit");
+        while (!Console.KeyAvailable)
+        {
+            Thread.Sleep(250);
+        }
+
+        await cts.CancelAsync();
+
+        if (process != null)
+        {
+            process.Kill();
+        }
     }
+}
+
+Task RunUdpClient(ProxyTrack track, Uri uri, CancellationToken cancellationToken)
+{
+    return Task.Run(() =>
+    {
+        try
+        {
+            using (UdpClient udpClient = new UdpClient(uri.Port))
+            {
+                IPEndPoint remoteEndPoint = new IPEndPoint(IPAddress.Parse(uri.Host), 0);
+
+                while (!cancellationToken.IsCancellationRequested)
+                {
+                    try
+                    {
+                        byte[] rtp = udpClient.Receive(ref remoteEndPoint);
+                        uint rtpTimestamp = RTPPacketUtil.ReadTS(rtp);
+                        track.FeedInRawSamples(rtpTimestamp, new List<byte[]>() { rtp });
+                    }
+                    catch (Exception e)
+                    {
+                        Debug.WriteLine(e.ToString());
+                    }
+                }
+            }
+        }
+        catch (Exception ee)
+        {
+            Debug.WriteLine(ee.ToString());
+        }
+    }, cancellationToken);
 }
 
 void Process_OutputDataReceived(object sender, DataReceivedEventArgs e)

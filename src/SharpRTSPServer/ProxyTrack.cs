@@ -1,11 +1,7 @@
 ﻿using System;
 using System.Buffers;
 using System.Collections.Generic;
-using System.Diagnostics;
-using System.Net;
-using System.Net.Sockets;
 using System.Text;
-using System.Threading.Tasks;
 
 namespace SharpRTSPServer
 {
@@ -29,11 +25,9 @@ namespace SharpRTSPServer
 
         public Uri Uri { get; }
 
-        public ProxyTrack(TrackType type, string uri)
+        public ProxyTrack(TrackType type)
         {
             this.ID = (int)type;
-            this.Uri = new Uri(uri, UriKind.Absolute);
-            Connect(this.Uri);
         }
 
         public override StringBuilder BuildSDP(StringBuilder sdp)
@@ -41,48 +35,21 @@ namespace SharpRTSPServer
             throw new NotImplementedException();
         }
 
+        public void Start()
+        {
+            _isReady = true;
+        }
+
         public override (List<Memory<byte>>, List<IMemoryOwner<byte>>) CreateRtpPackets(List<byte[]> samples, uint rtpTimestamp)
         {
-            throw new NotImplementedException();
-        }
-
-        public override void FeedInRawSamples(uint rtpTimestamp, List<byte[]> samples)
-        {
-            throw new InvalidOperationException("Proxy cannot feed in any samples!");
-        }
-
-        private async void Connect(Uri uri)
-        {
-            await Task.Run(() =>
-            {
-                try
-                {
-                    using (UdpClient udpClient = new UdpClient(uri.Port))
-                    {
-                        IPEndPoint remoteEndPoint = new IPEndPoint(IPAddress.Parse(uri.Host), 0);
-                        _isReady = true;
-
-                        while (_isReady)
-                        {
-                            try
-                            {
-                                byte[] rtp = udpClient.Receive(ref remoteEndPoint);
-                                uint rtpTimestamp = RTPPacketUtil.ReadTS(rtp);
-                                Sink.FeedInRawRTP(ID, rtpTimestamp, new List<Memory<byte>>() { rtp });
-                            }
-                            catch (Exception e)
-                            {
-                                Debug.WriteLine(e.ToString());
-                            }
-                        }
-                    }
-                }
-                catch(Exception ee)
-                {
-                    Debug.WriteLine(ee.ToString());
-                    _isReady = false;
-                }
-            });
+            List<Memory<byte>> rtpPackets = new List<Memory<byte>>();
+            List<IMemoryOwner<byte>> memoryOwners = new List<IMemoryOwner<byte>>();
+            var owner = MemoryPool<byte>.Shared.Rent(samples[0].Length);
+            memoryOwners.Add(owner);
+            var rtpPacket = owner.Memory.Slice(0, samples[0].Length);
+            MemoryExtensions.CopyTo(samples[0], rtpPacket);
+            rtpPackets.Add(rtpPacket);
+            return (rtpPackets, memoryOwners);
         }
 
         protected virtual void Dispose(bool disposing)
