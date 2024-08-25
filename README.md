@@ -10,6 +10,9 @@ Simple RTSP server that supports H264, H265 for video and AAC, PCMU and PCMA for
 ## FFmpeg RTSP Server
 Sample RTSP server for ffmpeg RTP streams. Fully configurable in appsettings.json.
 
+## Pcap RTSP Server
+PoC of re-playing RTSP from a Wireshark PcapNg file. 
+
 ## Remarks
 Still work in progress, APIs are subject to change.
 
