@@ -185,11 +185,11 @@ namespace SharpRTSPServer
             }
             catch (SocketException eex)
             {
-                _logger.LogWarning("Got an error listening, I have to handle the stopping which also throw an error", eex);
+                _logger.LogWarning("Got an error listening, I have to handle the stopping which also throw an error: {eex}", eex);
             }
             catch (Exception ex)
             {
-                _logger.LogError("Got an error listening...", ex);
+                _logger.LogError("Got an error listening... {ex}", ex);
                 throw;
             }
         }
