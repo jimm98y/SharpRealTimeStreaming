@@ -117,20 +117,19 @@ namespace SharpRTSPServer
         /// <param name="samples">An array of AAC fragments. By default single fragment is expected.</param>
         /// <param name="rtpTimestamp">RTP timestamp in the timescale of the track.</param>
         /// <returns>RTP packets.</returns>
-        public override (List<Memory<byte>>, List<IMemoryOwner<byte>>) CreateRtpPackets(List<byte[]> samples, uint rtpTimestamp)
+        public override List<IMemoryOwner<byte>> CreateRtpPackets(ReadOnlySequence<byte> samples, uint rtpTimestamp)
         {
-            List<Memory<byte>> rtpPackets = new List<Memory<byte>>();
             List<IMemoryOwner<byte>> memoryOwners = new List<IMemoryOwner<byte>>();
 
-            for (int i = 0; i < samples.Count; i++)
+            foreach (var sample in samples)
             {
                 // append AU header (required for AAC)
-                var audioPacket = AppendAUHeader(samples[i]);
+                var audioPacket = AppendAUHeader(sample.Span);
 
                 // Put the whole Audio Packet into one RTP packet.
                 // 12 is header size when there are no CSRCs or extensions
                 var size = 12 + audioPacket.Length;
-                var owner = MemoryPool<byte>.Shared.Rent(size);
+                var owner = AdjustedSizeMemoryOwner.Rent(size);
                 memoryOwners.Add(owner);
 
                 var rtpPacket = owner.Memory.Slice(0, size);
@@ -148,22 +147,21 @@ namespace SharpRTSPServer
 
                 // Now append the audio packet
                 audioPacket.CopyTo(rtpPacket.Slice(12));
-
-                rtpPackets.Add(rtpPacket);
             }
 
-            return (rtpPackets, memoryOwners);
+            return memoryOwners;
         }
 
-        private static byte[] AppendAUHeader(byte[] frame)
+        private static byte[] AppendAUHeader(ReadOnlySpan<byte> frame)
         {
             short frameLen = (short)(frame.Length << 3);
-            byte[] header = new byte[4];
+            byte[] header = new byte[4 + frame.Length];
             header[0] = 0x00;
             header[1] = 0x10; // 16 bits size of the header
             header[2] = (byte)((frameLen >> 8) & 0xFF);
             header[3] = (byte)(frameLen & 0xFF);
-            return header.Concat(frame).ToArray();
+            frame.CopyTo(header.AsSpan(4));
+            return header;
         }
 
         private static int GetAACLevel(int samplingFrequency, int channelConfiguration)

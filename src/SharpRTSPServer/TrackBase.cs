@@ -22,9 +22,9 @@ namespace SharpRTSPServer
 
         public abstract StringBuilder BuildSDP(StringBuilder sdp);
 
-        public abstract (List<Memory<byte>>, List<IMemoryOwner<byte>>) CreateRtpPackets(List<byte[]> samples, uint rtpTimestamp);
+        public abstract List<IMemoryOwner<byte>> CreateRtpPackets(ReadOnlySequence<byte> samples, uint rtpTimestamp);
 
-        public virtual void FeedInRawSamples(uint rtpTimestamp, List<byte[]> samples)
+        public virtual void FeedInRawSamples(uint rtpTimestamp, ReadOnlySequence<byte> samples)
         {
             if (Sink == null)
                 throw new InvalidOperationException("Sink is null!!!");
@@ -35,9 +35,9 @@ namespace SharpRTSPServer
             if (ID != (int)TrackType.Video && ID != (int)TrackType.Audio)
                 throw new ArgumentOutOfRangeException("ID must be 0 for video or 1 for audio");
 
-            (List<Memory<byte>> rtpPackets, List<IMemoryOwner<byte>> memoryOwners) = CreateRtpPackets(samples, rtpTimestamp);
+            var memoryOwners = CreateRtpPackets(samples, rtpTimestamp);
 
-            Sink.FeedInRawRTP(ID, rtpTimestamp, rtpPackets);
+            Sink.FeedInRawRTP(ID, rtpTimestamp, memoryOwners);
 
             foreach (var owner in memoryOwners)
             {

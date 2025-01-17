@@ -30,7 +30,7 @@ namespace SharpRTSPServer
             BinaryPrimitives.WriteUInt32BigEndian(rtp_packet.Slice(8), ssrc);
         }
 
-        public static uint ReadTS(byte[] data)
+        public static uint ReadTS(ReadOnlySpan<byte> data)
         {
             uint rtpTimestamp = ((uint)data[4] << 24) + (uint)(data[5] << 16) + (uint)(data[6] << 8) + data[7];
             return rtpTimestamp;

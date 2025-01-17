@@ -2,6 +2,7 @@
 using SharpMp4;
 using SharpRTSPServer;
 using System;
+using System.Buffers;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -51,7 +52,7 @@ using (var server = new RTSPServer(port, userName, password))
                 else
                 {
                     var h265VisualSample = videoTrackBox.GetMdia().GetMinf().GetStbl().GetStsd().Children.FirstOrDefault(x => x.Type == VisualSampleEntryBox.TYPE6 || x.Type == VisualSampleEntryBox.TYPE7) as VisualSampleEntryBox;
-                    if(h265VisualSample != null)
+                    if (h265VisualSample != null)
                     {
                         rtspVideoTrack = new SharpRTSPServer.H265Track();
                         server.AddVideoTrack(rtspVideoTrack);
@@ -60,9 +61,9 @@ using (var server = new RTSPServer(port, userName, password))
                     {
                         throw new NotSupportedException("No supported video found!");
                     }
-                }                                
+                }
             }
-            
+
             if (audioTrackBox != null)
             {
                 audioTrackId = fmp4.FindAudioTrackID().First();
@@ -76,7 +77,7 @@ using (var server = new RTSPServer(port, userName, password))
                     server.AddAudioTrack(rtspAudioTrack);
                 }
                 else
-                { 
+                {
                     // unsupported audio
                 }
             }
@@ -92,7 +93,7 @@ using (var server = new RTSPServer(port, userName, password))
     {
         var videoSamplingRate = SharpRTSPServer.H264Track.DEFAULT_CLOCK;
         var videoSampleDuration = videoSamplingRate / videoFrameRate;
-        var videoTrack = parsedMDAT[videoTrackId];        
+        var videoTrack = parsedMDAT[videoTrackId];
         videoTimer = new Timer(videoSampleDuration * 1000 / videoSamplingRate);
         videoTimer.Elapsed += (s, e) =>
         {
@@ -109,7 +110,7 @@ using (var server = new RTSPServer(port, userName, password))
                 videoIndex++;
             }
 
-            rtspVideoTrack.FeedInRawSamples((uint)(videoIndex * videoSampleDuration), (List<byte[]>)videoTrack[videoIndex++ % videoTrack.Count]);
+            rtspVideoTrack.FeedInRawSamples((uint)(videoIndex * videoSampleDuration), CreateReadOnlySequence(videoTrack[videoIndex++ % videoTrack.Count]));
 
             if (videoIndex % videoTrack.Count == 0)
             {
@@ -125,7 +126,7 @@ using (var server = new RTSPServer(port, userName, password))
         audioTimer = new Timer(audioSampleDuration * 1000 / (rtspAudioTrack as SharpRTSPServer.AACTrack).SamplingRate);
         audioTimer.Elapsed += (s, e) =>
         {
-            rtspAudioTrack.FeedInRawSamples((uint)(audioIndex * audioSampleDuration), new List<byte[]>() { audioTrack[0][audioIndex++ % audioTrack[0].Count] });
+            rtspAudioTrack.FeedInRawSamples((uint)(audioIndex * audioSampleDuration), new ReadOnlySequence<byte>(audioTrack[0][audioIndex++ % audioTrack[0].Count]));
 
             if (audioIndex % audioTrack[0].Count == 0)
             {
@@ -151,7 +152,7 @@ using (var server = new RTSPServer(port, userName, password))
     Console.WriteLine("Press any key to exit");
     while (!Console.KeyAvailable)
     {
-        System.Threading.Thread.Sleep(250); 
+        System.Threading.Thread.Sleep(250);
     }
 }
 
@@ -163,4 +164,45 @@ static void Reset(ref int videoIndex, Timer videoTimer, ref int audioIndex, Time
     audioIndex = 0;
     videoTimer?.Start();
     audioTimer?.Start();
+}
+
+
+static ReadOnlySequence<byte> CreateReadOnlySequence(IList<byte[]> byteArrayList)
+{
+    if (byteArrayList is not { Count: > 0 })
+    {
+        return ReadOnlySequence<byte>.Empty;
+    }
+
+    if (byteArrayList.Count == 1)
+    {
+        return new ReadOnlySequence<byte>(byteArrayList[0]);
+    }
+
+    var firstSegment = new SequenceSegment(new ReadOnlyMemory<byte>(byteArrayList[0]));
+    var lastSegment = firstSegment;
+
+    for (var i = 1; i < byteArrayList.Count; i++)
+    {
+        var nextSegment = new SequenceSegment(new ReadOnlyMemory<byte>(byteArrayList[i]));
+        lastSegment.Append(nextSegment);
+        lastSegment = nextSegment;
+    }
+
+    return new ReadOnlySequence<byte>(firstSegment, 0, lastSegment, lastSegment.Memory.Length);
+}
+
+internal class SequenceSegment : ReadOnlySequenceSegment<byte>
+{
+    public SequenceSegment(ReadOnlyMemory<byte> memory)
+    {
+        Memory = memory;
+        RunningIndex = 0;
+    }
+
+    public void Append(SequenceSegment next)
+    {
+        Next = next;
+        next.RunningIndex = RunningIndex + Memory.Length;
+    }
 }

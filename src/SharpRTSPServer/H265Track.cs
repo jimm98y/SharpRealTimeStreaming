@@ -132,18 +132,13 @@ namespace SharpRTSPServer
         /// <param name="samples">An array of H265 NALUs.</param>
         /// <param name="rtpTimestamp">RTP timestamp in the timescale of the track.</param>
         /// <returns>RTP packets.</returns>
-        public override (List<Memory<byte>>, List<IMemoryOwner<byte>>) CreateRtpPackets(List<byte[]> samples, uint rtpTimestamp)
+        public override List<IMemoryOwner<byte>> CreateRtpPackets(ReadOnlySequence<byte> samples, uint rtpTimestamp)
         {
-            List<Memory<byte>> rtpPackets = new List<Memory<byte>>();
             List<IMemoryOwner<byte>> memoryOwners = new List<IMemoryOwner<byte>>();
-            for (int x = 0; x < samples.Count; x++)
+            var length = samples.Length;
+            foreach (var rawNal in samples)
             {
-                var rawNal = samples[x];
-                bool lastNal = false;
-                if (x == samples.Count - 1)
-                {
-                    lastNal = true; // last NAL in our nal_array
-                }
+                bool lastNal = (length -= rawNal.Length) == 0;
 
                 // The H265 Payload could be sent as one large RTP packet (assuming the receiver can handle it)
                 // or as a Fragmented Data, split over several RTP packets with the same Timestamp.
@@ -165,11 +160,11 @@ namespace SharpRTSPServer
                     int endBit = 0;
 
                     // consume first byte of the raw_nal. It is used in the FU header
-                    byte firstByte = rawNal[0];
+                    byte firstByte = rawNal.Span[0];
                     nalPointer++;
                     dataRemaining--;
 
-                    byte secondByte = rawNal[1];
+                    byte secondByte = rawNal.Span[1];
                     nalPointer++;
                     dataRemaining--;
 
@@ -183,7 +178,7 @@ namespace SharpRTSPServer
                         // 12 is header size. 3 bytes for H265 FU-A header
                         var fuHeader = 3;
                         var destSize = 12 + fuHeader + payloadSize;
-                        var owner = MemoryPool<byte>.Shared.Rent(destSize);
+                        var owner = AdjustedSizeMemoryOwner.Rent(destSize);
                         memoryOwners.Add(owner);
                         var rtpPacket = owner.Memory.Slice(0, destSize);
 
@@ -218,12 +213,10 @@ namespace SharpRTSPServer
                         // FU header
                         rtpPacket.Span[14] = (byte)((startBit << 7) | (endBit << 6) | nalType);
 
-                        rawNal.AsSpan(nalPointer, payloadSize).CopyTo(rtpPacket.Slice(15).Span);
+                        rawNal.Span.Slice(nalPointer, payloadSize).CopyTo(rtpPacket.Slice(15).Span);
 
                         nalPointer += payloadSize;
                         dataRemaining -= payloadSize;
-
-                        rtpPackets.Add(rtpPacket);
 
                         startBit = 0;
                     }
@@ -235,7 +228,7 @@ namespace SharpRTSPServer
                     // Also with RTP over RTSP there is a limit of 65535 bytes for the RTP packet.
 
                     // 12 is header size when there are no CSRCs or extensions
-                    var owner = MemoryPool<byte>.Shared.Rent(12 + rawNal.Length);
+                    var owner = AdjustedSizeMemoryOwner.Rent(12 + rawNal.Length);
                     memoryOwners.Add(owner);
                     var rtpPacket = owner.Memory.Slice(0, 12 + rawNal.Length);
 
@@ -253,12 +246,10 @@ namespace SharpRTSPServer
 
                     // Now append the raw NAL
                     rawNal.CopyTo(rtpPacket.Slice(12));
-
-                    rtpPackets.Add(rtpPacket);
                 }
             }
 
-            return (rtpPackets, memoryOwners);
+            return memoryOwners;
         }
     }
 }

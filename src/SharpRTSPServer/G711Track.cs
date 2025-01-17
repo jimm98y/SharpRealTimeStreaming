@@ -59,16 +59,15 @@ namespace SharpRTSPServer
         /// <param name="samples">An array of PCMU fragments. By default single fragment is expected.</param>
         /// <param name="rtpTimestamp">RTP timestamp in the timescale of the track.</param>
         /// <returns>RTP packets.</returns>
-        public override (List<Memory<byte>>, List<IMemoryOwner<byte>>) CreateRtpPackets(List<byte[]> samples, uint rtpTimestamp)
+        public override List<IMemoryOwner<byte>> CreateRtpPackets(ReadOnlySequence<byte> samples, uint rtpTimestamp)
         {
             List<Memory<byte>> rtpPackets = new List<Memory<byte>>();
             List<IMemoryOwner<byte>> memoryOwners = new List<IMemoryOwner<byte>>();
 
-            for (int i = 0; i < samples.Count; i++)
+            foreach (var audioPacket in samples)
             {
-                var audioPacket = samples[i];
                 var size = 12 + audioPacket.Length;
-                var owner = MemoryPool<byte>.Shared.Rent(size);
+                var owner = AdjustedSizeMemoryOwner.Rent(size);
                 memoryOwners.Add(owner);
 
                 var rtpPacket = owner.Memory.Slice(0, size);
@@ -86,7 +85,7 @@ namespace SharpRTSPServer
                 rtpPackets.Add(rtpPacket);
             }
 
-            return (rtpPackets, memoryOwners);
+            return memoryOwners;
         }
     }
 
@@ -144,19 +143,17 @@ namespace SharpRTSPServer
         /// <param name="samples">An array of PCMA fragments. By default single fragment is expected.</param>
         /// <param name="rtpTimestamp">RTP timestamp in the timescale of the track.</param>
         /// <returns>RTP packets.</returns>
-        public override (List<Memory<byte>>, List<IMemoryOwner<byte>>) CreateRtpPackets(List<byte[]> samples, uint rtpTimestamp)
+        public override List<IMemoryOwner<byte>> CreateRtpPackets(ReadOnlySequence<byte> samples, uint rtpTimestamp)
         {
-            List<Memory<byte>> rtpPackets = new List<Memory<byte>>();
             List<IMemoryOwner<byte>> memoryOwners = new List<IMemoryOwner<byte>>();
 
-            for (int i = 0; i < samples.Count; i++)
+            foreach (var audioPacket in samples)
             {
-                var audioPacket = samples[i];
                 var size = 12 + audioPacket.Length;
-                var owner = MemoryPool<byte>.Shared.Rent(size);
+                var owner = AdjustedSizeMemoryOwner.Rent(size);
                 memoryOwners.Add(owner);
 
-                var rtpPacket = owner.Memory.Slice(0, size);
+                var rtpPacket = owner.Memory;
 
                 const bool rtpPadding = false;
                 const bool rtpHasExtension = false;
@@ -168,10 +165,9 @@ namespace SharpRTSPServer
 
                 RTPPacketUtil.WriteTS(rtpPacket.Span, rtpTimestamp);
                 audioPacket.CopyTo(rtpPacket.Slice(12));
-                rtpPackets.Add(rtpPacket);
             }
 
-            return (rtpPackets, memoryOwners);
+            return memoryOwners;
         }
     }
 }

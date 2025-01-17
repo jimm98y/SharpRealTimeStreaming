@@ -578,7 +578,7 @@ namespace SharpRTSPServer
             return true;
         }
 
-        public void FeedInRawRTP(int streamType, uint rtpTimestamp, List<Memory<byte>> rtpPackets)
+        public void FeedInRawRTP(int streamType, uint rtpTimestamp, List<IMemoryOwner<byte>> rtpPackets)
         {
             if (streamType != 0 && streamType != 1)
                 throw new ArgumentException("Invalid streamType! Video = 0, Audio = 1");
@@ -614,7 +614,7 @@ namespace SharpRTSPServer
             }
         }
 
-        public void SendRawRTP(RTSPConnection connection, RTPStream stream, List<Memory<byte>> rtpPackets)
+        public void SendRawRTP(RTSPConnection connection, RTPStream stream, List<IMemoryOwner<byte>> rtpPackets)
         {
             if (!connection.Play)
                 return;
@@ -625,11 +625,12 @@ namespace SharpRTSPServer
             foreach (var rtpPacket in rtpPackets)
             {
                 // Add the specific data for each transmission
-                RTPPacketUtil.WriteSequenceNumber(rtpPacket.Span, stream.SequenceNumber);
+                var rtpPacketSpan = rtpPacket.Memory.Span;
+                RTPPacketUtil.WriteSequenceNumber(rtpPacketSpan, stream.SequenceNumber);
                 stream.SequenceNumber++;
 
                 // Add the specific SSRC for each transmission
-                RTPPacketUtil.WriteSSRC(rtpPacket.Span, connection.SSRC);
+                RTPPacketUtil.WriteSSRC(rtpPacketSpan, connection.SSRC);
 
                 //Debug.Assert(connection.Streams[streamType].RtpChannel != null, "If connection.Streams[streamType].RtpChannel is null here the program did not handle well connection problem");
                 try
@@ -640,8 +641,8 @@ namespace SharpRTSPServer
                     var channel = stream.RtpChannel;
                     if (channel != null)
                     {
-                        channel.WriteToDataPort(rtpPacket.Span);
-                        writtenBytes += (uint)rtpPacket.Span.Length;
+                        channel.WriteToDataPort(rtpPacketSpan);
+                        writtenBytes += (uint)rtpPacketSpan.Length;
                     }
                     else
                     {
@@ -670,7 +671,7 @@ namespace SharpRTSPServer
 
         private bool SendRTCP(uint rtpTimestamp, RTSPConnection connection, RTPStream stream)
         {
-            using (var rtcpOwner = MemoryPool<byte>.Shared.Rent(28))
+            using (var rtcpOwner = AdjustedSizeMemoryOwner.Rent(28))
             {
                 var rtcpSenderReport = rtcpOwner.Memory.Slice(0, 28).Span;
                 const bool hasPadding = false;
@@ -889,7 +890,7 @@ namespace SharpRTSPServer
 
     public interface IRtpSender
     {
-        void FeedInRawRTP(int streamType, uint rtpTimestamp, List<Memory<byte>> rtpPackets);
+        void FeedInRawRTP(int streamType, uint rtpTimestamp, List<IMemoryOwner<byte>> rtpPackets);
         bool CanAcceptNewSamples();
     }
 
@@ -930,9 +931,9 @@ namespace SharpRTSPServer
         /// <param name="samples">An array of samples.</param>
         /// <param name="rtpTimestamp">RTP timestamp in the timescale of the track.</param>
         /// <returns>RTP packets.</returns>
-        (List<Memory<byte>>, List<IMemoryOwner<byte>>) CreateRtpPackets(List<byte[]> samples, uint rtpTimestamp);
+        List<IMemoryOwner<byte>> CreateRtpPackets(ReadOnlySequence<byte> samples, uint rtpTimestamp);
         
-        void FeedInRawSamples(uint rtpTimestamp, List<byte[]> samples);
+        void FeedInRawSamples(uint rtpTimestamp, ReadOnlySequence<byte> samples);
     }
 
     public class CustomLoggerFactory : ILoggerFactory

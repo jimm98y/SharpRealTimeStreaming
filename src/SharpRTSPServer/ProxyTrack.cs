@@ -40,16 +40,14 @@ namespace SharpRTSPServer
             _isReady = true;
         }
 
-        public override (List<Memory<byte>>, List<IMemoryOwner<byte>>) CreateRtpPackets(List<byte[]> samples, uint rtpTimestamp)
+        public override List<IMemoryOwner<byte>> CreateRtpPackets(ReadOnlySequence<byte> samples, uint rtpTimestamp)
         {
-            List<Memory<byte>> rtpPackets = new List<Memory<byte>>();
-            List<IMemoryOwner<byte>> memoryOwners = new List<IMemoryOwner<byte>>();
-            var owner = MemoryPool<byte>.Shared.Rent(samples[0].Length);
+            List<IMemoryOwner<byte>> memoryOwners = new List<IMemoryOwner<byte>>(1);
+            var owner = AdjustedSizeMemoryOwner.Rent(samples.First.Length);
             memoryOwners.Add(owner);
-            var rtpPacket = owner.Memory.Slice(0, samples[0].Length);
-            MemoryExtensions.CopyTo(samples[0], rtpPacket);
-            rtpPackets.Add(rtpPacket);
-            return (rtpPackets, memoryOwners);
+            var rtpPacket = owner.Memory;
+            samples.First.CopyTo(rtpPacket);
+            return memoryOwners;
         }
 
         protected virtual void Dispose(bool disposing)
