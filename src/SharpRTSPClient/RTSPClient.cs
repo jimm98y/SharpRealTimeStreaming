@@ -182,14 +182,7 @@ namespace SharpRTSPClient
             _rtspSocketStatus = RtspStatus.Connecting;
             try
             {
-                if (_uri.Scheme.Equals(Uri.UriSchemeHttp, StringComparison.InvariantCultureIgnoreCase))
-                {
-                    _rtspSocket = new RtspHttpTransport(_uri, _credentials);
-                }
-                else
-                {
-                    _rtspSocket = new RtspTcpTransport(_uri);
-                }
+                _rtspSocket = Rtsp.RtspUtils.CreateRtspTransportFromUrl(_uri);
             }
             catch
             {
