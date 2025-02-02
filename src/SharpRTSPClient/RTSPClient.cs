@@ -147,7 +147,7 @@ namespace SharpRTSPClient
         /// <param name="password">Password.</param>
         /// <param name="mediaRequest">Media request type <see cref="MediaRequest>."/></param>
         /// <param name="playbackSession">Playback session.</param>
-        public void Connect(string url, RTPTransport rtpTransport, string username = null, string password = null, MediaRequest mediaRequest = MediaRequest.VIDEO_AND_AUDIO, bool playbackSession = false)
+        public void Connect(string url, RTPTransport rtpTransport, string username = null, string password = null, MediaRequest mediaRequest = MediaRequest.VIDEO_AND_AUDIO, bool playbackSession = false, System.Net.Security.RemoteCertificateValidationCallback userCertificateSelectionCallback = null)
         {
             _logger.LogDebug("Connecting to {url} ", url);
             _uri = new Uri(url);
@@ -182,7 +182,21 @@ namespace SharpRTSPClient
             _rtspSocketStatus = RtspStatus.Connecting;
             try
             {
-                _rtspSocket = Rtsp.RtspUtils.CreateRtspTransportFromUrl(_uri);
+                switch (_uri.Scheme)
+                {
+                    case "http":
+                        {
+                            // to pass the credentials down we cannot use RtspUtils.CreateRtspTransportFromUrl
+                            _rtspSocket = new RtspHttpTransport(_uri, _credentials);
+                        }
+                        break;
+
+                    default:
+                        {
+                            _rtspSocket = Rtsp.RtspUtils.CreateRtspTransportFromUrl(_uri, userCertificateSelectionCallback);
+                        }
+                        break;
+                }
             }
             catch
             {
