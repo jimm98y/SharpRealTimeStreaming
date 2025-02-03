@@ -139,7 +139,7 @@ namespace SharpRTSPClient
         }
 
         /// <summary>
-        /// Connect.
+        /// Connects to the specified RTSP server.
         /// </summary>
         /// <param name="url">URL to connect to.</param>
         /// <param name="rtpTransport">Type of the RTP transport <see cref="RTPTransport"/>.</param>
@@ -147,10 +147,27 @@ namespace SharpRTSPClient
         /// <param name="password">Password.</param>
         /// <param name="mediaRequest">Media request type <see cref="MediaRequest>."/></param>
         /// <param name="playbackSession">Playback session.</param>
+        /// <param name="userCertificateSelectionCallback">Callback for user certificate selection.</param>
         public void Connect(string url, RTPTransport rtpTransport, string username = null, string password = null, MediaRequest mediaRequest = MediaRequest.VIDEO_AND_AUDIO, bool playbackSession = false, System.Net.Security.RemoteCertificateValidationCallback userCertificateSelectionCallback = null)
         {
-            _logger.LogDebug("Connecting to {url} ", url);
-            _uri = new Uri(url);
+            Connect(new Uri(url), rtpTransport, username, password, mediaRequest, playbackSession, userCertificateSelectionCallback);
+        }
+
+        /// <summary>
+        /// Connects to the specified RTSP server.
+        /// </summary>
+        /// <param name="uri">The URI of the RTSP server.</param>
+        /// <param name="rtpTransport">Type of the RTP transport <see cref="RTPTransport"/>.</param>
+        /// <param name="username">User name.</param>
+        /// <param name="password">Password.</param>
+        /// <param name="mediaRequest">Media request type <see cref="MediaRequest>."/></param>
+        /// <param name="playbackSession">Playback session.</param>
+        /// <param name="userCertificateSelectionCallback">Callback for user certificate selection.</param>
+        public void Connect(Uri uri, RTPTransport rtpTransport, string username, string password, MediaRequest mediaRequest, bool playbackSession, System.Net.Security.RemoteCertificateValidationCallback userCertificateSelectionCallback)
+        {
+            _logger.LogDebug("Connecting to {url} ", uri);
+
+            _uri = uri;
 
             _playbackSession = playbackSession;
 
