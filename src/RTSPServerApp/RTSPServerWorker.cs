@@ -50,61 +50,81 @@ internal class RTSPServerWorker : BackgroundService
         ITrack rtspVideoTrack = null;
         ITrack rtspAudioTrack = null;
 
-        // frag_bunny.mp4 audio is not playable in VLC on Windows 11 (works on MacOS)
-        using (Stream fs = new BufferedStream(new FileStream(fileName, FileMode.Open, FileAccess.Read, FileShare.Read)))
+        if (Path.GetExtension(fileName) == ".mp4")
         {
-            using (var fmp4 = await FragmentedMp4.ParseAsync(fs))
+            // frag_bunny.mp4 audio is not playable in VLC on Windows 11 (works on MacOS)
+            using (Stream fs = new BufferedStream(new FileStream(fileName, FileMode.Open, FileAccess.Read, FileShare.Read)))
             {
-                videoTrackBox = fmp4.FindVideoTracks().FirstOrDefault();
-                audioTrackBox = fmp4.FindAudioTracks().FirstOrDefault();
-
-                parsedMDAT = await fmp4.ParseMdatAsync();
-
-                if (videoTrackBox != null)
+                using (var fmp4 = await FragmentedMp4.ParseAsync(fs))
                 {
-                    videoTrackId = fmp4.FindVideoTrackID().First();
-                    videoFrameRate = fmp4.CalculateFrameRate(videoTrackBox);
+                    videoTrackBox = fmp4.FindVideoTracks().FirstOrDefault();
+                    audioTrackBox = fmp4.FindAudioTracks().FirstOrDefault();
 
-                    var h264VisualSample = videoTrackBox.GetMdia().GetMinf().GetStbl().GetStsd().Children.FirstOrDefault(x => x.Type == VisualSampleEntryBox.TYPE3 || x.Type == VisualSampleEntryBox.TYPE4) as VisualSampleEntryBox;
-                    if (h264VisualSample != null)
+                    parsedMDAT = await fmp4.ParseMdatAsync();
+
+                    if (videoTrackBox != null)
                     {
-                        var avcC = (h264VisualSample.Children.First(x => x.Type == AvcConfigurationBox.TYPE) as AvcConfigurationBox).AvcDecoderConfigurationRecord;
-                        rtspVideoTrack = new SharpRTSPServer.H264Track(avcC.AvcProfileIndication, 0, avcC.AvcLevelIndication);
-                        _server.AddVideoTrack(rtspVideoTrack);
-                    }
-                    else
-                    {
-                        var h265VisualSample = videoTrackBox.GetMdia().GetMinf().GetStbl().GetStsd().Children.FirstOrDefault(x => x.Type == VisualSampleEntryBox.TYPE6 || x.Type == VisualSampleEntryBox.TYPE7) as VisualSampleEntryBox;
-                        if (h265VisualSample != null)
+                        videoTrackId = fmp4.FindVideoTrackID().First();
+                        videoFrameRate = fmp4.CalculateFrameRate(videoTrackBox);
+
+                        var h264VisualSample = videoTrackBox.GetMdia().GetMinf().GetStbl().GetStsd().Children.FirstOrDefault(x => x.Type == VisualSampleEntryBox.TYPE3 || x.Type == VisualSampleEntryBox.TYPE4) as VisualSampleEntryBox;
+                        if (h264VisualSample != null)
                         {
-                            rtspVideoTrack = new SharpRTSPServer.H265Track();
+                            var avcC = (h264VisualSample.Children.First(x => x.Type == AvcConfigurationBox.TYPE) as AvcConfigurationBox).AvcDecoderConfigurationRecord;
+                            rtspVideoTrack = new SharpRTSPServer.H264Track(avcC.AvcProfileIndication, 0, avcC.AvcLevelIndication);
                             _server.AddVideoTrack(rtspVideoTrack);
                         }
                         else
                         {
-                            throw new NotSupportedException("No supported video found!");
+                            var h265VisualSample = videoTrackBox.GetMdia().GetMinf().GetStbl().GetStsd().Children.FirstOrDefault(x => x.Type == VisualSampleEntryBox.TYPE6 || x.Type == VisualSampleEntryBox.TYPE7) as VisualSampleEntryBox;
+                            if (h265VisualSample != null)
+                            {
+                                rtspVideoTrack = new SharpRTSPServer.H265Track();
+                                _server.AddVideoTrack(rtspVideoTrack);
+                            }
+                            else
+                            {
+                                throw new NotSupportedException("No supported video found!");
+                            }
+                        }
+                    }
+
+                    if (audioTrackBox != null)
+                    {
+                        audioTrackId = fmp4.FindAudioTrackID().First();
+
+                        var audioSampleEntry = audioTrackBox.GetAudioSampleEntryBox();
+                        if (audioSampleEntry.Type == AudioSampleEntryBox.TYPE3) // AAC
+                        {
+                            var audioConfigDescriptor = audioSampleEntry.GetAudioSpecificConfigDescriptor();
+                            int audioSamplingRate = audioConfigDescriptor.GetSamplingFrequency();
+                            rtspAudioTrack = new SharpRTSPServer.AACTrack(await audioConfigDescriptor.ToBytes(), audioSamplingRate, audioConfigDescriptor.ChannelConfiguration);
+                            _server.AddAudioTrack(rtspAudioTrack);
+                        }
+                        else
+                        {
+                            // unsupported audio
                         }
                     }
                 }
-
-                if (audioTrackBox != null)
-                {
-                    audioTrackId = fmp4.FindAudioTrackID().First();
-
-                    var audioSampleEntry = audioTrackBox.GetAudioSampleEntryBox();
-                    if (audioSampleEntry.Type == AudioSampleEntryBox.TYPE3) // AAC
-                    {
-                        var audioConfigDescriptor = audioSampleEntry.GetAudioSpecificConfigDescriptor();
-                        int audioSamplingRate = audioConfigDescriptor.GetSamplingFrequency();
-                        rtspAudioTrack = new SharpRTSPServer.AACTrack(await audioConfigDescriptor.ToBytes(), audioSamplingRate, audioConfigDescriptor.ChannelConfiguration);
-                        _server.AddAudioTrack(rtspAudioTrack);
-                    }
-                    else
-                    {
-                        // unsupported audio
-                    }
-                }
             }
+        }
+        else
+        {
+            parsedMDAT = new Dictionary<uint, IList<IList<byte[]>>>();
+            parsedMDAT.Add(videoTrackId, new List<IList<byte[]>>());
+
+            var jpgFiles = Directory.GetFiles(fileName, "*.jpg");
+            for (int i = 0; i < jpgFiles.Length; i++)
+            {
+                parsedMDAT[videoTrackId].Add(new List<byte[]>());
+                parsedMDAT[videoTrackId][i].Add(File.ReadAllBytes(jpgFiles[i]));
+            }
+
+            rtspVideoTrack = new SharpRTSPServer.MJpegTrack() { Width = 1160, Height = 768 };
+            _server.AddVideoTrack(rtspVideoTrack);
+
+            videoFrameRate = 1;
         }
 
         int videoIndex = 0;
@@ -112,7 +132,7 @@ internal class RTSPServerWorker : BackgroundService
         Timer audioTimer = null;
         Timer videoTimer = null;
 
-        if (videoTrackBox != null)
+        if (rtspVideoTrack != null)
         {
             var videoSamplingRate = SharpRTSPServer.H264Track.DEFAULT_CLOCK;
             var videoSampleDuration = videoSamplingRate / videoFrameRate;
@@ -125,12 +145,13 @@ internal class RTSPServerWorker : BackgroundService
                     if (rtspVideoTrack is SharpRTSPServer.H264Track h264VideoTrack)
                     {
                         h264VideoTrack.SetParameterSets(videoTrack[0][0], videoTrack[0][1]);
+                        videoIndex++;
                     }
                     else if (rtspVideoTrack is SharpRTSPServer.H265Track h265VideoTrack)
                     {
                         h265VideoTrack.SetParameterSets(videoTrack[0][0], videoTrack[0][1], videoTrack[0][2]);
+                        videoIndex++;
                     }
-                    videoIndex++;
                 }
 
                 rtspVideoTrack.FeedInRawSamples((uint)(videoIndex * videoSampleDuration), (List<byte[]>)videoTrack[videoIndex++ % videoTrack.Count]);
@@ -142,7 +163,7 @@ internal class RTSPServerWorker : BackgroundService
             };
         }
 
-        if (audioTrackBox != null)
+        if (rtspAudioTrack != null)
         {
             var audioSampleDuration = SharpMp4.AACTrack.AAC_SAMPLE_SIZE;
             var audioTrack = parsedMDAT[audioTrackId];
