@@ -17,7 +17,7 @@ internal class RTSPServerWorker : BackgroundService
 {
     private readonly ILoggerFactory _loggerFactory;
     private readonly IConfiguration _configuration;
-    private RTSPServer? _server;
+    private RTSPServer _server;
 
     public RTSPServerWorker(IConfiguration configuration, ILoggerFactory loggerFactory)
     {

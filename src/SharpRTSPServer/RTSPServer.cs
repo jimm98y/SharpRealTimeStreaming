@@ -256,7 +256,7 @@ namespace SharpRTSPServer
             // Update the RTSP Keepalive Timeout
             lock (_connectionList)
             {
-                foreach (var oneConnection in _connectionList.Where(c => c.Listener.RemoteAdress == listener.RemoteAdress))
+                foreach (var oneConnection in _connectionList.Where(c => c.Listener.RemoteEndPoint.Address == listener.RemoteEndPoint.Address))
                 {
                     // found the connection
                     oneConnection.UpdateKeepAlive();
@@ -376,8 +376,8 @@ namespace SharpRTSPServer
                 // RTP over UDP mode
                 // Create a pair of UDP sockets - One is for the Data (eg Video/Audio), one is for the RTCP
                 var udpPair = new UDPSocket(50000, 51000); // give a range of 500 pairs (1000 addresses) to try incase some address are in use
-                udpPair.SetDataDestination(listener.RemoteAdress.Split(':')[0], transport.ClientPort.First);
-                udpPair.SetControlDestination(listener.RemoteAdress.Split(':')[0], transport.ClientPort.Second);
+                udpPair.SetDataDestination(listener.RemoteEndPoint.Address.ToString().Split(':')[0], transport.ClientPort.First);
+                udpPair.SetControlDestination(listener.RemoteEndPoint.Address.ToString().Split(':')[0], transport.ClientPort.Second);
                 udpPair.ControlReceived += (localSender, localE) =>
                 {
                     // RTCP data received
@@ -424,7 +424,7 @@ namespace SharpRTSPServer
                 string copyOfSessionId = "";
                 lock (_connectionList)
                 {
-                    foreach (var setupConnection in _connectionList.Where(connection => connection.Listener.RemoteAdress == listener.RemoteAdress))
+                    foreach (var setupConnection in _connectionList.Where(connection => connection.Listener.RemoteEndPoint.Address == listener.RemoteEndPoint.Address))
                     {
                         // Check the Track ID to determine if this is a SETUP for the Video Stream
                         // or a SETUP for an Audio Stream.
@@ -658,7 +658,7 @@ namespace SharpRTSPServer
 
             if (writeError)
             {
-                _logger.LogWarning("Error writing to listener " + connection.Listener.RemoteAdress);
+                _logger.LogWarning("Error writing to listener " + connection.Listener.RemoteEndPoint.Address.ToString());
                 _logger.LogWarning("Removing session " + connection.SessionId + " due to write error");
                 RemoveSession(connection);
             }
@@ -696,7 +696,7 @@ namespace SharpRTSPServer
             }
             catch (Exception e)
             {
-                _logger.LogError(e, "Error writing RTCP to listener {remoteAdress}", connection.Listener.RemoteAdress);
+                _logger.LogError(e, "Error writing RTCP to listener {remoteAdress}", connection.Listener.RemoteEndPoint.Address.ToString());
                 return false;
             }
             return true;
