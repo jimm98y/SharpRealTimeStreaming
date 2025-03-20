@@ -21,10 +21,6 @@ namespace SharpRTSPServer
         /// <inheritdoc/>
         public override int ID { get; set; }
 
-        public int Width { get; set; }
-
-        public int Height { get; set; }
-
         /// <inheritdoc/>
         public override StringBuilder BuildSDP(StringBuilder sdp)
         {
@@ -51,8 +47,6 @@ namespace SharpRTSPServer
                 const ushort SoiMarker = 0xFFD8; // SOI - Start of image header
                                                  //const ushort App0Header = 0xFFE0; // Application Segment 0 header
                                                  //const ushort App15Header = 0xFFEF; // Application Segment 15 header
-                const ushort Sof0Marker = 0xFFC0; // SOF0 - Start of Frame marker
-                const ushort DqtHeader = 0xFFDB; // Define Quantization Table header
                                                  //const ushort SosMarker = 0xFFDA; // SOS - Start of Scan marker
                 const ushort EoiMarker = 0xFFD9; // EOI - End of Image marker
 
@@ -70,52 +64,14 @@ namespace SharpRTSPServer
                     throw new InvalidOperationException($"JPEG image must start with SOI marker {EoiMarker.ToString("X4")} and {header.ToString("X4")}");
                 }
 
-                //var reader = jpegImage[2..^2];
-                var reader = jpegImage.Slice(2); // keep EOI
-
                 byte type = 1; // https://datatracker.ietf.org/doc/html/rfc2435#section-3.1.3
                 byte q = 255; // https://datatracker.ietf.org/doc/html/rfc2435#section-3.1.4, https://datatracker.ietf.org/doc/html/rfc2435#section-4.2
 
-                int nbQuantizationTables = 0;
                 var firstQuantizationtable = ReadOnlySpan<byte>.Empty;
                 var secondQuantizationtable = ReadOnlySpan<byte>.Empty;
 
-                while (true)
-                {
-                    header = BinaryPrimitives.ReadUInt16BigEndian(reader);
-
-                    if (header == Sof0Marker)
-                    {
-                        break;
-                    }
-
-                    reader = reader.Slice(2);
-
-                    var size = BinaryPrimitives.ReadUInt16BigEndian(reader) - 2; reader = reader.Slice(2);
-
-                    switch (header)
-                    {
-                        case DqtHeader:
-                            nbQuantizationTables++;
-                            if (nbQuantizationTables == 1)
-                            {
-                                firstQuantizationtable = reader.Slice(0, size);
-                            }
-                            else if (nbQuantizationTables == 2)
-                            {
-                                secondQuantizationtable = reader.Slice(0, size);
-                            }
-                            else
-                            {
-                                throw new InvalidOperationException("Error: More than 2 quantization tables in JPEG image");
-                            }
-                            break;
-                        default:
-                            break;
-                    }
-
-                    reader = reader.Slice(size);
-                }
+                Span<byte> reader;
+                var jpegSize = ParseJpeg(jpegImage, out firstQuantizationtable, out secondQuantizationtable, out reader);
 
                 // Build a list of 1 or more RTP packets
                 // The last packet will have the M bit set to '1'
@@ -178,8 +134,8 @@ namespace SharpRTSPServer
                     // Write JPEG Header - https://datatracker.ietf.org/doc/html/rfc2435#section-3.1
                     rtpPacketSpan[0] = type;
                     rtpPacketSpan[1] = q;
-                    rtpPacketSpan[2] = (byte)(Width / 8);
-                    rtpPacketSpan[3] = (byte)(Height / 8);
+                    rtpPacketSpan[2] = (byte)(jpegSize.width >> 3);
+                    rtpPacketSpan[3] = (byte)(jpegSize.height >> 3);
                     rtpPacketSpan = rtpPacketSpan.Slice(4);
 
                     // write quantization tables
@@ -190,7 +146,7 @@ namespace SharpRTSPServer
 
                         // Write Quantization Table header https://datatracker.ietf.org/doc/html/rfc2435#section-3.1.8
 
-                        if (nbQuantizationTables == 1)
+                        if (secondQuantizationtable.IsEmpty)
                         {
                             // MBZ
                             rtpPacketSpan[0] = (byte)(firstQuantizationtable[0] & 0xf);
@@ -200,7 +156,7 @@ namespace SharpRTSPServer
 
                             // Length
                             var qtSize = firstQuantizationtable.Length - 1;
-                            BinaryPrimitives.WriteInt16BigEndian(rtpPacketSpan.Slice(2), (short)(qtSize));
+                            BinaryPrimitives.WriteInt16BigEndian(rtpPacketSpan.Slice(2), (short)qtSize);
 
                             // Quantization Table Data
                             firstQuantizationtable.Slice(1).CopyTo(rtpPacketSpan.Slice(4));
@@ -218,7 +174,7 @@ namespace SharpRTSPServer
 
                             // Length
                             var qtSize = firstQuantizationtable.Length + secondQuantizationtable.Length - 2;
-                            BinaryPrimitives.WriteInt16BigEndian(rtpPacketSpan.Slice(2), (short)(qtSize));
+                            BinaryPrimitives.WriteInt16BigEndian(rtpPacketSpan.Slice(2), (short)qtSize);
 
                             // Quantization Table Data
                             firstQuantizationtable.Slice(1).CopyTo(rtpPacketSpan.Slice(4));
@@ -230,7 +186,6 @@ namespace SharpRTSPServer
                     }
 
                     // Write JPEG Payload
-
                     reader.Slice(0, rtpPacketSpan.Length).CopyTo(rtpPacketSpan);
                     reader = reader.Slice(rtpPacketSpan.Length);
                     dataPointer += rtpPacketSpan.Length;
@@ -240,6 +195,81 @@ namespace SharpRTSPServer
             }
 
             return (rtpPackets, memoryOwners);
+        }
+
+
+        private static (int width, int height, int bpp) ParseJpeg(Span<byte> binaryReader, out ReadOnlySpan<byte> first, out ReadOnlySpan<byte> second, out Span<byte> retReader)
+        {
+            first = ReadOnlySpan<byte>.Empty;
+            second = ReadOnlySpan<byte>.Empty;
+            Span<byte> br = binaryReader;
+
+            // JPG magic bytes 
+            if (br[0] != 0xff || br[1] != 0xd8)
+            {
+                throw new ArgumentException();
+            }
+
+            br = br.Slice(2);
+
+            while (br[0] == 0xff)
+            {
+                // Start-Of-Frame (SOF) has 4 possible values
+                if (br[1] == 0xc0 || br[1] == 0xc1 || br[1] == 0xc2 || br[1] == 0xc3)
+                {
+                    retReader = br;
+
+                    br = br.Slice(2);
+                    br = br.Slice(2);
+
+                    // bits per pixel
+                    int bpp = br[0];
+                    br = br.Slice(1);
+
+                    // image height
+                    int height = (br[0] << 8) | br[1];
+                    br = br.Slice(2);
+
+                    // image width
+                    int width = (br[0] << 8) | br[1];
+                    br = br.Slice(2);
+
+                    return (width, height, bpp);
+                }
+
+                br = br.Slice(1);
+
+                byte marker = br[0];
+                br = br.Slice(1);
+
+                short chunkLength = (short)((br[0] << 8) | br[1]);
+                br = br.Slice(2);
+
+                // quantization tables
+                if (marker == 0xdb)
+                {
+                    int matrix_length = chunkLength - 2;
+                    var matrix = br.Slice(0, matrix_length);
+                    if (first.IsEmpty)
+                        first = matrix;
+                    else if (second.IsEmpty)
+                        second = matrix;
+                    else
+                        throw new InvalidOperationException("Error: More than 2 quantization tables in JPEG image");
+                }
+
+                if (chunkLength < 0)
+                {
+                    ushort uchunkLength = (ushort)chunkLength;
+                    br = br.Slice(uchunkLength - 2);
+                }
+                else
+                {
+                    br = br.Slice(chunkLength - 2);
+                }
+            }
+
+            throw new ArgumentException();
         }
     }
 }

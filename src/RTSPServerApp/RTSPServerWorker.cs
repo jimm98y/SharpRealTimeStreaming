@@ -121,7 +121,7 @@ internal class RTSPServerWorker : BackgroundService
                 parsedMDAT[videoTrackId][i].Add(File.ReadAllBytes(jpgFiles[i]));
             }
 
-            rtspVideoTrack = new SharpRTSPServer.MJpegTrack() { Width = 1160, Height = 768 };
+            rtspVideoTrack = new SharpRTSPServer.MJpegTrack();
             _server.AddVideoTrack(rtspVideoTrack);
 
             videoFrameRate = 1;
