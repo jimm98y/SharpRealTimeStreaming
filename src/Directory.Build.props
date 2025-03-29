@@ -3,6 +3,7 @@
 		<GeneratePackageOnBuild>True</GeneratePackageOnBuild>
 		<AllowUnsafeBlocks>True</AllowUnsafeBlocks>
 		<Nullable>disable</Nullable>
+		<ImplicitUsings>disable</ImplicitUsings>
 		<Title>$(ProjectName)</Title>
 		<Version>0.0.8</Version>
 		<Authors>Lukas Volf</Authors>
@@ -18,6 +19,7 @@
 		<PackageLicenseExpression>MIT</PackageLicenseExpression>
 		<Description>Simple RTSP client and server. Supports H264, H265 and AAC.</Description>
 	</PropertyGroup>
+	
 	<ItemGroup>
 		<None Include="..\..\README.md">
 			<Pack>True</Pack>

@@ -3,15 +3,8 @@
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net8.0</TargetFramework>
-    <ImplicitUsings>disable</ImplicitUsings>
-    <Nullable>disable</Nullable>
 	<GeneratePackageOnBuild>false</GeneratePackageOnBuild>
   </PropertyGroup>
-
-  <ItemGroup>
-    <None Remove="appsettings.json" />
-    <None Remove="test.pcapng" />
-  </ItemGroup>
 
   <ItemGroup>
     <Content Include="appsettings.json">
