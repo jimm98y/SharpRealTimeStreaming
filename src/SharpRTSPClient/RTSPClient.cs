@@ -1023,6 +1023,13 @@ namespace SharpRTSPClient
                             byte[] pps = vpsSpsPps[2];
                             streamConfigurationData = new H265StreamConfigurationData(vps, sps, pps);
                         }
+                        else if (vpsSpsPps.Count >= 2)
+                        {
+                            // some implementations only send SPS and PPS, e.g. Chromium Canary 136
+                            byte[] sps = vpsSpsPps[0];
+                            byte[] pps = vpsSpsPps[1];
+                            streamConfigurationData = new H265StreamConfigurationData(null, sps, pps);
+                        }
                     }
 
                     // Send the SETUP RTSP command if we have a matching Payload Decoder
