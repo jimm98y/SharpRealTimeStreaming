@@ -1025,7 +1025,7 @@ namespace SharpRTSPClient
                         }
                         else if (vpsSpsPps.Count >= 2)
                         {
-                            // some implementations only send SPS and PPS, e.g. Chromium Canary 136
+                            // some implementations only send SPS and PPS, e.g. some HikVision cameras
                             byte[] sps = vpsSpsPps[0];
                             byte[] pps = vpsSpsPps[1];
                             streamConfigurationData = new H265StreamConfigurationData(null, sps, pps);
