@@ -13,8 +13,13 @@ using (RTSPClient client = new RTSPClient())
     client.ReceivedVideoData += (sender, e) => Console.Write("*");
     client.NewAudioStream += (sender, e) => Console.WriteLine(e.ToString());
     client.ReceivedAudioData += (sender, e) => Console.Write("+");
+    client.AuthenticationFailed += (sender, e) => 
+    {
+        Console.WriteLine("Stopped");
+        client.Connect(rtspUri, RTPTransport.TCP, userName, password, MediaRequest.VIDEO_AND_AUDIO, false, null, true);
+    };
 
-    client.Connect(rtspUri, RTPTransport.TCP, userName, password);
+    client.Connect(rtspUri, RTPTransport.TCP, userName, password, MediaRequest.VIDEO_AND_AUDIO, false, null, true);
 
     Console.WriteLine("Press any key to exit");
     while (!Console.KeyAvailable)

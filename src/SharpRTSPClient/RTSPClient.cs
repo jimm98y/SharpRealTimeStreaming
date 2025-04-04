@@ -42,6 +42,7 @@ namespace SharpRTSPClient
         public event EventHandler<NewStreamEventArgs> NewAudioStream;
         public event EventHandler<SimpleDataEventArgs> ReceivedVideoData;
         public event EventHandler<SimpleDataEventArgs> ReceivedAudioData;
+        public event EventHandler<EventArgs> AuthenticationFailed;
 
         public bool ProcessRTCP { get; set; } = true; // answer RTCP
         public event EventHandler<RawRtcpDataEventArgs> ReceivedRawVideoRTCP;
@@ -148,9 +149,10 @@ namespace SharpRTSPClient
         /// <param name="mediaRequest">Media request type <see cref="MediaRequest>."/></param>
         /// <param name="playbackSession">Playback session.</param>
         /// <param name="userCertificateSelectionCallback">Callback for user certificate selection.</param>
-        public void Connect(string url, RTPTransport rtpTransport, string username = null, string password = null, MediaRequest mediaRequest = MediaRequest.VIDEO_AND_AUDIO, bool playbackSession = false, System.Net.Security.RemoteCertificateValidationCallback userCertificateSelectionCallback = null)
+        /// <param name="autoReconnect">Automatically try to reconnect after losing the connection.</param>
+        public void Connect(string url, RTPTransport rtpTransport, string username = null, string password = null, MediaRequest mediaRequest = MediaRequest.VIDEO_AND_AUDIO, bool playbackSession = false, System.Net.Security.RemoteCertificateValidationCallback userCertificateSelectionCallback = null, bool autoReconnect = false)
         {
-            Connect(new Uri(url), rtpTransport, username, password, mediaRequest, playbackSession, userCertificateSelectionCallback);
+            Connect(new Uri(url), rtpTransport, username, password, mediaRequest, playbackSession, userCertificateSelectionCallback, autoReconnect);
         }
 
         /// <summary>
@@ -163,7 +165,8 @@ namespace SharpRTSPClient
         /// <param name="mediaRequest">Media request type <see cref="MediaRequest>."/></param>
         /// <param name="playbackSession">Playback session.</param>
         /// <param name="userCertificateSelectionCallback">Callback for user certificate selection.</param>
-        public void Connect(Uri uri, RTPTransport rtpTransport, string username, string password, MediaRequest mediaRequest, bool playbackSession, System.Net.Security.RemoteCertificateValidationCallback userCertificateSelectionCallback)
+        /// <param name="autoReconnect">Automatically try to reconnect after losing the connection.</param>
+        public void Connect(Uri uri, RTPTransport rtpTransport, string username, string password, MediaRequest mediaRequest, bool playbackSession, System.Net.Security.RemoteCertificateValidationCallback userCertificateSelectionCallback, bool autoReconnect = false)
         {
             _logger.LogDebug("Connecting to {url} ", uri);
 
@@ -234,7 +237,7 @@ namespace SharpRTSPClient
             // Connect a RTSP Listener to the RTSP Socket (or other Stream) to send RTSP messages and listen for RTSP replies
             _rtspClient = new RtspListener(_rtspSocket, _loggerFactory.CreateLogger<RtspListener>())
             {
-                AutoReconnect = false
+                AutoReconnect = autoReconnect
             };
 
             _rtspClient.MessageReceived += RtspMessageReceived;
@@ -399,6 +402,11 @@ namespace SharpRTSPClient
         /// </summary>
         public void Stop()
         {
+            StopClient();
+        }
+
+        private void StopClient()
+        {
             // Send TEARDOWN
             RtspRequest teardown_message = new RtspRequestTeardown
             {
@@ -409,14 +417,41 @@ namespace SharpRTSPClient
             _rtspClient?.SendMessage(teardown_message);
 
             // Stop the keepalive timer
-            _keepaliveTimer?.Stop();
+            var keepaliveTimer = _keepaliveTimer;
+            if(keepaliveTimer != null)
+            {
+                keepaliveTimer.Elapsed -= SendKeepAlive;
+                keepaliveTimer.Dispose();
+                _keepaliveTimer = null;
+            }
 
             // clear up any UDP sockets
-            _videoRtpTransport?.Stop();
-            _audioRtpTransport?.Stop();
+            var videoRtpTransport = _videoRtpTransport;
+            if (videoRtpTransport != null)
+            {
+                videoRtpTransport.Stop();
+                videoRtpTransport.DataReceived -= VideoRtpDataReceived;
+                videoRtpTransport.ControlReceived -= VideoRtcpControlDataReceived;
+                _videoRtpTransport = null;
+            }
+
+            var audioRtpTransport = _audioRtpTransport;
+            if (audioRtpTransport != null)
+            {
+                audioRtpTransport.Stop();
+                audioRtpTransport.DataReceived -= AudioRtpDataReceived;
+                audioRtpTransport.ControlReceived -= AudioRtcpControlDataReceived;
+                _audioRtpTransport = null;
+            }
 
             // Drop the RTSP session
-            _rtspClient?.Stop();
+            if (_rtspClient != null)
+            {
+                var rtspClient = _rtspClient;
+                rtspClient.MessageReceived -= RtspMessageReceived;
+                rtspClient.Stop();
+                _rtspClient = null;
+            }
         }
 
         /// <summary>
@@ -705,8 +740,9 @@ namespace SharpRTSPClient
 
                 if (message.ReturnCode == 401 && message.OriginalRequest?.Headers.ContainsKey(RtspHeaderNames.Authorization) == true)
                 {
-                    _logger.LogError("Fail to authenticate stoping here");
-                    Stop();
+                    _logger.LogError("Fail to authenticate stopping here");
+                    StopClient();
+                    AuthenticationFailed?.Invoke(this, EventArgs.Empty);
                     return;
                 }
 
@@ -1262,7 +1298,7 @@ namespace SharpRTSPClient
             {
                 if (disposing)
                 {
-                    Stop();
+                    StopClient();
 
                     _rtspClient?.Dispose();
                     _videoRtpTransport?.Dispose();
