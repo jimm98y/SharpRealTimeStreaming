@@ -166,7 +166,7 @@ namespace SharpRTSPClient
         /// <param name="playbackSession">Playback session.</param>
         /// <param name="userCertificateSelectionCallback">Callback for user certificate selection.</param>
         /// <param name="autoReconnect">Automatically try to reconnect after losing the connection.</param>
-        public void Connect(Uri uri, RTPTransport rtpTransport, string username, string password, MediaRequest mediaRequest, bool playbackSession, System.Net.Security.RemoteCertificateValidationCallback userCertificateSelectionCallback, bool autoReconnect = false)
+        public void Connect(Uri uri, RTPTransport rtpTransport, string username = null, string password = null, MediaRequest mediaRequest = MediaRequest.VIDEO_AND_AUDIO, bool playbackSession = false, System.Net.Security.RemoteCertificateValidationCallback userCertificateSelectionCallback = null, bool autoReconnect = false)
         {
             _logger.LogDebug("Connecting to {url} ", uri);
 
