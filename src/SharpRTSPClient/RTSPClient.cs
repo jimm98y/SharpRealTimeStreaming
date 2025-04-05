@@ -10,6 +10,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Net;
+using System.Net.Security;
 using System.Text;
 
 namespace SharpRTSPClient
@@ -42,6 +43,7 @@ namespace SharpRTSPClient
         public event EventHandler<NewStreamEventArgs> NewAudioStream;
         public event EventHandler<SimpleDataEventArgs> ReceivedVideoData;
         public event EventHandler<SimpleDataEventArgs> ReceivedAudioData;
+        public event EventHandler<EventArgs> Stopped;
 
         public bool ProcessRTCP { get; set; } = true; // answer RTCP
         public event EventHandler<RawRtcpDataEventArgs> ReceivedRawVideoRTCP;
@@ -65,13 +67,13 @@ namespace SharpRTSPClient
         private IRtpTransport _videoRtpTransport;
         private IRtpTransport _audioRtpTransport;
 
-        private Uri _uri;                         // RTSP URI (username & password will be stripped out)
+        private Uri _uri = null;                  // RTSP URI (username & password will be stripped out)
         private string _session = "";             // RTSP Session
         private Authentication _authentication;
         private NetworkCredential _credentials = new NetworkCredential();
-        private bool _clientWantsVideo = false;   // Client wants to receive Video
-        private bool _clientWantsAudio = false;   // Client wants to receive Audio
-
+        private MediaRequest _mediaRequest = MediaRequest.VIDEO_AND_AUDIO;
+        private RemoteCertificateValidationCallback _userCertificateSelectionCallback = null;
+        private bool _autoReconnect = false;
         private Uri _videoUri = null;            // URI used for the Video Track
         private int _videoPayload = -1;          // Payload Type for the Video. (often 96 which is the first dynamic payload value. Bosch use 35)
 
@@ -148,9 +150,21 @@ namespace SharpRTSPClient
         /// <param name="mediaRequest">Media request type <see cref="MediaRequest>."/></param>
         /// <param name="playbackSession">Playback session.</param>
         /// <param name="userCertificateSelectionCallback">Callback for user certificate selection.</param>
-        public void Connect(string url, RTPTransport rtpTransport, string username = null, string password = null, MediaRequest mediaRequest = MediaRequest.VIDEO_AND_AUDIO, bool playbackSession = false, System.Net.Security.RemoteCertificateValidationCallback userCertificateSelectionCallback = null)
+        /// <param name="autoReconnect">Automatically try to reconnect after losing the connection.</param>
+        public void Connect(
+            string url, 
+            RTPTransport rtpTransport, 
+            string username = null, 
+            string password = null, 
+            MediaRequest mediaRequest = MediaRequest.VIDEO_AND_AUDIO, 
+            bool playbackSession = false,
+            RemoteCertificateValidationCallback userCertificateSelectionCallback = null, 
+            bool autoReconnect = false)
         {
-            Connect(new Uri(url), rtpTransport, username, password, mediaRequest, playbackSession, userCertificateSelectionCallback);
+            if (string.IsNullOrEmpty(url)) 
+                throw new ArgumentNullException(nameof(url));
+
+            Connect(new Uri(url), rtpTransport, username, password, mediaRequest, playbackSession, userCertificateSelectionCallback, autoReconnect);
         }
 
         /// <summary>
@@ -163,40 +177,78 @@ namespace SharpRTSPClient
         /// <param name="mediaRequest">Media request type <see cref="MediaRequest>."/></param>
         /// <param name="playbackSession">Playback session.</param>
         /// <param name="userCertificateSelectionCallback">Callback for user certificate selection.</param>
-        public void Connect(Uri uri, RTPTransport rtpTransport, string username, string password, MediaRequest mediaRequest, bool playbackSession, System.Net.Security.RemoteCertificateValidationCallback userCertificateSelectionCallback)
+        /// <param name="autoReconnect">Automatically try to reconnect after losing the connection.</param>
+        public void Connect(
+            Uri uri, 
+            RTPTransport rtpTransport, 
+            string username = null, 
+            string password = null, 
+            MediaRequest mediaRequest = MediaRequest.VIDEO_AND_AUDIO,
+            bool playbackSession = false, 
+            RemoteCertificateValidationCallback userCertificateSelectionCallback = null, 
+            bool autoReconnect = false)
         {
-            _logger.LogDebug("Connecting to {url} ", uri);
-
-            _uri = uri;
-
-            _playbackSession = playbackSession;
+            if (uri == null) 
+                throw new ArgumentNullException(nameof(uri));
 
             // Use URI to extract username and password and to make a new URL without the username and password
-            var hostname = _uri.Host;
-            var port = _uri.Port;
-            try
+            var hostname = uri.Host;
+            var port = uri.Port;
+            NetworkCredential credentials = null;
+
+            if (uri.UserInfo.Length > 0)
             {
-                if (_uri.UserInfo.Length > 0)
-                {
-                    _credentials = new NetworkCredential(_uri.UserInfo.Split(':')[0], _uri.UserInfo.Split(':')[1]);
-                    _uri = new Uri(_uri.GetComponents(UriComponents.AbsoluteUri & ~UriComponents.UserInfo, UriFormat.UriEscaped));
-                }
-                else
-                {
-                    _credentials = new NetworkCredential(username, password);
-                }
+                credentials = new NetworkCredential(uri.UserInfo.Split(':')[0], uri.UserInfo.Split(':')[1]);
+                uri = new Uri(uri.GetComponents(UriComponents.AbsoluteUri & ~UriComponents.UserInfo, UriFormat.UriEscaped));
             }
-            catch
+            else
             {
-                _credentials = new NetworkCredential();
+                credentials = new NetworkCredential(username, password);
             }
 
+            Connect(uri, rtpTransport, credentials, mediaRequest, playbackSession, userCertificateSelectionCallback, autoReconnect);
+        }
+
+        /// <summary>
+        /// Connects to the specified RTSP server.
+        /// </summary>
+        /// <param name="uri">The URI of the RTSP server.</param>
+        /// <param name="rtpTransport">Type of the RTP transport <see cref="RTPTransport"/>.</param>
+        /// <param name="credentials">Network credentials.</param>
+        /// <param name="mediaRequest">Media request type <see cref="MediaRequest>."/></param>
+        /// <param name="playbackSession">Playback session.</param>
+        /// <param name="userCertificateSelectionCallback">Callback for user certificate selection.</param>
+        /// <param name="autoReconnect">Automatically try to reconnect after losing the connection.</param>
+        public void Connect(
+            Uri uri, 
+            RTPTransport rtpTransport, 
+            NetworkCredential credentials = null, 
+            MediaRequest mediaRequest = MediaRequest.VIDEO_AND_AUDIO, 
+            bool playbackSession = false, 
+            RemoteCertificateValidationCallback userCertificateSelectionCallback = null, 
+            bool autoReconnect = false)
+        {
+            if (_rtspClient != null)
+                throw new InvalidOperationException("You must first call Stop() before re-connecting!");
+
+            _logger.LogDebug("Connecting to {url} ", uri);
+
+            this._uri = uri;
+            // Check the RTP Transport
+            // If the RTP transport is TCP then we interleave the RTP packets in the RTSP stream
+            // If the RTP transport is UDP, we initialise two UDP sockets (one for video, one for RTCP status messages)
+            // If the RTP transport is MULTICAST, we have to wait for the SETUP message to get the Multicast Address from the RTSP server
+            this._rtpTransport = rtpTransport;
+            this._credentials = credentials ?? new NetworkCredential();
             // We can ask the RTSP server for Video, Audio or both. If we don't want audio we don't need to SETUP the audio channel or receive it
-            _clientWantsVideo = (mediaRequest is MediaRequest.VIDEO_ONLY || mediaRequest is MediaRequest.VIDEO_AND_AUDIO);
-            _clientWantsAudio = (mediaRequest is MediaRequest.AUDIO_ONLY || mediaRequest is MediaRequest.VIDEO_AND_AUDIO);
+            this._mediaRequest = mediaRequest;
+            this._playbackSession = playbackSession;
+            this._userCertificateSelectionCallback = userCertificateSelectionCallback;
+            this._autoReconnect = autoReconnect;
 
             // Connect to a RTSP Server. The RTSP session is a TCP connection
             _rtspSocketStatus = RtspStatus.Connecting;
+
             try
             {
                 switch (_uri.Scheme)
@@ -210,7 +262,7 @@ namespace SharpRTSPClient
 
                     default:
                         {
-                            _rtspSocket = Rtsp.RtspUtils.CreateRtspTransportFromUrl(_uri, userCertificateSelectionCallback);
+                            _rtspSocket = Rtsp.RtspUtils.CreateRtspTransportFromUrl(_uri, _userCertificateSelectionCallback);
                         }
                         break;
                 }
@@ -219,6 +271,7 @@ namespace SharpRTSPClient
             {
                 _rtspSocketStatus = RtspStatus.ConnectFailed;
                 _logger.LogWarning("Error - did not connect");
+                Stopped?.Invoke(this, EventArgs.Empty);
                 return;
             }
 
@@ -226,6 +279,7 @@ namespace SharpRTSPClient
             {
                 _rtspSocketStatus = RtspStatus.ConnectFailed;
                 _logger.LogWarning("Error - did not connect");
+                Stopped?.Invoke(this, EventArgs.Empty);
                 return;
             }
 
@@ -234,22 +288,16 @@ namespace SharpRTSPClient
             // Connect a RTSP Listener to the RTSP Socket (or other Stream) to send RTSP messages and listen for RTSP replies
             _rtspClient = new RtspListener(_rtspSocket, _loggerFactory.CreateLogger<RtspListener>())
             {
-                AutoReconnect = false
+                AutoReconnect = _autoReconnect
             };
 
             _rtspClient.MessageReceived += RtspMessageReceived;
             _rtspClient.Start(); // start listening for messages from the server (messages fire the MessageReceived event)
 
-            // Check the RTP Transport
-            // If the RTP transport is TCP then we interleave the RTP packets in the RTSP stream
-            // If the RTP transport is UDP, we initialise two UDP sockets (one for video, one for RTCP status messages)
-            // If the RTP transport is MULTICAST, we have to wait for the SETUP message to get the Multicast Address from the RTSP server
-            this._rtpTransport = rtpTransport;
-            
             if (rtpTransport == RTPTransport.UDP)
             {
                 // give a range of 500 pairs (1000 addresses) to try incase some address are in use
-                _videoRtpTransport = new UDPSocket(50000, 51000); 
+                _videoRtpTransport = new UDPSocket(50000, 51000);
                 _audioRtpTransport = new UDPSocket(50000, 51000);
             }
 
@@ -283,6 +331,18 @@ namespace SharpRTSPClient
             };
 
             _rtspClient.SendMessage(optionsMessage);
+        }
+
+        /// <summary>
+        /// Attempt to reconnect when a connection to the server is lost.
+        /// </summary>
+        /// <exception cref="InvalidOperationException">Reconnect can only be called after calling Connect.</exception>
+        public void TryReconnect()
+        {
+            if (_uri == null)
+                throw new InvalidOperationException("You must first call Connect() before re-connecting!");
+
+            Connect(_uri, _rtpTransport, _credentials, _mediaRequest, _playbackSession, _userCertificateSelectionCallback, _autoReconnect);
         }
 
         /// <summary>
@@ -399,6 +459,11 @@ namespace SharpRTSPClient
         /// </summary>
         public void Stop()
         {
+            StopClient();
+        }
+
+        private void StopClient()
+        {
             // Send TEARDOWN
             RtspRequest teardown_message = new RtspRequestTeardown
             {
@@ -409,14 +474,43 @@ namespace SharpRTSPClient
             _rtspClient?.SendMessage(teardown_message);
 
             // Stop the keepalive timer
-            _keepaliveTimer?.Stop();
+            var keepaliveTimer = _keepaliveTimer;
+            if(keepaliveTimer != null)
+            {
+                keepaliveTimer.Elapsed -= SendKeepAlive;
+                keepaliveTimer.Dispose();
+                _keepaliveTimer = null;
+            }
 
             // clear up any UDP sockets
-            _videoRtpTransport?.Stop();
-            _audioRtpTransport?.Stop();
+            var videoRtpTransport = _videoRtpTransport;
+            if (videoRtpTransport != null)
+            {
+                videoRtpTransport.Stop();
+                videoRtpTransport.DataReceived -= VideoRtpDataReceived;
+                videoRtpTransport.ControlReceived -= VideoRtcpControlDataReceived;
+                _videoRtpTransport = null;
+            }
+
+            var audioRtpTransport = _audioRtpTransport;
+            if (audioRtpTransport != null)
+            {
+                audioRtpTransport.Stop();
+                audioRtpTransport.DataReceived -= AudioRtpDataReceived;
+                audioRtpTransport.ControlReceived -= AudioRtcpControlDataReceived;
+                _audioRtpTransport = null;
+            }
 
             // Drop the RTSP session
-            _rtspClient?.Stop();
+            var rtspClient = _rtspClient;
+            if (rtspClient != null)
+            {
+                rtspClient.MessageReceived -= RtspMessageReceived;
+                rtspClient.Stop();
+                _rtspClient = null;
+            }
+
+            _rtspSocket = null; // closed by rtspClient.Stop()
         }
 
         /// <summary>
@@ -705,8 +799,9 @@ namespace SharpRTSPClient
 
                 if (message.ReturnCode == 401 && message.OriginalRequest?.Headers.ContainsKey(RtspHeaderNames.Authorization) == true)
                 {
-                    _logger.LogError("Fail to authenticate stoping here");
-                    Stop();
+                    _logger.LogError("Fail to authenticate stopping here");
+                    StopClient();
+                    Stopped?.Invoke(this, EventArgs.Empty);
                     return;
                 }
 
@@ -911,7 +1006,7 @@ namespace SharpRTSPClient
 
             // Process each 'Media' Attribute in the SDP (each sub-stream)
             //  to look for first supported video substream
-            if (_clientWantsVideo)
+            if (_mediaRequest is MediaRequest.VIDEO_ONLY || _mediaRequest is MediaRequest.VIDEO_AND_AUDIO)
             {
                 foreach (Media media in sdpData.Medias.Where(m => m.MediaType == Media.MediaTypes.video))
                 {
@@ -1057,7 +1152,7 @@ namespace SharpRTSPClient
                 }
             }
 
-            if (_clientWantsAudio)
+            if (_mediaRequest is MediaRequest.AUDIO_ONLY || _mediaRequest is MediaRequest.VIDEO_AND_AUDIO)
             {
                 foreach (Media media in sdpData.Medias.Where(m => m.MediaType == Media.MediaTypes.audio))
                 {
@@ -1262,11 +1357,7 @@ namespace SharpRTSPClient
             {
                 if (disposing)
                 {
-                    Stop();
-
-                    _rtspClient?.Dispose();
-                    _videoRtpTransport?.Dispose();
-                    _audioRtpTransport?.Dispose();
+                    StopClient();
                 }
 
                 _disposedValue = true;
