@@ -497,9 +497,9 @@ namespace SharpRTSPClient
             }
 
             // Drop the RTSP session
-            if (_rtspClient != null)
+            var rtspClient = _rtspClient;
+            if (rtspClient != null)
             {
-                var rtspClient = _rtspClient;
                 rtspClient.MessageReceived -= RtspMessageReceived;
                 rtspClient.Stop();
                 _rtspClient = null;
@@ -1351,10 +1351,6 @@ namespace SharpRTSPClient
                 if (disposing)
                 {
                     StopClient();
-
-                    _rtspClient?.Dispose();
-                    _videoRtpTransport?.Dispose();
-                    _audioRtpTransport?.Dispose();
                 }
 
                 _disposedValue = true;
