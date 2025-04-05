@@ -228,6 +228,9 @@ namespace SharpRTSPClient
             RemoteCertificateValidationCallback userCertificateSelectionCallback = null, 
             bool autoReconnect = false)
         {
+            if (_rtspClient != null)
+                throw new InvalidOperationException("You must first call Stop() before re-connecting!");
+
             _logger.LogDebug("Connecting to {url} ", uri);
 
             this._uri = uri;
@@ -268,6 +271,7 @@ namespace SharpRTSPClient
             {
                 _rtspSocketStatus = RtspStatus.ConnectFailed;
                 _logger.LogWarning("Error - did not connect");
+                Stopped?.Invoke(this, EventArgs.Empty);
                 return;
             }
 
@@ -275,6 +279,7 @@ namespace SharpRTSPClient
             {
                 _rtspSocketStatus = RtspStatus.ConnectFailed;
                 _logger.LogWarning("Error - did not connect");
+                Stopped?.Invoke(this, EventArgs.Empty);
                 return;
             }
 
@@ -335,7 +340,7 @@ namespace SharpRTSPClient
         public void TryReconnect()
         {
             if (_uri == null)
-                throw new InvalidOperationException("Reconnect can only be called after calling Connect!");
+                throw new InvalidOperationException("You must first call Connect() before re-connecting!");
 
             Connect(_uri, _rtpTransport, _credentials, _mediaRequest, _playbackSession, _userCertificateSelectionCallback, _autoReconnect);
         }
@@ -504,6 +509,8 @@ namespace SharpRTSPClient
                 rtspClient.Stop();
                 _rtspClient = null;
             }
+
+            _rtspSocket = null; // closed by rtspClient.Stop()
         }
 
         /// <summary>
