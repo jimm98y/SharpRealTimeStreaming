@@ -154,7 +154,14 @@ internal class RTSPServerWorker : BackgroundService
                     }
                 }
 
-                rtspVideoTrack.FeedInRawSamples((uint)(videoIndex * videoSampleDuration), (List<byte[]>)videoTrack[videoIndex++ % videoTrack.Count]);
+                try
+                {
+                    rtspVideoTrack.FeedInRawSamples((uint)(videoIndex * videoSampleDuration), (List<byte[]>)videoTrack[videoIndex++ % videoTrack.Count]);
+                }
+                catch(Exception ex)
+                {
+                    _logger.LogError(ex, $"FeedInRawSamples failed: {ex.Message}");
+                }
 
                 if (videoIndex % videoTrack.Count == 0)
                 {
@@ -179,14 +186,7 @@ internal class RTSPServerWorker : BackgroundService
             };
         }
 
-        try
-        {
-            _server.StartListen();
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, ex.ToString());
-        }
+        _server.StartListen();
 
         _logger.LogInformation($"RTSP URL is rtsp://{userName}:{password}@{hostName}:{port}");
 

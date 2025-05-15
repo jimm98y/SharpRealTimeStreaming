@@ -2,7 +2,6 @@
 using System.Buffers;
 using System.Buffers.Binary;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using System.Text;
 
@@ -213,11 +212,23 @@ namespace SharpRTSPServer
             }
         }
 
-        private static (int width, int height, int bpp, byte type) ParseJpeg(Span<byte> binaryReader, out ReadOnlySpan<byte> first, out ReadOnlySpan<byte> second, out Span<byte> retReader)
+        /// <summary>
+        /// Parse JPEG image and return the width, height, bit depth and type.
+        /// </summary>
+        /// <param name="jpegImage">Span holding the JPEG image buffer. <see cref="Span{Byte}"/>.</param>
+        /// <param name="firstQuantizationTable">The first Quantization Table or an empty span when not present.</param>
+        /// <param name="secondQuantizationTable">The second Quantization Table or an empty span when not present.</param>
+        /// <param name="imageData">Image data.</param>
+        /// <returns>JPEG image width, height, bit depth and the RTP payload type.</returns>
+        /// <exception cref="ArgumentException">Thrown when jpegImage data do not contain a valid JPEG image.</exception>
+        /// <exception cref="NotSupportedException">Thrown when JPEG image passed to this function does not meet the criteria for being used in RTP without re-encoding. 
+        /// The criteria are: image dimensions must be less than or equal to 2040 x 2040 pixels and chroma subsampling must be set to 4:2:0 or 4:2:2.
+        /// </exception>
+        public static (int width, int height, int bpp, byte type) ParseJpeg(Span<byte> jpegImage, out ReadOnlySpan<byte> firstQuantizationTable, out ReadOnlySpan<byte> secondQuantizationTable, out Span<byte> imageData)
         {
-            first = ReadOnlySpan<byte>.Empty;
-            second = ReadOnlySpan<byte>.Empty;
-            Span<byte> br = binaryReader;
+            firstQuantizationTable = ReadOnlySpan<byte>.Empty;
+            secondQuantizationTable = ReadOnlySpan<byte>.Empty;
+            Span<byte> br = jpegImage;
             bool isDriPresent = false;
 
             // JPG magic bytes 
@@ -233,7 +244,7 @@ namespace SharpRTSPServer
                 // Start-Of-Frame (SOF) has 4 possible values
                 if (br[1] == 0xc0 || br[1] == 0xc1 || br[1] == 0xc2 || br[1] == 0xc3)
                 {
-                    retReader = br;
+                    imageData = br;
 
                     br = br.Slice(2);
                     br = br.Slice(2);
@@ -249,6 +260,11 @@ namespace SharpRTSPServer
                     // image width
                     int width = (br[0] << 8) | br[1];
                     br = br.Slice(2);
+
+                    if (width > 2040 || height > 2040)
+                    {
+                        throw new NotSupportedException("JPEG image is too large. Maximum image dimensions allowed in JPEG over RTP are 2040x2040 pixels.");
+                    }
 
                     int numComponents = br[0];
                     br = br.Slice(1);
@@ -269,6 +285,8 @@ namespace SharpRTSPServer
                         components.Add(component);
                     }
 
+                    // https://datatracker.ietf.org/doc/html/rfc2435#section-4.1: supported types are only 0, 1 and 64, 65
+                    // JPEG must be re-encoded with chroma subsampling 4:2:0 (0x22,0x11,0x11) or 4:2:2 (0x21,0x11,0x11).
                     var sortedComponents = components.OrderBy(x => x.id);
                     byte type = 0;
                     if (sortedComponents.First().samp == 0x21)
@@ -281,13 +299,20 @@ namespace SharpRTSPServer
                     }
                     else
                     {
-                        // https://datatracker.ietf.org/doc/html/rfc2435#section-4.1: supported types are only 0, 1 and 64, 65
-                        // JPEG must be re-encoded with chroma subsampling 4:2:0 (0x22) or 4:2:2 (0x21).
-                        throw new NotSupportedException("Unsupported chroma subsampling. Please re-encode the JPEG with chroma subsampling 4:2:0 (0x22) or 4:2:2 (0x21).");
+                        throw new NotSupportedException($"Unsupported chroma subsampling 0x{sortedComponents.First().samp:X2}. Supported chroma subsampling values are 4:2:0 (0x22,0x11,0x11) or 4:2:2 (0x21,0x11,0x11).");
                     }
 
-                    if(isDriPresent)
+                    foreach(var comp in sortedComponents.Skip(1))
                     {
+                        if (comp.samp != 0x11)
+                        {
+                            throw new NotSupportedException($"Unsupported chroma subsampling 0x{comp.samp:X2}. Supported chroma subsampling values are 4:2:0 (0x22,0x11,0x11) or 4:2:2 (0x21,0x11,0x11).");
+                        }
+                    }
+
+                    if (isDriPresent)
+                    {
+                        // when restart marker is present, we shift the type by 64
                         type += 64;
                     }
 
@@ -307,12 +332,12 @@ namespace SharpRTSPServer
                 {
                     int matrix_length = chunkLength - 2;
                     var matrix = br.Slice(0, matrix_length);
-                    if (first.IsEmpty)
-                        first = matrix;
-                    else if (second.IsEmpty)
-                        second = matrix;
+                    if (firstQuantizationTable.IsEmpty)
+                        firstQuantizationTable = matrix;
+                    else if (secondQuantizationTable.IsEmpty)
+                        secondQuantizationTable = matrix;
                     else
-                        throw new InvalidOperationException("Error: More than 2 quantization tables in JPEG image");
+                        throw new NotSupportedException("Invalid JPEG image. More than 2 quantization tables found.");
                 }
 
                 // restart marker
