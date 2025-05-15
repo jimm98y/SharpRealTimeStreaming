@@ -2,6 +2,8 @@
 using System.Buffers;
 using System.Buffers.Binary;
 using System.Collections.Generic;
+using System.IO;
+using System.Linq;
 using System.Text;
 
 namespace SharpRTSPServer
@@ -64,14 +66,14 @@ namespace SharpRTSPServer
                     throw new InvalidOperationException($"JPEG image must start with SOI marker {EoiMarker.ToString("X4")} and {header.ToString("X4")}");
                 }
 
-                byte type = 1; // https://datatracker.ietf.org/doc/html/rfc2435#section-3.1.3
+                //byte type = 1; // https://datatracker.ietf.org/doc/html/rfc2435#section-3.1.3
                 byte q = 255; // https://datatracker.ietf.org/doc/html/rfc2435#section-3.1.4, https://datatracker.ietf.org/doc/html/rfc2435#section-4.2
 
                 var firstQuantizationtable = ReadOnlySpan<byte>.Empty;
                 var secondQuantizationtable = ReadOnlySpan<byte>.Empty;
 
                 Span<byte> reader;
-                var jpegSize = ParseJpeg(jpegImage, out firstQuantizationtable, out secondQuantizationtable, out reader);
+                var jpegInfo = ParseJpeg(jpegImage, out firstQuantizationtable, out secondQuantizationtable, out reader);
 
                 // Build a list of 1 or more RTP packets
                 // The last packet will have the M bit set to '1'
@@ -132,10 +134,10 @@ namespace SharpRTSPServer
                     rtpPacketSpan = rtpPacketSpan.Slice(4);
 
                     // Write JPEG Header - https://datatracker.ietf.org/doc/html/rfc2435#section-3.1
-                    rtpPacketSpan[0] = type;
+                    rtpPacketSpan[0] = jpegInfo.type;
                     rtpPacketSpan[1] = q;
-                    rtpPacketSpan[2] = (byte)(jpegSize.width >> 3);
-                    rtpPacketSpan[3] = (byte)(jpegSize.height >> 3);
+                    rtpPacketSpan[2] = (byte)(jpegInfo.width >> 3);
+                    rtpPacketSpan[3] = (byte)(jpegInfo.height >> 3);
                     rtpPacketSpan = rtpPacketSpan.Slice(4);
 
                     // write quantization tables
@@ -197,12 +199,26 @@ namespace SharpRTSPServer
             return (rtpPackets, memoryOwners);
         }
 
+        public struct JpgComponent
+        {
+            public byte id;
+            public byte samp;
+            public byte qt;
 
-        private static (int width, int height, int bpp) ParseJpeg(Span<byte> binaryReader, out ReadOnlySpan<byte> first, out ReadOnlySpan<byte> second, out Span<byte> retReader)
+            public JpgComponent(byte id, byte samp, byte qt)
+            {
+                this.id = id;
+                this.samp = samp;
+                this.qt = qt;
+            }
+        }
+
+        private static (int width, int height, int bpp, byte type) ParseJpeg(Span<byte> binaryReader, out ReadOnlySpan<byte> first, out ReadOnlySpan<byte> second, out Span<byte> retReader)
         {
             first = ReadOnlySpan<byte>.Empty;
             second = ReadOnlySpan<byte>.Empty;
             Span<byte> br = binaryReader;
+            bool isDriPresent = false;
 
             // JPG magic bytes 
             if (br[0] != 0xff || br[1] != 0xd8)
@@ -234,7 +250,48 @@ namespace SharpRTSPServer
                     int width = (br[0] << 8) | br[1];
                     br = br.Slice(2);
 
-                    return (width, height, bpp);
+                    int numComponents = br[0];
+                    br = br.Slice(1);
+
+                    List<JpgComponent> components = new List<JpgComponent>(numComponents);
+                    for (int i = 0; i < numComponents; i++)
+                    {
+                        byte id = br[0];
+                        br = br.Slice(1);
+
+                        byte samp = br[0];
+                        br = br.Slice(1);
+
+                        byte qt = br[0];
+                        br = br.Slice(1);
+
+                        JpgComponent component = new JpgComponent(id, samp, qt);
+                        components.Add(component);
+                    }
+
+                    var sortedComponents = components.OrderBy(x => x.id);
+                    byte type = 0;
+                    if (sortedComponents.First().samp == 0x21)
+                    {
+                        type = 0;
+                    }
+                    else if(sortedComponents.First().samp == 0x22)
+                    {
+                        type = 1;
+                    }
+                    else
+                    {
+                        // https://datatracker.ietf.org/doc/html/rfc2435#section-4.1: supported types are only 0, 1 and 64, 65
+                        // JPEG must be re-encoded with chroma subsampling 4:2:0 (0x22) or 4:2:2 (0x21).
+                        throw new NotSupportedException("Unsupported chroma subsampling. Please re-encode the JPEG with chroma subsampling 4:2:0 (0x22) or 4:2:2 (0x21).");
+                    }
+
+                    if(isDriPresent)
+                    {
+                        type += 64;
+                    }
+
+                    return (width, height, bpp, type);
                 }
 
                 br = br.Slice(1);
@@ -256,6 +313,12 @@ namespace SharpRTSPServer
                         second = matrix;
                     else
                         throw new InvalidOperationException("Error: More than 2 quantization tables in JPEG image");
+                }
+
+                // restart marker
+                if(marker == 0xdd)
+                {
+                    isDriPresent = true;
                 }
 
                 if (chunkLength < 0)
