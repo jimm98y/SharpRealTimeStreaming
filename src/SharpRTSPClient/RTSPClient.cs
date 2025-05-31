@@ -531,6 +531,28 @@ namespace SharpRTSPClient
             _audioRtpTransport.WriteToControlPort(rtcp);
         }
 
+        public byte[] BuildRtcpReceiverReport(uint ssrc)
+        {
+            // TODO: do not send just an empty report
+            // https://www.rfc-editor.org/rfc/rfc3550.txt
+            // https://learn.microsoft.com/en-us/openspecs/office_protocols/ms-rtp/953b588a-4e9d-4ec8-b4d1-913f9b9d04ef
+            byte[] rtcp_receiver_report = new byte[8];
+            int version = 2;
+            int paddingBit = 0;
+            int reportCount = 0; // an empty report
+            int packetType = 201; // Receiver Report
+            int length = rtcp_receiver_report.Length / 4 - 1; // num 32 bit words minus 1
+            rtcp_receiver_report[0] = (byte)((version << 6) + (paddingBit << 5) + reportCount);
+            rtcp_receiver_report[1] = (byte)packetType;
+            rtcp_receiver_report[2] = (byte)(length >> 8 & 0xFF);
+            rtcp_receiver_report[3] = (byte)(length >> 0 & 0XFF);
+            rtcp_receiver_report[4] = (byte)(ssrc >> 24 & 0xFF);
+            rtcp_receiver_report[5] = (byte)(ssrc >> 16 & 0xFF);
+            rtcp_receiver_report[6] = (byte)(ssrc >> 8 & 0xFF);
+            rtcp_receiver_report[7] = (byte)(ssrc >> 0 & 0xFF);
+            return rtcp_receiver_report;
+        }
+
         private void VideoRtpDataReceived(object sender, RtspDataEventArgs e)
         {
             if (e.Data.Data.IsEmpty)
@@ -1342,7 +1364,10 @@ namespace SharpRTSPClient
             else
             {
                 keepAliveMessage = new RtspRequestOptions
-                { };
+                { 
+                    RtspUri = _uri,
+                    Session = _session
+                };
             }
 
             keepAliveMessage.AddAuthorization(_authentication, _uri, _rtspSocket.NextCommandIndex());
