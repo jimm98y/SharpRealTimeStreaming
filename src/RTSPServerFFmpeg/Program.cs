@@ -130,7 +130,7 @@ Task RunUdpClient(ProxyTrack track, Uri uri, CancellationToken cancellationToken
                     {
                         byte[] rtp = udpClient.Receive(ref remoteEndPoint);
                         uint rtpTimestamp = RTPPacketUtil.ReadTS(rtp);
-                        track.FeedInRawSamples(rtpTimestamp, new List<byte[]>() { rtp });
+                        track.FeedInRawSamples(rtpTimestamp, new(rtp));
                     }
                     catch (Exception e)
                     {

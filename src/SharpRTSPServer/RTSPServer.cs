@@ -499,7 +499,7 @@ namespace SharpRTSPServer
 
         private string GenerateSDP()
         {
-            if(!string.IsNullOrEmpty(_sdp))
+            if (!string.IsNullOrEmpty(_sdp))
                 return _sdp; // sdp
 
             StringBuilder sdp = new StringBuilder();
@@ -523,7 +523,7 @@ namespace SharpRTSPServer
 
         private RTSPConnection ConnectionByRtpTransport(IRtpTransport rtpTransport)
         {
-            if (rtpTransport == null) 
+            if (rtpTransport == null)
                 return null;
 
             lock (_connectionList)
@@ -534,7 +534,7 @@ namespace SharpRTSPServer
 
         private RTSPConnection ConnectionBySessionId(string sessionId)
         {
-            if (sessionId == null) 
+            if (sessionId == null)
                 return null;
 
             lock (_connectionList)
@@ -578,7 +578,7 @@ namespace SharpRTSPServer
             return true;
         }
 
-        public void FeedInRawRTP(int streamType, uint rtpTimestamp, List<Memory<byte>> rtpPackets)
+        public void FeedInRawRTP(int streamType, uint rtpTimestamp, ReadOnlySequence<byte> rtpPackets)
         {
             if (streamType != 0 && streamType != 1)
                 throw new ArgumentException("Invalid streamType! Video = 0, Audio = 1");
@@ -614,7 +614,7 @@ namespace SharpRTSPServer
             }
         }
 
-        public void SendRawRTP(RTSPConnection connection, RTPStream stream, List<Memory<byte>> rtpPackets)
+        public void SendRawRTP(RTSPConnection connection, RTPStream stream, ReadOnlySequence<byte> rtpPackets)
         {
             if (!connection.Play)
                 return;
@@ -622,37 +622,43 @@ namespace SharpRTSPServer
             bool writeError = false;
             uint writtenBytes = 0;
             // There could be more than 1 RTP packet (if the data is fragmented)
-            foreach (var rtpPacket in rtpPackets)
+            using (var rawRtpBuffer = new PooledByteBuffer(initialBufferSize: 0))
             {
-                // Add the specific data for each transmission
-                RTPPacketUtil.WriteSequenceNumber(rtpPacket.Span, stream.SequenceNumber);
-                stream.SequenceNumber++;
-
-                // Add the specific SSRC for each transmission
-                RTPPacketUtil.WriteSSRC(rtpPacket.Span, connection.SSRC);
-
-                //Debug.Assert(connection.Streams[streamType].RtpChannel != null, "If connection.Streams[streamType].RtpChannel is null here the program did not handle well connection problem");
-                try
+                foreach (var rtpPacket in rtpPackets)
                 {
-                    // send the whole NAL. ** We could fragment the RTP packet into smaller chuncks that fit within the MTU
-                    // Send to the IP address of the Client
-                    // Send to the UDP Port the Client gave us in the SETUP command
-                    var channel = stream.RtpChannel;
-                    if (channel != null)
+                    // Add the specific data for each transmission
+                    var rtpPacketSpan = rawRtpBuffer.GetSpan(rtpPacket.Length).Slice(0, rtpPacket.Length);
+                    rtpPacket.Span.CopyTo(rtpPacketSpan);
+
+                    RTPPacketUtil.WriteSequenceNumber(rtpPacketSpan, stream.SequenceNumber);
+                    stream.SequenceNumber++;
+
+                    // Add the specific SSRC for each transmission
+                    RTPPacketUtil.WriteSSRC(rtpPacketSpan, connection.SSRC);
+
+                    //Debug.Assert(connection.Streams[streamType].RtpChannel != null, "If connection.Streams[streamType].RtpChannel is null here the program did not handle well connection problem");
+                    try
                     {
-                        channel.WriteToDataPort(rtpPacket.Span);
-                        writtenBytes += (uint)rtpPacket.Span.Length;
+                        // send the whole NAL. ** We could fragment the RTP packet into smaller chuncks that fit within the MTU
+                        // Send to the IP address of the Client
+                        // Send to the UDP Port the Client gave us in the SETUP command
+                        var channel = stream.RtpChannel;
+                        if (channel != null)
+                        {
+                            channel.WriteToDataPort(rtpPacketSpan);
+                            writtenBytes += (uint)rtpPacketSpan.Length;
+                        }
+                        else
+                        {
+                            writeError = true;
+                        }
                     }
-                    else
+                    catch (Exception e)
                     {
+                        _logger.LogWarning("UDP Write Exception " + e);
                         writeError = true;
+                        break; // exit out of foreach loop
                     }
-                }
-                catch (Exception e)
-                {
-                    _logger.LogWarning("UDP Write Exception " + e);
-                    writeError = true;
-                    break; // exit out of foreach loop
                 }
             }
 
@@ -670,9 +676,11 @@ namespace SharpRTSPServer
 
         private bool SendRTCP(uint rtpTimestamp, RTSPConnection connection, RTPStream stream)
         {
-            using (var rtcpOwner = MemoryPool<byte>.Shared.Rent(28))
+            using (var rtcpBuffer = new PooledByteBuffer(28))
             {
-                var rtcpSenderReport = rtcpOwner.Memory.Slice(0, 28).Span;
+                const int size = 28; // 7 32-bit words
+                var rtcpSenderReport = rtcpBuffer.GetMemory(size).Slice(0, size).Span;
+                rtcpBuffer.Advance(size);
                 const bool hasPadding = false;
                 const int reportCount = 0; // an empty report
                 int length = (rtcpSenderReport.Length / 4) - 1; // num 32 bit words minus 1
@@ -715,7 +723,7 @@ namespace SharpRTSPServer
 
         private static string TransportLogName(IRtpTransport transport)
         {
-            switch(transport)
+            switch (transport)
             {
                 case RtpTcpTransport _:
                     return "TCP";
@@ -725,7 +733,8 @@ namespace SharpRTSPServer
                     return "UDP";
                 default:
                     return "";
-            };
+            }
+            ;
         }
 
         #region IDisposable
@@ -746,7 +755,7 @@ namespace SharpRTSPServer
                 StopListen();
                 _stopping?.Dispose();
 
-                if(VideoTrack is IDisposable disposableVideoTrack)
+                if (VideoTrack is IDisposable disposableVideoTrack)
                 {
                     disposableVideoTrack.Dispose();
                     VideoTrack = null;
@@ -772,7 +781,7 @@ namespace SharpRTSPServer
                     // we have to fill in the trackID to identify the session in RTSP
                     using (var textReader = new StringReader(sdp))
                     {
-                        while(true)
+                        while (true)
                         {
                             string line = textReader.ReadLine();
 
@@ -781,7 +790,7 @@ namespace SharpRTSPServer
 
                             builder.AppendLine(line);
 
-                            if(line.StartsWith("m="))
+                            if (line.StartsWith("m="))
                             {
                                 builder.AppendLine($"a=control:trackID={mediaIndex++}");
                             }
@@ -859,7 +868,7 @@ namespace SharpRTSPServer
             /// <summary>
             /// RTSP Session ID used with this client connection.
             /// </summary>
-            public string SessionId { get; set; } = ""; 
+            public string SessionId { get; set; } = "";
 
             /// <summary>
             /// Video stream.
@@ -889,7 +898,7 @@ namespace SharpRTSPServer
 
     public interface IRtpSender
     {
-        void FeedInRawRTP(int streamType, uint rtpTimestamp, List<Memory<byte>> rtpPackets);
+        void FeedInRawRTP(int streamType, uint rtpTimestamp, ReadOnlySequence<byte> rtpPackets);
         bool CanAcceptNewSamples();
     }
 
@@ -930,9 +939,9 @@ namespace SharpRTSPServer
         /// <param name="samples">An array of samples.</param>
         /// <param name="rtpTimestamp">RTP timestamp in the timescale of the track.</param>
         /// <returns>RTP packets.</returns>
-        (List<Memory<byte>>, List<IMemoryOwner<byte>>) CreateRtpPackets(List<byte[]> samples, uint rtpTimestamp);
-        
-        void FeedInRawSamples(uint rtpTimestamp, List<byte[]> samples);
+        IByteBuffer CreateRtpPackets(ReadOnlySequence<byte> samples, uint rtpTimestamp);
+
+        void FeedInRawSamples(uint rtpTimestamp, ReadOnlySequence<byte> samples);
     }
 
     public class CustomLoggerFactory : ILoggerFactory
