@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using SharpMp4;
 using SharpRTSPServer;
 using System;
+using System.Buffers;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -156,9 +157,17 @@ internal class RTSPServerWorker : BackgroundService
 
                 try
                 {
-                    rtspVideoTrack.FeedInRawSamples((uint)(videoIndex * videoSampleDuration), (List<byte[]>)videoTrack[videoIndex++ % videoTrack.Count]);
+                    using (var buffer = new PooledByteBuffer(initialBufferSize: 0))
+                    {
+                        foreach (var trackBytes in videoTrack[videoIndex++ % videoTrack.Count])
+                        {
+                            buffer.Write(trackBytes);
+                        }
+
+                        rtspVideoTrack.FeedInRawSamples((uint)(videoIndex * videoSampleDuration), buffer.GetReadOnlySequence());
+                    }
                 }
-                catch(Exception ex)
+                catch (Exception ex)
                 {
                     _logger.LogError(ex, $"FeedInRawSamples failed: {ex.Message}");
                 }
@@ -167,7 +176,8 @@ internal class RTSPServerWorker : BackgroundService
                 {
                     Reset(ref videoIndex, videoTimer, ref audioIndex, audioTimer);
                 }
-            };
+            }
+        ;
         }
 
         if (rtspAudioTrack != null)
@@ -177,7 +187,7 @@ internal class RTSPServerWorker : BackgroundService
             audioTimer = new Timer(audioSampleDuration * 1000 / (rtspAudioTrack as SharpRTSPServer.AACTrack).SamplingRate);
             audioTimer.Elapsed += (s, e) =>
             {
-                rtspAudioTrack.FeedInRawSamples((uint)(audioIndex * audioSampleDuration), new List<byte[]>() { audioTrack[0][audioIndex++ % audioTrack[0].Count] });
+                rtspAudioTrack.FeedInRawSamples((uint)(audioIndex * audioSampleDuration), new ReadOnlySequence<byte>(audioTrack[0][audioIndex++ % audioTrack[0].Count]));
 
                 if (audioIndex % audioTrack[0].Count == 0)
                 {

@@ -5,6 +5,7 @@ using Rtsp.Onvif;
 using Rtsp.Rtp;
 using Rtsp.Sdp;
 using System;
+using System.Buffers;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -59,7 +60,7 @@ namespace SharpRTSPClient
 
         private IRtspTransport _rtspSocket; // RTSP connection
         private RtspStatus _rtspSocketStatus = RtspStatus.WaitingToConnect;
-        
+
         // this wraps around a the RTSP tcpSocket stream
         private RtspListener _rtspClient;
         private RTPTransport _rtpTransport = RTPTransport.UDP; // Mode, either RTP over UDP or RTP over TCP using the RTSP socket
@@ -101,7 +102,7 @@ namespace SharpRTSPClient
         /// Called when the Setup command are completed, so we can start the right Play message (with or without playback informations)
         /// </summary>
         public event EventHandler SetupMessageCompleted;
-        
+
         /// <summary>
         /// Video SSRC.
         /// </summary>
@@ -118,9 +119,9 @@ namespace SharpRTSPClient
             {
                 RtspUtils.RegisterUri();
             }
-            catch(Exception ex)
+            catch (Exception ex)
             {
-                if(Log.ErrorEnabled) Log.Error(ex.Message);
+                if (Log.ErrorEnabled) Log.Error(ex.Message);
             }
         }
 
@@ -152,16 +153,16 @@ namespace SharpRTSPClient
         /// <param name="userCertificateSelectionCallback">Callback for user certificate selection.</param>
         /// <param name="autoReconnect">Automatically try to reconnect after losing the connection.</param>
         public void Connect(
-            string url, 
-            RTPTransport rtpTransport, 
-            string username = null, 
-            string password = null, 
-            MediaRequest mediaRequest = MediaRequest.VIDEO_AND_AUDIO, 
+            string url,
+            RTPTransport rtpTransport,
+            string username = null,
+            string password = null,
+            MediaRequest mediaRequest = MediaRequest.VIDEO_AND_AUDIO,
             bool playbackSession = false,
-            RemoteCertificateValidationCallback userCertificateSelectionCallback = null, 
+            RemoteCertificateValidationCallback userCertificateSelectionCallback = null,
             bool autoReconnect = false)
         {
-            if (string.IsNullOrEmpty(url)) 
+            if (string.IsNullOrEmpty(url))
                 throw new ArgumentNullException(nameof(url));
 
             Connect(new Uri(url), rtpTransport, username, password, mediaRequest, playbackSession, userCertificateSelectionCallback, autoReconnect);
@@ -179,16 +180,16 @@ namespace SharpRTSPClient
         /// <param name="userCertificateSelectionCallback">Callback for user certificate selection.</param>
         /// <param name="autoReconnect">Automatically try to reconnect after losing the connection.</param>
         public void Connect(
-            Uri uri, 
-            RTPTransport rtpTransport, 
-            string username = null, 
-            string password = null, 
+            Uri uri,
+            RTPTransport rtpTransport,
+            string username = null,
+            string password = null,
             MediaRequest mediaRequest = MediaRequest.VIDEO_AND_AUDIO,
-            bool playbackSession = false, 
-            RemoteCertificateValidationCallback userCertificateSelectionCallback = null, 
+            bool playbackSession = false,
+            RemoteCertificateValidationCallback userCertificateSelectionCallback = null,
             bool autoReconnect = false)
         {
-            if (uri == null) 
+            if (uri == null)
                 throw new ArgumentNullException(nameof(uri));
 
             // Use URI to extract username and password and to make a new URL without the username and password
@@ -220,12 +221,12 @@ namespace SharpRTSPClient
         /// <param name="userCertificateSelectionCallback">Callback for user certificate selection.</param>
         /// <param name="autoReconnect">Automatically try to reconnect after losing the connection.</param>
         public void Connect(
-            Uri uri, 
-            RTPTransport rtpTransport, 
-            NetworkCredential credentials = null, 
-            MediaRequest mediaRequest = MediaRequest.VIDEO_AND_AUDIO, 
-            bool playbackSession = false, 
-            RemoteCertificateValidationCallback userCertificateSelectionCallback = null, 
+            Uri uri,
+            RTPTransport rtpTransport,
+            NetworkCredential credentials = null,
+            MediaRequest mediaRequest = MediaRequest.VIDEO_AND_AUDIO,
+            bool playbackSession = false,
+            RemoteCertificateValidationCallback userCertificateSelectionCallback = null,
             bool autoReconnect = false)
         {
             if (_rtspClient != null)
@@ -349,9 +350,9 @@ namespace SharpRTSPClient
         /// Returns true if this connection failed, or if it connected but is no longer connected.
         /// </summary>
         /// <returns></returns>
-        public bool StreamingFinished() 
+        public bool StreamingFinished()
         {
-            switch(_rtspSocketStatus)
+            switch (_rtspSocketStatus)
             {
                 case RtspStatus.ConnectFailed:
                     return true;
@@ -475,7 +476,7 @@ namespace SharpRTSPClient
 
             // Stop the keepalive timer
             var keepaliveTimer = _keepaliveTimer;
-            if(keepaliveTimer != null)
+            if (keepaliveTimer != null)
             {
                 keepaliveTimer.Elapsed -= SendKeepAlive;
                 keepaliveTimer.Dispose();
@@ -536,12 +537,12 @@ namespace SharpRTSPClient
             // TODO: do not send just an empty report
             // https://www.rfc-editor.org/rfc/rfc3550.txt
             // https://learn.microsoft.com/en-us/openspecs/office_protocols/ms-rtp/953b588a-4e9d-4ec8-b4d1-913f9b9d04ef
-            byte[] rtcp_receiver_report = new byte[8];
-            int version = 2;
-            int paddingBit = 0;
-            int reportCount = 0; // an empty report
-            int packetType = 201; // Receiver Report
-            int length = rtcp_receiver_report.Length / 4 - 1; // num 32 bit words minus 1
+            var rtcp_receiver_report = new byte[8];
+            var version = 2;
+            var paddingBit = 0;
+            var reportCount = 0; // an empty report
+            var packetType = 201; // Receiver Report
+            var length = rtcp_receiver_report.Length / 4 - 1; // num 32 bit words minus 1
             rtcp_receiver_report[0] = (byte)((version << 6) + (paddingBit << 5) + reportCount);
             rtcp_receiver_report[1] = (byte)packetType;
             rtcp_receiver_report[2] = (byte)(length >> 8 & 0xFF);
@@ -598,11 +599,25 @@ namespace SharpRTSPClient
                     return;
                 }
 
-                using (RawMediaFrame nalUnits = _videoPayloadProcessor.ProcessPacket(rtpPacket)) // this will cache the Packets until there is a Frame
+                var receivedVideoData = ReceivedVideoData;
+                if (receivedVideoData != null)
                 {
-                    if (nalUnits.Any())
+                    using (var nalUnits = _videoPayloadProcessor.ProcessPacket(rtpPacket)) // this will cache the Packets until there is a Frame
                     {
-                        ReceivedVideoData?.Invoke(this, new SimpleDataEventArgs(nalUnits.Data, nalUnits.ClockTimestamp, nalUnits.RtpTimestamp));
+                        using (var buffer = new PooledByteBuffer())
+                        {
+                            foreach (var segment in nalUnits.Data)
+                            {
+                                buffer.Write(segment.Span);
+                            }
+
+                            var sequence = buffer.GetReadOnlySequence();
+
+                            if (!sequence.IsEmpty)
+                            {
+                                receivedVideoData(this, new SimpleDataEventArgs(sequence, nalUnits.ClockTimestamp, nalUnits.RtpTimestamp));
+                            }
+                        }
                     }
                 }
             }
@@ -629,7 +644,7 @@ namespace SharpRTSPClient
                 if (rtpPacket.PayloadType != _audioPayload)
                 {
                     _logger.LogDebug("Ignoring this Audio RTP payload");
-                    return; 
+                    return;
                 }
 
                 ReceivedRawAudioRTP?.Invoke(this,
@@ -661,11 +676,25 @@ namespace SharpRTSPClient
                     return;
                 }
 
-                using (var audioFrames = _audioPayloadProcessor.ProcessPacket(rtpPacket))
+                var receivedAudioData = ReceivedAudioData;
+                if (receivedAudioData != null)
                 {
-                    if (audioFrames.Any())
+                    using (var audioFrames = _audioPayloadProcessor.ProcessPacket(rtpPacket))
                     {
-                        ReceivedAudioData?.Invoke(this, new SimpleDataEventArgs(audioFrames.Data, audioFrames.ClockTimestamp, audioFrames.RtpTimestamp));
+                        using (var buffer = new PooledByteBuffer())
+                        {
+                            foreach (var segment in audioFrames.Data)
+                            {
+                                buffer.Write(segment.Span);
+                            }
+
+                            var sequence = buffer.GetReadOnlySequence();
+
+                            if (!sequence.IsEmpty)
+                            {
+                                receivedAudioData(this, new SimpleDataEventArgs(sequence, audioFrames.ClockTimestamp, audioFrames.RtpTimestamp));
+                            }
+                        }
                     }
                 }
             }
@@ -1013,7 +1042,7 @@ namespace SharpRTSPClient
             _logger.LogDebug("SDP:\n{sdp}", Encoding.UTF8.GetString(message.Data.Span.ToArray()));
 
             SdpFile sdpData;
-            using(var ms = new MemoryStream(message.Data.Span.ToArray()))
+            using (var ms = new MemoryStream(message.Data.Span.ToArray()))
             using (StreamReader sdpStream = new StreamReader(ms))
             {
                 sdpData = SdpFile.ReadLoose(sdpStream);
@@ -1063,7 +1092,7 @@ namespace SharpRTSPClient
                     {
                         // found a valid codec
                         payloadName = rtpmap.EncodingName.ToUpperInvariant();
-                        switch(payloadName)
+                        switch (payloadName)
                         {
                             case "H264":
                                 _videoPayloadProcessor = new H264Payload(_loggerFactory.CreateLogger<H264Payload>());
@@ -1080,7 +1109,8 @@ namespace SharpRTSPClient
                             default:
                                 _videoPayloadProcessor = null;
                                 break;
-                        };
+                        }
+                        ;
                         _videoPayload = media.PayloadType;
                     }
                     else
@@ -1089,7 +1119,7 @@ namespace SharpRTSPClient
                         if (media.PayloadType < 96)
                         {
                             // PayloadType is a static value, so we can use it to determine the codec
-                            switch(media.PayloadType)
+                            switch (media.PayloadType)
                             {
                                 case 26:
                                     {
@@ -1109,7 +1139,8 @@ namespace SharpRTSPClient
                                         payloadName = string.Empty;
                                     }
                                     break;
-                            };
+                            }
+                            ;
                         }
                     }
 
@@ -1164,7 +1195,7 @@ namespace SharpRTSPClient
                             setupMessage.AddTransport(transport);
                             setupMessage.AddAuthorization(_authentication, _uri, _rtspSocket.NextCommandIndex());
                             if (_playbackSession) { setupMessage.AddRequireOnvifRequest(); }
-                            
+
                             // Add SETUP message to list of mesages to send
                             _setupMessages.Enqueue(setupMessage);
                             NewVideoStream?.Invoke(this, new NewStreamEventArgs(media.PayloadType, payloadName, streamConfigurationData));
@@ -1189,7 +1220,7 @@ namespace SharpRTSPClient
                     if (media.PayloadType < 96)
                     {
                         // fixed payload type
-                        switch(media.PayloadType)
+                        switch (media.PayloadType)
                         {
                             case 0:
                                 (_audioPayloadProcessor, _audioCodec) = (new G711Payload(), "PCMU");
@@ -1200,13 +1231,14 @@ namespace SharpRTSPClient
                             default:
                                 (_audioPayloadProcessor, _audioCodec) = (null, "");
                                 break;
-                        };
+                        }
+                        ;
                     }
                     else
                     {
                         // dynamic payload type
                         _audioCodec = rtpmap?.EncodingName?.ToUpperInvariant() ?? string.Empty;
-                        switch(_audioCodec)
+                        switch (_audioCodec)
                         {
                             // Create AAC RTP Parser
                             // Example fmtp is "96 profile-level-id=1;mode=AAC-hbr;sizelength=13;indexlength=3;indexdeltalength=3;config=1490"
@@ -1229,7 +1261,8 @@ namespace SharpRTSPClient
                             default:
                                 _audioPayloadProcessor = null;
                                 break;
-                        };
+                        }
+                        ;
                         if (_audioPayloadProcessor is AACPayload aacPayloadProcessor)
                         {
                             _audioCodec = "AAC";
@@ -1246,12 +1279,12 @@ namespace SharpRTSPClient
                     // Send the SETUP RTSP command if we have a matching Payload Decoder
                     if (_audioPayloadProcessor != null)
                     {
-                        RtspTransport transport = CalculateTransport(_audioRtpTransport);
+                        var transport = CalculateTransport(_audioRtpTransport);
 
                         // Generate SETUP messages
                         if (transport != null)
                         {
-                            RtspRequestSetup setupMessage = new RtspRequestSetup()
+                            var setupMessage = new RtspRequestSetup()
                             {
                                 RtspUri = _audioUri,
                             };
@@ -1288,14 +1321,14 @@ namespace SharpRTSPClient
             var attrib = media.Attributs.FirstOrDefault(a => a.Key == "control");
             if (attrib != null)
             {
-                string sdpControl = attrib.Value;
+                var sdpControl = attrib.Value;
 
                 if (sdpControl.StartsWith("rtsp://", StringComparison.OrdinalIgnoreCase) ||
                     sdpControl.StartsWith("rtsps://", StringComparison.OrdinalIgnoreCase) ||
                     sdpControl.StartsWith("http://", StringComparison.OrdinalIgnoreCase))
                 {
                     // the "track" or "stream id"
-                    string control = sdpControl; //absolute path
+                    var control = sdpControl; //absolute path
                     controlUri = new Uri(control);
                 }
                 else
@@ -1311,7 +1344,7 @@ namespace SharpRTSPClient
 
         private RtspTransport CalculateTransport(IRtpTransport transport)
         {
-            switch(_rtpTransport)
+            switch (_rtpTransport)
             {
                 // Server interleaves the RTP packets over the RTSP connection
                 // Example for TCP mode (RTP over RTSP)   Transport: RTP/AVP/TCP;interleaved=0-1
@@ -1341,7 +1374,7 @@ namespace SharpRTSPClient
                     };
                 default:
                     return null;
-            };
+            }
         }
 
         private void SendKeepAlive(object sender, System.Timers.ElapsedEventArgs e)
@@ -1364,7 +1397,7 @@ namespace SharpRTSPClient
             else
             {
                 keepAliveMessage = new RtspRequestOptions
-                { 
+                {
                     RtspUri = _uri,
                     Session = _session
                 };
@@ -1422,20 +1455,20 @@ namespace SharpRTSPClient
 
     public class SimpleDataEventArgs : EventArgs
     {
-        public SimpleDataEventArgs(IEnumerable<ReadOnlyMemory<byte>> data, DateTime timestamp, uint rtpTimestamp)
+        public SimpleDataEventArgs(ReadOnlySequence<byte> data, DateTime timestamp, uint rtpTimestamp)
         {
             Data = data;
             Timestamp = timestamp;
-            RtpTimestamp = rtpTimestamp;    
+            RtpTimestamp = rtpTimestamp;
         }
 
         public DateTime Timestamp { get; }
         public uint RtpTimestamp { get; }
-        public IEnumerable<ReadOnlyMemory<byte>> Data { get; }
+        public ReadOnlySequence<byte> Data { get; }
 
         public override string ToString()
         {
-            return $"{Timestamp}: Data {Data.Count()}";
+            return $"{Timestamp}: Data lenght {Data.Length} bytes";
         }
     }
 
@@ -1458,14 +1491,14 @@ namespace SharpRTSPClient
         public RawRtpDataEventArgs(
             ReadOnlyMemory<byte> data,
             int csrcCount,
-            int? extensionHeaderId, 
-            bool hasPadding, 
-            bool isMarker, 
-            bool isWellFormed, 
-            int payloadSize, 
+            int? extensionHeaderId,
+            bool hasPadding,
+            bool isMarker,
+            bool isWellFormed,
+            int payloadSize,
             int payloadType,
-            int sequenceNumber, 
-            uint ssrc, 
+            int sequenceNumber,
+            uint ssrc,
             uint timestamp,
             int version,
             int payloadStart)
@@ -1516,7 +1549,7 @@ namespace SharpRTSPClient
             }
 
             string authorization = authentication.GetResponse(commandCounter, uri.AbsoluteUri, message.Method, new byte[0]);
-            
+
             // remove if already one...
             message.Headers.Remove(RtspHeaderNames.Authorization);
             message.Headers.Add(RtspHeaderNames.Authorization, authorization);
@@ -1526,7 +1559,7 @@ namespace SharpRTSPClient
     public class CustomLoggerFactory : ILoggerFactory
     {
         public void AddProvider(ILoggerProvider provider)
-        {  }
+        { }
 
         public ILogger CreateLogger(string categoryName)
         {
@@ -1534,7 +1567,7 @@ namespace SharpRTSPClient
         }
 
         public void Dispose()
-        {  }
+        { }
     }
 
     public class CustomLogger : ILogger

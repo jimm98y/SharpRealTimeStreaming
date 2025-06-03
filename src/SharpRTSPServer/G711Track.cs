@@ -59,34 +59,29 @@ namespace SharpRTSPServer
         /// <param name="samples">An array of PCMU fragments. By default single fragment is expected.</param>
         /// <param name="rtpTimestamp">RTP timestamp in the timescale of the track.</param>
         /// <returns>RTP packets.</returns>
-        public override (List<Memory<byte>>, List<IMemoryOwner<byte>>) CreateRtpPackets(List<byte[]> samples, uint rtpTimestamp)
+        public override IByteBuffer CreateRtpPackets(ReadOnlySequence<byte> samples, uint rtpTimestamp)
         {
-            List<Memory<byte>> rtpPackets = new List<Memory<byte>>();
-            List<IMemoryOwner<byte>> memoryOwners = new List<IMemoryOwner<byte>>();
+            var byteBuffer = new PooledByteBuffer(initialBufferSize: 0);
 
-            for (int i = 0; i < samples.Count; i++)
+            foreach (var audioPacket in samples)
             {
-                var audioPacket = samples[i];
                 var size = 12 + audioPacket.Length;
-                var owner = MemoryPool<byte>.Shared.Rent(size);
-                memoryOwners.Add(owner);
-
-                var rtpPacket = owner.Memory.Slice(0, size);
+                var rtpPacket = byteBuffer.GetSpan(size).Slice(0, size);
+                byteBuffer.Advance(size);
 
                 const bool rtpPadding = false;
                 const bool rtpHasExtension = false;
                 int rtpCsrcCount = 0;
                 const bool rtpMarker = true;
 
-                RTPPacketUtil.WriteHeader(rtpPacket.Span,
+                RTPPacketUtil.WriteHeader(rtpPacket,
                     RTPPacketUtil.RTP_VERSION, rtpPadding, rtpHasExtension, rtpCsrcCount, rtpMarker, PayloadType);
 
-                RTPPacketUtil.WriteTS(rtpPacket.Span, rtpTimestamp);
-                audioPacket.CopyTo(rtpPacket.Slice(12));
-                rtpPackets.Add(rtpPacket);
+                RTPPacketUtil.WriteTS(rtpPacket, rtpTimestamp);
+                audioPacket.Span.CopyTo(rtpPacket.Slice(12));
             }
 
-            return (rtpPackets, memoryOwners);
+            return byteBuffer;
         }
     }
 
@@ -144,34 +139,29 @@ namespace SharpRTSPServer
         /// <param name="samples">An array of PCMA fragments. By default single fragment is expected.</param>
         /// <param name="rtpTimestamp">RTP timestamp in the timescale of the track.</param>
         /// <returns>RTP packets.</returns>
-        public override (List<Memory<byte>>, List<IMemoryOwner<byte>>) CreateRtpPackets(List<byte[]> samples, uint rtpTimestamp)
+        public override IByteBuffer CreateRtpPackets(ReadOnlySequence<byte> samples, uint rtpTimestamp)
         {
-            List<Memory<byte>> rtpPackets = new List<Memory<byte>>();
-            List<IMemoryOwner<byte>> memoryOwners = new List<IMemoryOwner<byte>>();
+            var byteBuffer = new PooledByteBuffer(initialBufferSize: 0);
 
-            for (int i = 0; i < samples.Count; i++)
+            foreach (var audioPacket in samples)
             {
-                var audioPacket = samples[i];
                 var size = 12 + audioPacket.Length;
-                var owner = MemoryPool<byte>.Shared.Rent(size);
-                memoryOwners.Add(owner);
-
-                var rtpPacket = owner.Memory.Slice(0, size);
+                var rtpPacket = byteBuffer.GetSpan(size).Slice(0, size);
+                byteBuffer.Advance(size);
 
                 const bool rtpPadding = false;
                 const bool rtpHasExtension = false;
                 int rtpCsrcCount = 0;
                 const bool rtpMarker = true; 
 
-                RTPPacketUtil.WriteHeader(rtpPacket.Span,
+                RTPPacketUtil.WriteHeader(rtpPacket,
                     RTPPacketUtil.RTP_VERSION, rtpPadding, rtpHasExtension, rtpCsrcCount, rtpMarker, PayloadType);
 
-                RTPPacketUtil.WriteTS(rtpPacket.Span, rtpTimestamp);
-                audioPacket.CopyTo(rtpPacket.Slice(12));
-                rtpPackets.Add(rtpPacket);
+                RTPPacketUtil.WriteTS(rtpPacket, rtpTimestamp);
+                audioPacket.Span.CopyTo(rtpPacket.Slice(12));
             }
 
-            return (rtpPackets, memoryOwners);
+            return byteBuffer;
         }
     }
 }

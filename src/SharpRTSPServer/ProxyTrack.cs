@@ -16,11 +16,11 @@ namespace SharpRTSPServer
         private bool _disposedValue;
 
         public override bool IsReady
-        { 
-            get 
+        {
+            get
             {
                 return _isReady;
-            } 
+            }
         }
 
         public Uri Uri { get; }
@@ -40,23 +40,20 @@ namespace SharpRTSPServer
             _isReady = true;
         }
 
-        public override (List<Memory<byte>>, List<IMemoryOwner<byte>>) CreateRtpPackets(List<byte[]> samples, uint rtpTimestamp)
+        public override IByteBuffer CreateRtpPackets(ReadOnlySequence<byte> samples, uint rtpTimestamp)
         {
-            List<Memory<byte>> rtpPackets = new List<Memory<byte>>();
-            List<IMemoryOwner<byte>> memoryOwners = new List<IMemoryOwner<byte>>();
-            var owner = MemoryPool<byte>.Shared.Rent(samples[0].Length);
-            memoryOwners.Add(owner);
-            var rtpPacket = owner.Memory.Slice(0, samples[0].Length);
-            MemoryExtensions.CopyTo(samples[0], rtpPacket);
-            rtpPackets.Add(rtpPacket);
-            return (rtpPackets, memoryOwners);
+            int length = (int)samples.Length;
+            var byteBuffer = new PooledByteBuffer(length);
+            samples.CopyTo(byteBuffer.GetSpan(length));
+            byteBuffer.Advance(length);
+            return byteBuffer;
         }
 
         protected virtual void Dispose(bool disposing)
         {
             if (!_disposedValue)
             {
-                if(disposing)
+                if (disposing)
                 {
                     _isReady = false;
                 }

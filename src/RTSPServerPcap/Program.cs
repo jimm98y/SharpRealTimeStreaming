@@ -4,6 +4,7 @@ using Haukcode.PcapngUtils.PcapNG.BlockTypes;
 using Microsoft.Extensions.Configuration;
 using SharpRTSPServer;
 using System;
+using System.Buffers;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -87,7 +88,7 @@ void Reader_OnReadPacketEvent(object context, IPacket packet)
     {
         var ipHeader = ParseIPHeader(packet);
 
-        if(ipHeader.Protocol == 6) // TCP - RTSP
+        if (ipHeader.Protocol == 6) // TCP - RTSP
         {
             var tcpHeader = ParseTCPHeader(packet, 4 + ipHeader.HeaderLength);
             Debug.WriteLine($"Source: {ipHeader.SourceIP}:{tcpHeader.SourcePort}, Dest: {ipHeader.DestintationIP}:{tcpHeader.DestinationPort}, Ver: {ipHeader.Version}");
@@ -113,7 +114,7 @@ void ParseData(byte[] data, object header, uint seconds, uint microseconds)
 
     if (udp != null && data.Length > 1) // TODO
     {
-        if(data[0] == 0x80 && data[1] != 0xc8) // 0xc8 sender report -> ignore rtcp
+        if (data[0] == 0x80 && data[1] != 0xc8) // 0xc8 sender report -> ignore rtcp
         {
             long messageTime = seconds * 1000 + (microseconds / 1000);
             long realTime = (uint)_stopwatch.ElapsedMilliseconds;
@@ -132,9 +133,9 @@ void ParseData(byte[] data, object header, uint seconds, uint microseconds)
                 {
                     Thread.Sleep(sleep);
                 }
-                videoTrack?.FeedInRawSamples(RTPPacketUtil.ReadTS(data), new List<byte[]> { data });
+                videoTrack?.FeedInRawSamples(RTPPacketUtil.ReadTS(data), new ReadOnlySequence<byte>(data));
             }
-            else if(rtspProtocolParser.Ports.Count > 1 && rtspProtocolParser.Ports[1].Contains(udp.SourcePort) && rtspProtocolParser.Ports[1].Contains(udp.DestinationPort))
+            else if (rtspProtocolParser.Ports.Count > 1 && rtspProtocolParser.Ports[1].Contains(udp.SourcePort) && rtspProtocolParser.Ports[1].Contains(udp.DestinationPort))
             {
                 if (lastAudioMessageTime == -1)
                     lastAudioMessageTime = messageTime;
@@ -149,7 +150,7 @@ void ParseData(byte[] data, object header, uint seconds, uint microseconds)
                     Thread.Sleep(sleep);
                 }
 
-                audioTrack?.FeedInRawSamples(RTPPacketUtil.ReadTS(data), new List<byte[]> { data });
+                audioTrack?.FeedInRawSamples(RTPPacketUtil.ReadTS(data), new ReadOnlySequence<byte>(data));
             }
         }
     }
@@ -305,19 +306,19 @@ public class RtspProtocolParser
                         {
                             int.TryParse(line.Substring(CONTENT_LENGTH.Length).Trim(), out contentLength);
                         }
-                        else if(line.StartsWith(TRANSPORT)) // SETUP response
+                        else if (line.StartsWith(TRANSPORT)) // SETUP response
                         {
                             int[] clientPorts = null;
                             int[] serverPorts = null;
                             string[] split = line.Substring(TRANSPORT.Length).Trim().Split(';');
-                            foreach(var s in split)
+                            foreach (var s in split)
                             {
                                 string str = s.Trim();
-                                if(str.StartsWith(CLIENT_PORT))
+                                if (str.StartsWith(CLIENT_PORT))
                                 {
                                     clientPorts = str.Substring(CLIENT_PORT.Length).Split('-').Select(int.Parse).ToArray();
                                 }
-                                else if(str.StartsWith(SERVER_PORT))
+                                else if (str.StartsWith(SERVER_PORT))
                                 {
                                     serverPorts = str.Substring(SERVER_PORT.Length).Split('-').Select(int.Parse).ToArray();
                                 }
@@ -337,7 +338,7 @@ public class RtspProtocolParser
                     if (ms.Position == ms.Length && contentLength > (ms.Length - ms.Position))
                     {
                         return true;
-                    }                                    
+                    }
                 }
             }
         }
@@ -364,7 +365,7 @@ public class UDPHeader
 
 public class TCPHeader
 {
-    public TCPHeader(ushort sourcePort, ushort destinationPort, uint sequenceNumber, uint acknowledgementNumber, int tcpHeaderLength, int flags, ushort window, ushort checksum, ushort urgentPointer) 
+    public TCPHeader(ushort sourcePort, ushort destinationPort, uint sequenceNumber, uint acknowledgementNumber, int tcpHeaderLength, int flags, ushort window, ushort checksum, ushort urgentPointer)
     {
         SourcePort = sourcePort;
         DestinationPort = destinationPort;
@@ -391,18 +392,18 @@ public class TCPHeader
 public class IPHeader
 {
     public IPHeader(
-        int family, 
-        int version, 
+        int family,
+        int version,
         int headerLength,
-        byte differentiatedServicesField, 
-        ushort totalLength, 
-        ushort identification, 
-        byte flags, 
-        ushort fragmentOffset, 
-        byte ttl, 
-        byte protocol, 
-        ushort headerCheckSum, 
-        IPAddress sourceIP, 
+        byte differentiatedServicesField,
+        ushort totalLength,
+        ushort identification,
+        byte flags,
+        ushort fragmentOffset,
+        byte ttl,
+        byte protocol,
+        ushort headerCheckSum,
+        IPAddress sourceIP,
         IPAddress destintationIP)
     {
         Family = family;
