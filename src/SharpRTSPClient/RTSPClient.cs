@@ -839,7 +839,7 @@ namespace SharpRTSPClient
                     _logger.LogDebug("WWW Authorize parsed for {authentication}", _authentication);
                 }
 
-                RtspMessage resendMessage = message.OriginalRequest?.Clone() as RtspMessage;
+                RtspRequest resendMessage = message.OriginalRequest?.Clone() as RtspRequest;
 
                 if (resendMessage != null)
                 {
@@ -1508,18 +1508,18 @@ namespace SharpRTSPClient
 
     public static class RTSPMessageAuthExtensions
     {
-        public static void AddAuthorization(this RtspMessage message, Authentication authentication, Uri uri, uint commandCounter)
+        public static void AddAuthorization(this RtspRequest request, Authentication authentication, Uri uri, uint commandCounter)
         {
             if (authentication == null)
             {
                 return;
             }
 
-            string authorization = authentication.GetResponse(commandCounter, uri.AbsoluteUri, message.Method, new byte[0]);
-            
+            string authorization = authentication.GetResponse(commandCounter, uri.AbsoluteUri, request.Request, new byte[0]);
+
             // remove if already one...
-            message.Headers.Remove(RtspHeaderNames.Authorization);
-            message.Headers.Add(RtspHeaderNames.Authorization, authorization);
+            request.Headers.Remove(RtspHeaderNames.Authorization);
+            request.Headers.Add(RtspHeaderNames.Authorization, authorization);
         }
     }
 
