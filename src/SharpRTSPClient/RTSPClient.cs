@@ -1080,7 +1080,7 @@ namespace SharpRTSPClient
                             default:
                                 _videoPayloadProcessor = null;
                                 break;
-                        };
+                        }
                         _videoPayload = media.PayloadType;
                     }
                     else
@@ -1109,7 +1109,7 @@ namespace SharpRTSPClient
                                         payloadName = string.Empty;
                                     }
                                     break;
-                            };
+                            }
                         }
                     }
 
@@ -1147,6 +1147,22 @@ namespace SharpRTSPClient
                             byte[] pps = vpsSpsPps[1];
                             streamConfigurationData = new H265StreamConfigurationData(null, sps, pps);
                         }
+                    }
+                    else if (_videoPayloadProcessor is H266Payload && fmtp?.FormatParameter != null)
+                    {
+                        // If the rtpmap contains H266 then split the fmtp to get the sprop-dci, sprop-vps, sprop-sps, sprop-pps and sprop-sei
+                        // The RFC makes the DCI, VPS, SPS and PPS OPTIONAL so they may not be present. In which we pass back NULL values
+                        var param = H266Parameters.Parse(fmtp.FormatParameter);
+                        var vpsSpsPps = param.SpropParameterSets;
+                        if (vpsSpsPps.Count >= 5)
+                        {
+                            byte[] dci = vpsSpsPps[0];
+                            byte[] vps = vpsSpsPps[1];
+                            byte[] sps = vpsSpsPps[2];
+                            byte[] pps = vpsSpsPps[3];
+                            byte[] sei = vpsSpsPps[4];
+                            streamConfigurationData = new H266StreamConfigurationData(dci, vps, sps, pps, sei);
+                        }                        
                     }
 
                     // Send the SETUP RTSP command if we have a matching Payload Decoder
@@ -1200,7 +1216,7 @@ namespace SharpRTSPClient
                             default:
                                 (_audioPayloadProcessor, _audioCodec) = (null, "");
                                 break;
-                        };
+                        }
                     }
                     else
                     {
@@ -1229,7 +1245,7 @@ namespace SharpRTSPClient
                             default:
                                 _audioPayloadProcessor = null;
                                 break;
-                        };
+                        }
                         if (_audioPayloadProcessor is AACPayload aacPayloadProcessor)
                         {
                             _audioCodec = "AAC";
@@ -1341,7 +1357,7 @@ namespace SharpRTSPClient
                     };
                 default:
                     return null;
-            };
+            }
         }
 
         private void SendKeepAlive(object sender, System.Timers.ElapsedEventArgs e)

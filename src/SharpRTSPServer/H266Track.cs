@@ -6,14 +6,14 @@ using System.Text;
 namespace SharpRTSPServer
 {
     /// <summary>
-    /// H265 video track.
+    /// H266 video track.
     /// </summary>
-    public class H265Track : TrackBase
+    public class H266Track : TrackBase
     {
         /// <summary>
-        /// H265 Video Codec name.
+        /// H266 Video Codec name.
         /// </summary>
-        public override string Codec => "H265";
+        public override string Codec => "H266";
 
         /// <summary>
         /// Default video track clock rate.
@@ -36,6 +36,11 @@ namespace SharpRTSPServer
         public int PacketMTU { get; set; } = 1400;
 
         /// <summary>
+        /// Decoding Capability Information (DCI).
+        /// </summary>
+        public byte[] DCI { get; set; }
+
+        /// <summary>
         /// Video Parameter Set (VPS).
         /// </summary>
         public byte[] VPS { get; set; }
@@ -44,11 +49,16 @@ namespace SharpRTSPServer
         /// Sequence Parameter Set (SPS).
         /// </summary>
         public byte[] SPS { get; set; }
-        
+
         /// <summary>
         /// Picture Parameter Set (PPS).
         /// </summary>
         public byte[] PPS { get; set; }
+
+        /// <summary>
+        /// Supplemental Enhancement Information (SEI).
+        /// </summary>
+        public byte[] SEI { get; set; }
 
         /// <summary>
         /// Is the track ready?
@@ -58,7 +68,7 @@ namespace SharpRTSPServer
         private int _payloadType = -1;
 
         /// <summary>
-        /// Payload type. H265 uses a dynamic payload type, which by default we calculate as 96 + track ID.
+        /// Payload type. H266 uses a dynamic payload type, which by default we calculate as 96 + track ID.
         /// </summary>
         public override int PayloadType
         {
@@ -82,8 +92,8 @@ namespace SharpRTSPServer
         /// <summary>
         /// Ctor.
         /// </summary>
-        /// <param name="clock">H265 clock. Default value is 90000.</param>
-        public H265Track(int clock = DEFAULT_CLOCK)
+        /// <param name="clock">H266 clock. Default value is 90000.</param>
+        public H266Track(int clock = DEFAULT_CLOCK)
         {
             this.VideoClock = clock;
         }
@@ -91,45 +101,68 @@ namespace SharpRTSPServer
         /// <summary>
         /// Ctor.
         /// </summary>
+        /// <param name="dci">Decoding Capability Information (DCI).</param>
         /// <param name="vps">Video Parameter Set (VPS).</param>
         /// <param name="sps">Sequence Parameter Set (SPS).</param>
         /// <param name="pps">Picture Parameter Set (PPS).</param>
-        /// <param name="clock">H265 clock. Default value is 90000.</param>
-        public H265Track(byte[] vps, byte[] sps, byte[] pps, int clock = DEFAULT_CLOCK) : this(clock)
+        /// <param name="sei">Supplemental Enhancement Information (SEI).</param>
+        /// <param name="clock">H266 clock. Default value is 90000.</param>
+        public H266Track(byte[] dci, byte[] vps, byte[] sps, byte[] pps, byte[] sei = null, int clock = DEFAULT_CLOCK) : this(clock)
         {
-            SetParameterSets(vps, sps, pps);
+            SetParameterSets(dci, vps, sps, pps, sei);
         }
 
         /// <summary>
-        /// Feed in Raw VPS/SPS/PPS data - no 32 bit headers, no Annex-B (00 00 00 01).
+        /// Feed in Raw DCI/VPS/SPS/PPS data - no 32 bit headers, no Annex-B (00 00 00 01).
         /// </summary>
+        /// <param name="dci">Decoding Capability Information (DCI).</param>
         /// <param name="vps">Video Parameter Set (VPS).</param>
         /// <param name="sps">Sequence Parameter Set (SPS).</param>
         /// <param name="pps">Picture Parameter Set (PPS).</param>
-        public void SetParameterSets(byte[] vps, byte[] sps, byte[] pps)
+        /// <param name="sei">Supplemental Enhancement Information (SEI).</param>
+        public void SetParameterSets(byte[] dci, byte[] vps, byte[] sps, byte[] pps, byte[] sei)
         {
+            this.DCI = dci;
             this.VPS = vps;
             this.SPS = sps;
             this.PPS = pps;
+            this.SEI = sei;
         }
 
         public override StringBuilder BuildSDP(StringBuilder sdp)
         {
-            string vps_str = Convert.ToBase64String(VPS);
-            string sps_str = Convert.ToBase64String(SPS);
-            string pps_str = Convert.ToBase64String(PPS);
+            string dci = "";
+            string vps = "";
+            string sps = "";
+            string pps = "";
+            string sei = "";
 
+            if (DCI != null && DCI.Length > 0)
+                dci = "; sprop-dci=" + Convert.ToBase64String(DCI);
+            if (VPS != null && VPS.Length > 0)
+                vps = "; sprop-vps=" + Convert.ToBase64String(VPS);
+            if (SPS != null && SPS.Length > 0)
+                sps = "; sprop-sps=" + Convert.ToBase64String(SPS);
+            if (PPS != null && PPS.Length > 0)
+                pps = "; sprop-pps=" + Convert.ToBase64String(PPS);
+            if (SEI != null && SEI.Length > 0)
+                sei = "; sprop-sei=" + Convert.ToBase64String(SEI);
+            
             sdp.Append($"m=video 0 RTP/AVP {PayloadType}\n");
             sdp.Append($"a=control:trackID={ID}\n");
             sdp.Append($"a=rtpmap:{PayloadType} {Codec}/{VideoClock}\n");
-            sdp.Append($"a=fmtp:{PayloadType} sprop-vps={vps_str}; sprop-sps={sps_str}; sprop-pps={pps_str}\n");
+
+            string additionalParams = dci + vps + sps + pps + sei;
+            additionalParams = additionalParams.TrimStart(';');
+
+            sdp.Append($"a=fmtp:{PayloadType}{additionalParams}\n");
             return sdp;
         }
 
         /// <summary>
         /// Creates RTP packets.
         /// </summary>
-        /// <param name="samples">An array of H265 NALUs.</param>
+        /// <param name="samples">An array of H266 NALUs.</param>
         /// <param name="rtpTimestamp">RTP timestamp in the timescale of the track.</param>
         /// <returns>RTP packets.</returns>
         public override (List<Memory<byte>>, List<IMemoryOwner<byte>>) CreateRtpPackets(List<byte[]> samples, uint rtpTimestamp)
@@ -145,7 +178,7 @@ namespace SharpRTSPServer
                     lastNal = true; // last NAL in our nal_array
                 }
 
-                // The H265 Payload could be sent as one large RTP packet (assuming the receiver can handle it)
+                // The H266 Payload could be sent as one large RTP packet (assuming the receiver can handle it)
                 // or as a Fragmented Data, split over several RTP packets with the same Timestamp.
                 bool fragmenting = false;
 
@@ -163,6 +196,7 @@ namespace SharpRTSPServer
                     int nalPointer = 0;
                     int startBit = 1;
                     int endBit = 0;
+                    int pBit = 0;
 
                     // consume first byte of the raw_nal. It is used in the FU header
                     byte firstByte = rawNal[0];
@@ -176,11 +210,14 @@ namespace SharpRTSPServer
                     while (dataRemaining > 0)
                     {
                         int payloadSize = Math.Min(packetMTU, dataRemaining);
-                        
-                        if (dataRemaining == payloadSize) 
+
+                        if (dataRemaining == payloadSize)
                             endBit = 1;
 
-                        // 12 is header size. 3 bytes for H265 FU-A header
+                        if (dataRemaining == payloadSize && lastNal)
+                            pBit = 1;
+
+                        // 12 is header size. 3 bytes for H266 FU-A header
                         var fuHeader = 3;
                         var destSize = 12 + fuHeader + payloadSize;
                         var owner = MemoryPool<byte>.Shared.Rent(destSize);
@@ -204,19 +241,18 @@ namespace SharpRTSPServer
                         // sequence number and SSRC are set just before send
                         RTPPacketUtil.WriteTS(rtpPacket.Span, rtpTimestamp);
 
-                        // For H265 we need https://www.rfc-editor.org/rfc/rfc7798#section-4.4.3
+                        // For H266 we need https://www.rfc-editor.org/rfc/rfc7798#section-4.4.3
 
                         // Now append the Fragmentation Header (with Start and End marker) and part of the raw_nal
-                        const byte fBit = 0;
-                        byte nalType = (byte)((firstByte & 0x7E) >> 1);
+                        byte nalType = (byte)((secondByte & 0xF8) >> 1);
                         const byte type = 49; // FU Fragmentation
 
                         // PayloadHdr
-                        rtpPacket.Span[12] = (byte)((fBit << 7) | ((type << 1) & 0x7E) | (firstByte & 0x1));
-                        rtpPacket.Span[13] = secondByte;
+                        rtpPacket.Span[12] = firstByte;
+                        rtpPacket.Span[13] = (byte)((type << 3 & 0xF8) | (secondByte & 0x07));
 
                         // FU header
-                        rtpPacket.Span[14] = (byte)((startBit << 7) | (endBit << 6) | nalType);
+                        rtpPacket.Span[14] = (byte)((startBit << 7) | (endBit << 6) | (pBit << 5) | nalType);
 
                         rawNal.AsSpan(nalPointer, payloadSize).CopyTo(rtpPacket.Slice(15).Span);
 

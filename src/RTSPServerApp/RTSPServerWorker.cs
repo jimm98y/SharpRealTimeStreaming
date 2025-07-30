@@ -1,7 +1,7 @@
 ﻿using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using SharpMp4;
+using SharpMP4;
 using SharpRTSPServer;
 using System;
 using System.Collections.Generic;
@@ -40,6 +40,8 @@ internal class RTSPServerWorker : BackgroundService
 
         _server = new RTSPServer(port, userName, password, _loggerFactory);
 
+
+        /*
         Dictionary<uint, IList<IList<byte[]>>> parsedMDAT;
         uint videoTrackId = 0;
         uint audioTrackId = 0;
@@ -84,7 +86,16 @@ internal class RTSPServerWorker : BackgroundService
                             }
                             else
                             {
-                                throw new NotSupportedException("No supported video found!");
+                                var h266VisualSample = videoTrackBox.GetMdia().GetMinf().GetStbl().GetStsd().Children.FirstOrDefault(x => x.Type == "vvc1") as VisualSampleEntryBox;
+                                if (h265VisualSample != null)
+                                {
+                                    rtspVideoTrack = new SharpRTSPServer.H266Track();
+                                    _server.AddVideoTrack(rtspVideoTrack);
+                                }
+                                else
+                                {
+                                    throw new NotSupportedException("No supported video found!");
+                                }
                             }
                         }
                     }
@@ -185,6 +196,7 @@ internal class RTSPServerWorker : BackgroundService
                 }
             };
         }
+        
 
         _server.StartListen();
 
@@ -192,6 +204,8 @@ internal class RTSPServerWorker : BackgroundService
 
         videoTimer?.Start();
         audioTimer?.Start();
+        */
+        throw new NotImplementedException();
     }
 
     public override void Dispose()

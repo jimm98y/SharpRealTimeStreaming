@@ -35,10 +35,10 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.1" />
-    <PackageReference Include="SharpMp4" Version="0.0.7" />
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\..\SharpMP4BoxGenerator\src\SharpMP4\SharpMP4.csproj" />
     <ProjectReference Include="..\SharpRTSPServer\SharpRTSPServer.csproj" />
   </ItemGroup>
 
