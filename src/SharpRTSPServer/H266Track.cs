@@ -63,7 +63,7 @@ namespace SharpRTSPServer
         /// <summary>
         /// Is the track ready?
         /// </summary>
-        public override bool IsReady { get { return VPS != null && SPS != null && PPS != null; } }
+        public override bool IsReady { get { return SPS != null && PPS != null; } }
 
         private int _payloadType = -1;
 

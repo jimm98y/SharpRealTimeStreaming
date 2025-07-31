@@ -1,7 +1,9 @@
 ﻿using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using SharpMP4;
+using SharpISOBMFF;
+using SharpISOBMFF.Extensions;
+using SharpMP4.Readers;
 using SharpRTSPServer;
 using System;
 using System.Collections.Generic;
@@ -18,6 +20,11 @@ internal class RTSPServerWorker : BackgroundService
     private readonly ILoggerFactory _loggerFactory;
     private readonly IConfiguration _configuration;
     private RTSPServer _server;
+    private Timer _videoTimer;
+    private Timer _audioTimer;
+    private IsoStream _isoStream;
+
+    private readonly object _syncRoot = new object();
 
     public RTSPServerWorker(IConfiguration configuration, ILoggerFactory loggerFactory)
     {
@@ -28,7 +35,7 @@ internal class RTSPServerWorker : BackgroundService
         _configuration = configuration;
     }
 
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    protected override Task ExecuteAsync(CancellationToken stoppingToken)
     {
         var _logger = _loggerFactory.CreateLogger<RTSPServerWorker>();
 
@@ -40,188 +47,164 @@ internal class RTSPServerWorker : BackgroundService
 
         _server = new RTSPServer(port, userName, password, _loggerFactory);
 
-
-        /*
-        Dictionary<uint, IList<IList<byte[]>>> parsedMDAT;
-        uint videoTrackId = 0;
-        uint audioTrackId = 0;
-        TrakBox audioTrackBox = null;
-        TrakBox videoTrackBox = null;
-        double videoFrameRate = 0;
-
         ITrack rtspVideoTrack = null;
         ITrack rtspAudioTrack = null;
 
-        if (Path.GetExtension(fileName) == ".mp4")
+        if (Path.GetExtension(fileName).ToLowerInvariant() == ".mp4")
         {
-            // frag_bunny.mp4 audio is not playable in VLC on Windows 11 (works on MacOS)
-            using (Stream fs = new BufferedStream(new FileStream(fileName, FileMode.Open, FileAccess.Read, FileShare.Read)))
+            SharpH26X.Log.SinkDebug = (o, e) => { };
+            SharpH26X.Log.SinkInfo = (o, e) => { };
+            SharpISOBMFF.Log.SinkInfo = (o, e) => { };
+            SharpISOBMFF.Log.SinkDebug = (o, e) => { };
+            SharpMP4.Log.SinkInfo = (o, e) => { };
+            SharpMP4.Log.SinkDebug = (o, e) => { };
+
+            Stream inputFileStream = new BufferedStream(new FileStream(fileName, FileMode.Open, FileAccess.Read, FileShare.Read));
+            _isoStream = new IsoStream(inputFileStream);
+            var fmp4 = new Container();
+            fmp4.Read(_isoStream);
+
+            Mp4Reader inputReader = new Mp4Reader();
+            inputReader.Parse(fmp4);
+            IEnumerable<SharpMP4.Tracks.ITrack> inputTracks = inputReader.GetTracks();
+            IEnumerable<byte[]> videoUnits = null;
+
+            foreach (var inputTrack in inputTracks)
             {
-                using (var fmp4 = await FragmentedMp4.ParseAsync(fs))
+                if (inputTrack.HandlerType == HandlerTypes.Video)
                 {
-                    videoTrackBox = fmp4.FindVideoTracks().FirstOrDefault();
-                    audioTrackBox = fmp4.FindAudioTracks().FirstOrDefault();
+                    videoUnits = inputTrack.GetContainerSamples();
 
-                    parsedMDAT = await fmp4.ParseMdatAsync();
-
-                    if (videoTrackBox != null)
+                    if (inputTrack is SharpMP4.Tracks.H264Track)
                     {
-                        videoTrackId = fmp4.FindVideoTrackID().First();
-                        videoFrameRate = fmp4.CalculateFrameRate(videoTrackBox);
-
-                        var h264VisualSample = videoTrackBox.GetMdia().GetMinf().GetStbl().GetStsd().Children.FirstOrDefault(x => x.Type == VisualSampleEntryBox.TYPE3 || x.Type == VisualSampleEntryBox.TYPE4) as VisualSampleEntryBox;
-                        if (h264VisualSample != null)
-                        {
-                            var avcC = (h264VisualSample.Children.First(x => x.Type == AvcConfigurationBox.TYPE) as AvcConfigurationBox).AvcDecoderConfigurationRecord;
-                            rtspVideoTrack = new SharpRTSPServer.H264Track(avcC.AvcProfileIndication, 0, avcC.AvcLevelIndication);
-                            _server.AddVideoTrack(rtspVideoTrack);
-                        }
-                        else
-                        {
-                            var h265VisualSample = videoTrackBox.GetMdia().GetMinf().GetStbl().GetStsd().Children.FirstOrDefault(x => x.Type == VisualSampleEntryBox.TYPE6 || x.Type == VisualSampleEntryBox.TYPE7) as VisualSampleEntryBox;
-                            if (h265VisualSample != null)
-                            {
-                                rtspVideoTrack = new SharpRTSPServer.H265Track();
-                                _server.AddVideoTrack(rtspVideoTrack);
-                            }
-                            else
-                            {
-                                var h266VisualSample = videoTrackBox.GetMdia().GetMinf().GetStbl().GetStsd().Children.FirstOrDefault(x => x.Type == "vvc1") as VisualSampleEntryBox;
-                                if (h265VisualSample != null)
-                                {
-                                    rtspVideoTrack = new SharpRTSPServer.H266Track();
-                                    _server.AddVideoTrack(rtspVideoTrack);
-                                }
-                                else
-                                {
-                                    throw new NotSupportedException("No supported video found!");
-                                }
-                            }
-                        }
+                        var h264Track = new SharpRTSPServer.H264Track();
+                        h264Track.SetParameterSets(videoUnits.First(), videoUnits.Skip(1).First());
+                        rtspVideoTrack = h264Track;
+                    }
+                    else if (inputTrack is SharpMP4.Tracks.H265Track)
+                    {
+                        var h265Track = new SharpRTSPServer.H265Track();
+                        h265Track.SetParameterSets(videoUnits.First(), videoUnits.Skip(1).First(), videoUnits.Skip(2).First());
+                        rtspVideoTrack = h265Track;
+                    }
+                    else if (inputTrack is SharpMP4.Tracks.H266Track)
+                    {
+                        var h266Track = new SharpRTSPServer.H266Track();
+                        h266Track.SetParameterSets(null, null, videoUnits.First(), videoUnits.Skip(1).First(), null);
+                        rtspVideoTrack = h266Track;
+                    }
+                    else
+                    {
+                        continue;
                     }
 
-                    if (audioTrackBox != null)
-                    {
-                        audioTrackId = fmp4.FindAudioTrackID().First();
+                    _server.AddVideoTrack(rtspVideoTrack);
 
-                        var audioSampleEntry = audioTrackBox.GetAudioSampleEntryBox();
-                        if (audioSampleEntry.Type == AudioSampleEntryBox.TYPE3) // AAC
+                    rtspVideoTrack.FeedInRawSamples(0, videoUnits.ToList());
+
+                    _videoTimer = new Timer(inputTrack.DefaultSampleDuration * 1000 / inputTrack.Timescale);
+                    _videoTimer.Elapsed += (s, e) =>
+                    {
+                        Mp4Sample sample;
+
+                        lock (_syncRoot)
                         {
-                            var audioConfigDescriptor = audioSampleEntry.GetAudioSpecificConfigDescriptor();
-                            int audioSamplingRate = audioConfigDescriptor.GetSamplingFrequency();
-                            rtspAudioTrack = new SharpRTSPServer.AACTrack(await audioConfigDescriptor.ToBytes(), audioSamplingRate, audioConfigDescriptor.ChannelConfiguration);
-                            _server.AddAudioTrack(rtspAudioTrack);
+                            sample = inputReader.ReadSample(inputTrack.TrackID);
+
+                            if (sample == null)
+                            {
+                                foreach (var track in inputReader.Tracks)
+                                {
+                                    track.SampleIndex = 0;
+                                    track.FragmentIndex = 0;
+                                }
+                                return;
+                            }
                         }
-                        else
-                        {
-                            // unsupported audio
-                        }
+
+                        IEnumerable<byte[]> units = inputReader.ParseSample(inputTrack.TrackID, sample.Data);
+                        rtspVideoTrack.FeedInRawSamples((uint)sample.DTS, units.ToList());
+                    };
+
+                    break;
+                }
+            }
+
+            foreach (var inputTrack in inputTracks)
+            {
+                if (inputTrack.HandlerType == HandlerTypes.Sound)
+                {
+                    if (inputTrack is SharpMP4.Tracks.AACTrack aac)
+                    {
+                        rtspAudioTrack = new SharpRTSPServer.AACTrack(aac.AudioSpecificConfig.ToBytes(), (int)aac.SamplingRate, aac.ChannelCount);
                     }
+                    else
+                    {
+                        continue;
+                    }
+
+                    _server.AddAudioTrack(rtspAudioTrack);
+
+                    _audioTimer = new Timer(inputTrack.DefaultSampleDuration * 1000 / inputTrack.Timescale);
+                    _audioTimer.Elapsed += (s, e) =>
+                    {
+                        Mp4Sample sample;
+
+                        lock (_syncRoot)
+                        {
+                            sample = inputReader.ReadSample(inputTrack.TrackID);
+
+                            if (sample == null)
+                            {
+                                foreach (var track in inputReader.Tracks)
+                                {
+                                    track.SampleIndex = 0;
+                                    track.FragmentIndex = 0;
+                                }
+                                return;
+                            }
+                        }
+
+                        IEnumerable<byte[]> units = inputReader.ParseSample(inputTrack.TrackID, sample.Data);
+                        rtspAudioTrack.FeedInRawSamples((uint)sample.DTS, units.ToList());
+                    };
+
+                    break;
                 }
             }
         }
         else
         {
-            parsedMDAT = new Dictionary<uint, IList<IList<byte[]>>>();
-            parsedMDAT.Add(videoTrackId, new List<IList<byte[]>>());
-
-            var jpgFiles = Directory.GetFiles(fileName, "*.jpg");
-            for (int i = 0; i < jpgFiles.Length; i++)
-            {
-                parsedMDAT[videoTrackId].Add(new List<byte[]>());
-                parsedMDAT[videoTrackId][i].Add(File.ReadAllBytes(jpgFiles[i]));
-            }
+            string[] jpgFiles = Directory.GetFiles(fileName, "*.jpg");
+            int jpgFileIndex = 0;
 
             rtspVideoTrack = new SharpRTSPServer.MJpegTrack();
             _server.AddVideoTrack(rtspVideoTrack);
 
-            videoFrameRate = 1;
-        }
-
-        int videoIndex = 0;
-        int audioIndex = 0;
-        Timer audioTimer = null;
-        Timer videoTimer = null;
-
-        if (rtspVideoTrack != null)
-        {
-            var videoSamplingRate = SharpRTSPServer.H264Track.DEFAULT_CLOCK;
-            var videoSampleDuration = videoSamplingRate / videoFrameRate;
-            var videoTrack = parsedMDAT[videoTrackId];
-            videoTimer = new Timer(videoSampleDuration * 1000 / videoSamplingRate);
-            videoTimer.Elapsed += (s, e) =>
+            _videoTimer = new Timer(1000);
+            _videoTimer.Elapsed += (s, e) =>
             {
-                if (videoIndex == 0)
-                {
-                    if (rtspVideoTrack is SharpRTSPServer.H264Track h264VideoTrack)
-                    {
-                        h264VideoTrack.SetParameterSets(videoTrack[0][0], videoTrack[0][1]);
-                        videoIndex++;
-                    }
-                    else if (rtspVideoTrack is SharpRTSPServer.H265Track h265VideoTrack)
-                    {
-                        h265VideoTrack.SetParameterSets(videoTrack[0][0], videoTrack[0][1], videoTrack[0][2]);
-                        videoIndex++;
-                    }
-                }
-
-                try
-                {
-                    rtspVideoTrack.FeedInRawSamples((uint)(videoIndex * videoSampleDuration), (List<byte[]>)videoTrack[videoIndex++ % videoTrack.Count]);
-                }
-                catch(Exception ex)
-                {
-                    _logger.LogError(ex, $"FeedInRawSamples failed: {ex.Message}");
-                }
-
-                if (videoIndex % videoTrack.Count == 0)
-                {
-                    Reset(ref videoIndex, videoTimer, ref audioIndex, audioTimer);
-                }
+                rtspVideoTrack.FeedInRawSamples((uint)jpgFileIndex * 1000, new List<byte[]> { File.ReadAllBytes(jpgFiles[jpgFileIndex++ % jpgFiles.Length]) });
             };
         }
-
-        if (rtspAudioTrack != null)
-        {
-            var audioSampleDuration = SharpMp4.AACTrack.AAC_SAMPLE_SIZE;
-            var audioTrack = parsedMDAT[audioTrackId];
-            audioTimer = new Timer(audioSampleDuration * 1000 / (rtspAudioTrack as SharpRTSPServer.AACTrack).SamplingRate);
-            audioTimer.Elapsed += (s, e) =>
-            {
-                rtspAudioTrack.FeedInRawSamples((uint)(audioIndex * audioSampleDuration), new List<byte[]>() { audioTrack[0][audioIndex++ % audioTrack[0].Count] });
-
-                if (audioIndex % audioTrack[0].Count == 0)
-                {
-                    Reset(ref videoIndex, videoTimer, ref audioIndex, audioTimer);
-                }
-            };
-        }
-        
 
         _server.StartListen();
 
         _logger.LogInformation($"RTSP URL is rtsp://{userName}:{password}@{hostName}:{port}");
 
-        videoTimer?.Start();
-        audioTimer?.Start();
-        */
-        throw new NotImplementedException();
+        _videoTimer?.Start();
+        _audioTimer?.Start();
+
+        return Task.CompletedTask;
     }
 
     public override void Dispose()
     {
         base.Dispose();
 
-        _server?.Dispose();
-    }
+        _videoTimer?.Stop();
+        _audioTimer?.Stop();
 
-    static void Reset(ref int videoIndex, Timer videoTimer, ref int audioIndex, Timer audioTimer)
-    {
-        videoTimer?.Stop();
-        audioTimer?.Stop();
-        videoIndex = 0;
-        audioIndex = 0;
-        videoTimer?.Start();
-        audioTimer?.Start();
+        _server?.Dispose();
     }
 }
