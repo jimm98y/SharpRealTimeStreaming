@@ -100,7 +100,7 @@ internal class RTSPServerWorker : BackgroundService
 
                     _server.AddVideoTrack(rtspVideoTrack);
 
-                    rtspVideoTrack.FeedInRawSamples(0, videoUnits.ToList());
+                    //rtspVideoTrack.FeedInRawSamples(0, videoUnits.ToList());
 
                     _videoTimer = new Timer(inputTrack.DefaultSampleDuration * 1000 / inputTrack.Timescale);
                     _videoTimer.Elapsed += (s, e) =>

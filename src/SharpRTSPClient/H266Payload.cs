@@ -75,7 +75,7 @@ namespace Rtsp.Rtp
             }
 
             int layerID = payloadHeader >> 8 & 0x3F;
-            int type = payloadHeader >> 3 & 0x0F;
+            int type = (payloadHeader & 0x00F8) >> 3;
 
             // There are three ways to Packetize NAL units into RTP Packets
             //  Single NAL Unit Packet
@@ -112,8 +112,8 @@ namespace Rtsp.Rtp
             // Parse Fragmentation Unit Header
             int fu_header_s = payload[2] >> 7 & 0x01;  // start marker
             int fu_header_e = payload[2] >> 6 & 0x01;  // end marker
-            int fu_header_p = payload[2] >> 5 & 0x01;  //  last VCL NAL unit marker
-            int fu_header_type = payload[2] >> 0 & 0x1F; // fu type
+            int fu_header_p = payload[2] >> 5 & 0x01;  // last VCL NAL unit marker
+            int fu_header_type = payload[2] & 0x1F; // fu type
 
             _logger.LogTrace("Frag FU-A s={headerS} e={headerE} p={headerP}", fu_header_s, fu_header_e, fu_header_p);
 

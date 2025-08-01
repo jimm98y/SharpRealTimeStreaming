@@ -217,7 +217,7 @@ namespace SharpRTSPServer
                         if (dataRemaining == payloadSize && lastNal)
                             pBit = 1;
 
-                        // 12 is header size. 3 bytes for H266 FU-A header
+                        // 12 is header size. 3 bytes for H266 FU header
                         var fuHeader = 3;
                         var destSize = 12 + fuHeader + payloadSize;
                         var owner = MemoryPool<byte>.Shared.Rent(destSize);
@@ -226,7 +226,7 @@ namespace SharpRTSPServer
 
                         // RTP Packet Header
                         // 0 - Version, P, X, CC, M, PT and Sequence Number
-                        //32 - Timestamp. H265 uses a 90kHz clock
+                        //32 - Timestamp. H266 uses a 90kHz clock
                         //64 - SSRC
                         //96 - CSRCs (optional)
                         //nn - Extension ID and Length
@@ -241,15 +241,15 @@ namespace SharpRTSPServer
                         // sequence number and SSRC are set just before send
                         RTPPacketUtil.WriteTS(rtpPacket.Span, rtpTimestamp);
 
-                        // For H266 we need https://www.rfc-editor.org/rfc/rfc7798#section-4.4.3
+                        // For H266 we need https://www.rfc-editor.org/rfc/rfc9328.pdf
 
                         // Now append the Fragmentation Header (with Start and End marker) and part of the raw_nal
-                        byte nalType = (byte)((secondByte & 0xF8) >> 1);
+                        byte nalType = (byte)((secondByte & 0xF8) >> 3);
                         const byte type = 29; // FU Fragmentation
 
                         // PayloadHdr
                         rtpPacket.Span[12] = firstByte;
-                        rtpPacket.Span[13] = (byte)(((type << 3) & 0xF8) | (secondByte & 0x07));
+                        rtpPacket.Span[13] = (byte)((type << 3) | (secondByte & 0x07));
 
                         // FU header
                         rtpPacket.Span[14] = (byte)((startBit << 7) | (endBit << 6) | (pBit << 5) | nalType);
