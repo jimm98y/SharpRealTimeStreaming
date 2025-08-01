@@ -245,11 +245,11 @@ namespace SharpRTSPServer
 
                         // Now append the Fragmentation Header (with Start and End marker) and part of the raw_nal
                         byte nalType = (byte)((secondByte & 0xF8) >> 1);
-                        const byte type = 49; // FU Fragmentation
+                        const byte type = 29; // FU Fragmentation
 
                         // PayloadHdr
                         rtpPacket.Span[12] = firstByte;
-                        rtpPacket.Span[13] = (byte)((type << 3 & 0xF8) | (secondByte & 0x07));
+                        rtpPacket.Span[13] = (byte)(((type << 3) & 0xF8) | (secondByte & 0x07));
 
                         // FU header
                         rtpPacket.Span[14] = (byte)((startBit << 7) | (endBit << 6) | (pBit << 5) | nalType);

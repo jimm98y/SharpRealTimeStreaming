@@ -1045,14 +1045,14 @@ namespace SharpRTSPClient
                     }
 
                     // extract h265 donl if available...
-                    bool h265HasDonl = false;
+                    bool hasDonl = false;
 
-                    if ((rtpmap?.EncodingName?.ToUpperInvariant().Equals("H265") ?? false) && !string.IsNullOrEmpty(fmtp?.FormatParameter))
+                    if (((rtpmap?.EncodingName?.ToUpperInvariant().Equals("H265") ?? false) || (rtpmap?.EncodingName?.ToUpperInvariant().Equals("H266") ?? false)) && !string.IsNullOrEmpty(fmtp?.FormatParameter))
                     {
                         var param = H265Parameters.Parse(fmtp.FormatParameter);
                         if (param.ContainsKey("sprop-max-don-diff") && int.TryParse(param["sprop-max-don-diff"], out int donl) && donl > 0)
                         {
-                            h265HasDonl = true;
+                            hasDonl = true;
                         }
                     }
 
@@ -1069,7 +1069,10 @@ namespace SharpRTSPClient
                                 _videoPayloadProcessor = new H264Payload(_loggerFactory.CreateLogger<H264Payload>());
                                 break;
                             case "H265":
-                                _videoPayloadProcessor = new H265Payload(h265HasDonl, _loggerFactory.CreateLogger<H265Payload>());
+                                _videoPayloadProcessor = new H265Payload(hasDonl, _loggerFactory.CreateLogger<H265Payload>());
+                                break;
+                            case "H266":
+                                _videoPayloadProcessor = new H266Payload(hasDonl, _loggerFactory.CreateLogger<H266Payload>());
                                 break;
                             case "JPEG":
                                 _videoPayloadProcessor = new JPEGPayload();
