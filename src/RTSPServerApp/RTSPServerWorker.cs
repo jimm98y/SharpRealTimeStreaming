@@ -20,7 +20,9 @@ internal class RTSPServerWorker : BackgroundService
     private readonly ILoggerFactory _loggerFactory;
     private readonly IConfiguration _configuration;
     private RTSPServer _server;
+    private int _videoRtpBaseTime;
     private Timer _videoTimer;
+    private int _audioRtpBaseTime;
     private Timer _audioTimer;
     private IsoStream _isoStream;
 
@@ -35,7 +37,7 @@ internal class RTSPServerWorker : BackgroundService
         _configuration = configuration;
     }
 
-    protected override Task ExecuteAsync(CancellationToken stoppingToken)
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         var _logger = _loggerFactory.CreateLogger<RTSPServerWorker>();
 
@@ -93,6 +95,12 @@ internal class RTSPServerWorker : BackgroundService
                         h266Track.SetParameterSets(null, null, videoUnits.First(), videoUnits.Skip(1).First(), null);
                         rtspVideoTrack = h266Track;
                     }
+                    else if (inputTrack is SharpMP4.Tracks.AV1Track)
+                    {
+                        var av1Track = new SharpRTSPServer.AV1Track();
+                        av1Track.SetOBUs(videoUnits.ToList());
+                        rtspVideoTrack = av1Track;
+                    }
                     else
                     {
                         continue;
@@ -102,7 +110,8 @@ internal class RTSPServerWorker : BackgroundService
 
                     //rtspVideoTrack.FeedInRawSamples(0, videoUnits.ToList());
 
-                    _videoTimer = new Timer(inputTrack.DefaultSampleDuration * 1000 / inputTrack.Timescale);
+                    _videoRtpBaseTime = Random.Shared.Next();
+                    _videoTimer = new Timer(inputTrack.DefaultSampleDuration * 1000d / inputTrack.Timescale);
                     _videoTimer.Elapsed += (s, e) =>
                     {
                         lock (_syncRoot)
@@ -120,7 +129,7 @@ internal class RTSPServerWorker : BackgroundService
                             }
                         
                             IEnumerable<byte[]> units = inputReader.ParseSample(inputTrack.TrackID, sample.Data);
-                            rtspVideoTrack.FeedInRawSamples((uint)sample.DTS, units.ToList());
+                            rtspVideoTrack.FeedInRawSamples((uint)unchecked(_videoRtpBaseTime + sample.PTS), units.ToList());
                         }
                     };
 
@@ -143,7 +152,8 @@ internal class RTSPServerWorker : BackgroundService
 
                     _server.AddAudioTrack(rtspAudioTrack);
 
-                    _audioTimer = new Timer(inputTrack.DefaultSampleDuration * 1000 / inputTrack.Timescale);
+                    _audioRtpBaseTime = Random.Shared.Next();
+                    _audioTimer = new Timer(inputTrack.DefaultSampleDuration * 1000d / inputTrack.Timescale);
                     _audioTimer.Elapsed += (s, e) =>
                     {
                         lock (_syncRoot)
@@ -161,7 +171,7 @@ internal class RTSPServerWorker : BackgroundService
                             }
 
                             IEnumerable<byte[]> units = inputReader.ParseSample(inputTrack.TrackID, sample.Data);
-                            rtspAudioTrack.FeedInRawSamples((uint)sample.DTS, units.ToList());
+                            rtspAudioTrack.FeedInRawSamples((uint)unchecked(_audioRtpBaseTime + sample.PTS), units.ToList());
                         }
                     };
 
@@ -190,8 +200,6 @@ internal class RTSPServerWorker : BackgroundService
 
         _videoTimer?.Start();
         _audioTimer?.Start();
-
-        return Task.CompletedTask;
     }
 
     public override void Dispose()

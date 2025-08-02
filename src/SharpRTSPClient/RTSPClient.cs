@@ -1074,6 +1074,9 @@ namespace SharpRTSPClient
                             case "H266":
                                 _videoPayloadProcessor = new H266Payload(hasDonl, _loggerFactory.CreateLogger<H266Payload>());
                                 break;
+                            case "AV1":
+                                _videoPayloadProcessor = new AV1Payload(_loggerFactory.CreateLogger<AV1Payload>());
+                                break;
                             case "JPEG":
                                 _videoPayloadProcessor = new JPEGPayload();
                                 break;
@@ -1166,6 +1169,12 @@ namespace SharpRTSPClient
                             byte[] sei = vpsSpsPps[4];
                             streamConfigurationData = new H266StreamConfigurationData(dci, vps, sps, pps, sei);
                         }                        
+                    }
+                    else if (_videoPayloadProcessor is AV1Payload && fmtp?.FormatParameter != null)
+                    {
+                        var param = AV1Parameters.Parse(fmtp.FormatParameter);
+                        // TODO: the rtpmap contains AV1
+                        streamConfigurationData = new AV1StreamConfigurationData();
                     }
 
                     // Send the SETUP RTSP command if we have a matching Payload Decoder
