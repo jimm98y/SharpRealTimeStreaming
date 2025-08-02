@@ -1044,15 +1044,26 @@ namespace SharpRTSPClient
                         fmtpPayloadNumber = fmtp.PayloadNumber;
                     }
 
-                    // extract h265 donl if available...
+                    // extract h265/h266 donl if available...
                     bool hasDonl = false;
 
-                    if (((rtpmap?.EncodingName?.ToUpperInvariant().Equals("H265") ?? false) || (rtpmap?.EncodingName?.ToUpperInvariant().Equals("H266") ?? false)) && !string.IsNullOrEmpty(fmtp?.FormatParameter))
+                    if (!string.IsNullOrEmpty(fmtp?.FormatParameter))
                     {
-                        var param = H265Parameters.Parse(fmtp.FormatParameter);
-                        if (param.ContainsKey("sprop-max-don-diff") && int.TryParse(param["sprop-max-don-diff"], out int donl) && donl > 0)
+                        if (rtpmap?.EncodingName?.ToUpperInvariant().Equals("H265") ?? false)
                         {
-                            hasDonl = true;
+                            var param = H265Parameters.Parse(fmtp.FormatParameter);
+                            if (param.ContainsKey("sprop-max-don-diff") && int.TryParse(param["sprop-max-don-diff"], out int donl) && donl > 0)
+                            {
+                                hasDonl = true;
+                            }
+                        }
+                        else if (rtpmap?.EncodingName?.ToUpperInvariant().Equals("H266") ?? false)
+                        {
+                            var param = H266Parameters.Parse(fmtp.FormatParameter);
+                            if (param.ContainsKey("sprop-max-don-diff") && int.TryParse(param["sprop-max-don-diff"], out int donl) && donl > 0)
+                            {
+                                hasDonl = true;
+                            }
                         }
                     }
 
