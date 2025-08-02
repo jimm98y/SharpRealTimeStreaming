@@ -105,11 +105,9 @@ internal class RTSPServerWorker : BackgroundService
                     _videoTimer = new Timer(inputTrack.DefaultSampleDuration * 1000 / inputTrack.Timescale);
                     _videoTimer.Elapsed += (s, e) =>
                     {
-                        Mp4Sample sample;
-
                         lock (_syncRoot)
                         {
-                            sample = inputReader.ReadSample(inputTrack.TrackID);
+                            Mp4Sample sample = inputReader.ReadSample(inputTrack.TrackID);
 
                             if (sample == null)
                             {
@@ -120,10 +118,10 @@ internal class RTSPServerWorker : BackgroundService
                                 }
                                 return;
                             }
+                        
+                            IEnumerable<byte[]> units = inputReader.ParseSample(inputTrack.TrackID, sample.Data);
+                            rtspVideoTrack.FeedInRawSamples((uint)sample.DTS, units.ToList());
                         }
-
-                        IEnumerable<byte[]> units = inputReader.ParseSample(inputTrack.TrackID, sample.Data);
-                        rtspVideoTrack.FeedInRawSamples((uint)sample.DTS, units.ToList());
                     };
 
                     break;
@@ -148,11 +146,9 @@ internal class RTSPServerWorker : BackgroundService
                     _audioTimer = new Timer(inputTrack.DefaultSampleDuration * 1000 / inputTrack.Timescale);
                     _audioTimer.Elapsed += (s, e) =>
                     {
-                        Mp4Sample sample;
-
                         lock (_syncRoot)
                         {
-                            sample = inputReader.ReadSample(inputTrack.TrackID);
+                            Mp4Sample sample = inputReader.ReadSample(inputTrack.TrackID);
 
                             if (sample == null)
                             {
@@ -163,10 +159,10 @@ internal class RTSPServerWorker : BackgroundService
                                 }
                                 return;
                             }
-                        }
 
-                        IEnumerable<byte[]> units = inputReader.ParseSample(inputTrack.TrackID, sample.Data);
-                        rtspAudioTrack.FeedInRawSamples((uint)sample.DTS, units.ToList());
+                            IEnumerable<byte[]> units = inputReader.ParseSample(inputTrack.TrackID, sample.Data);
+                            rtspAudioTrack.FeedInRawSamples((uint)sample.DTS, units.ToList());
+                        }
                     };
 
                     break;
