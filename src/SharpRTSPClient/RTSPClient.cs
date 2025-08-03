@@ -1265,6 +1265,9 @@ namespace SharpRTSPClient
                             case "AMR":
                                 _audioPayloadProcessor = new AMRPayload();
                                 break;
+                            case "OPUS":
+                                _audioPayloadProcessor = new OpusPayload();
+                                break;
                             default:
                                 _audioPayloadProcessor = null;
                                 break;

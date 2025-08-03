@@ -138,6 +138,10 @@ internal class RTSPServerWorker : BackgroundService
                     {
                         rtspAudioTrack = new SharpRTSPServer.AACTrack(aac.AudioSpecificConfig.ToBytes(), (int)aac.SamplingRate, aac.ChannelCount);
                     }
+                    else if (inputTrack is SharpMP4.Tracks.OpusTrack opus)
+                    {
+                        rtspAudioTrack = new SharpRTSPServer.OpusTrack();
+                    }
                     else
                     {
                         continue;
