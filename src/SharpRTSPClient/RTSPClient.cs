@@ -1010,7 +1010,8 @@ namespace SharpRTSPClient
             }
 
             // Examine the SDP
-            _logger.LogDebug("SDP:\n{sdp}", Encoding.UTF8.GetString(message.Data.Span.ToArray()));
+            string sdpText = Encoding.UTF8.GetString(message.Data.Span.ToArray());
+            _logger.LogDebug("SDP:\n{sdp}", sdpText);
 
             SdpFile sdpData;
             using(var ms = new MemoryStream(message.Data.Span.ToArray()))
