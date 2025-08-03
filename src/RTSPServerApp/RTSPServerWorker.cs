@@ -54,13 +54,6 @@ internal class RTSPServerWorker : BackgroundService
 
         if (Path.GetExtension(fileName).ToLowerInvariant() == ".mp4")
         {
-            SharpH26X.Log.SinkDebug = (o, e) => { };
-            SharpH26X.Log.SinkInfo = (o, e) => { };
-            SharpISOBMFF.Log.SinkInfo = (o, e) => { };
-            SharpISOBMFF.Log.SinkDebug = (o, e) => { };
-            SharpMP4.Log.SinkInfo = (o, e) => { };
-            SharpMP4.Log.SinkDebug = (o, e) => { };
-
             Stream inputFileStream = new BufferedStream(new FileStream(fileName, FileMode.Open, FileAccess.Read, FileShare.Read));
             _isoStream = new IsoStream(inputFileStream);
             var fmp4 = new Container();

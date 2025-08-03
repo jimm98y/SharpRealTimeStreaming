@@ -104,33 +104,61 @@ namespace Rtsp.Rtp
             }
         }
 
+        private bool _seenSequenceHeader = false;
+
         private void CreateOBU(MemoryStream fragmentedObu)
         {
             fragmentedObu.Seek(0, SeekOrigin.Begin);
+            int obuLength = (int)fragmentedObu.Length;
 
             int obuHeader = fragmentedObu.ReadByte();
             int obuHeaderLen = 1;
+            int obuHeaderExtensions = -1;
             int obuType = (obuHeader & 0x78) >> 3;
+            byte[] obuLizeLeb128 = null;
 
-            if((obuHeader & 0x04) == 0x04)
+            if (obuType == 1)
+            {
+                _seenSequenceHeader = true;
+            }
+
+            if ((obuHeader & 0x04) == 0x04)
             {
                 obuHeaderLen += 1;
-                int obuHeaderExtensions = fragmentedObu.ReadByte();
+                obuHeaderExtensions = fragmentedObu.ReadByte();
             }
             if ((obuHeader & 0x02) != 0x02)
             {
-                // we cannot patch the header in the MemoryStream now, let's patch it later
+                // we'll have to restore the OBU size inside the OBU
                 obuHeader = (byte)(obuHeader | 0x02);
-
-                // write the length
-                WriteLeb128(fragmentedObu, (int)(fragmentedObu.Length - obuHeaderLen));
+                obuLizeLeb128 = WriteLeb128(obuLength - obuHeaderLen);
             }
 
-            var obuSpan = PrepareNewObu((int)fragmentedObu.Length);
-            fragmentedObu.GetBuffer().AsSpan()[..(int)fragmentedObu.Length].CopyTo(obuSpan);
+            // keep dropping frames until we get a sequence header
+            if (_seenSequenceHeader)
+            {
+                Span<byte> obuSpan;
 
-            // patch the header and add the size flag
-            obuSpan[0] = (byte)obuHeader;
+                if (obuLizeLeb128 != null)
+                {
+                    // restore the OBU size inside the OBU
+                    obuSpan = PrepareNewObu(obuLength + obuLizeLeb128.Length);
+                    obuSpan[0] = (byte)obuHeader;
+                    if (obuHeaderExtensions != -1)
+                    {
+                        obuSpan[1] = (byte)obuHeaderExtensions;
+                    }
+                    obuLizeLeb128.CopyTo(obuSpan[obuHeaderLen..]);
+                    fragmentedObu.GetBuffer().AsSpan()[obuHeaderLen..obuLength].CopyTo(obuSpan[(obuHeaderLen + obuLizeLeb128.Length)..]);
+                }
+                else
+                {
+                    obuSpan = PrepareNewObu(obuLength); 
+                    fragmentedObu.GetBuffer().AsSpan()[..obuLength].CopyTo(obuSpan);
+                }
+
+                //Log.Trace($"OBU {obuType}, payload: {Utilities.ToHexString(obuSpan.ToArray())}");
+            }
 
             // reset buffer
             fragmentedObu.SetLength(0);
@@ -191,8 +219,9 @@ namespace Rtsp.Rtp
             return Leb128Bytes;
         }
 
-        public int WriteLeb128(MemoryStream ms, int value)
+        public byte[] WriteLeb128(int value)
         {
+            List<byte> bytes = new List<byte>();
             int v = value;
             int Leb128Bytes = 0;
             for (int i = 0; i < 8; i++)
@@ -202,18 +231,18 @@ namespace Rtsp.Rtp
 
                 if (v > 0)
                 {
-                    ms.WriteByte((byte)(vv | 0x80));
+                    bytes.Add((byte)(vv | 0x80));
                     Leb128Bytes++;
                 }
                 else
                 {
-                    ms.WriteByte((byte)(vv));
+                    bytes.Add((byte)vv);
                     Leb128Bytes++;
                     break;
                 }
             }
 
-            return Leb128Bytes;
+            return bytes.ToArray();
         }
     }
 }

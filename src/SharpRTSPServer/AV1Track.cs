@@ -121,7 +121,9 @@ namespace SharpRTSPServer
                     continue;
                 }
 
-                if((obuHeader & 0x04) == 0x04)
+                //Log.Trace($"OBU {obuType}, payload: {Utilities.ToHexString(rawObu.ToArray())}");
+
+                if ((obuHeader & 0x04) == 0x04)
                 {
                     obuHeaderLen += 1;
                 }
