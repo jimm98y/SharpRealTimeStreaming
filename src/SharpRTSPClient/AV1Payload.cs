@@ -1,5 +1,6 @@
 ﻿using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Rtsp.Onvif;
 using System;
 using System.Buffers;
 using System.Buffers.Binary;
@@ -34,7 +35,43 @@ namespace Rtsp.Rtp
 
         public RawMediaFrame ProcessPacket(RtpPacket packet)
         {
+            if (packet.Extension.Length > 0)
+            {
+                _timestamp = RtpPacketOnvifUtils.ProcessRTPTimestampExtension(packet.Extension, headerPosition: out _);
+            }
+
+            ProcessRTPFrame(packet.Payload);
+
+            if (!packet.IsMarker)
+            {
+                // we don't have a frame yet. Keep accumulating RTP packets
+                return RawMediaFrame.Empty;
+            }
+
+            // End Marker is set return the list of OBUs
+            // clone list of nalUnits and owners
+            var result = new RawMediaFrame([.. obus], [.. owners])
+            {
+                RtpTimestamp = packet.Timestamp,
+                ClockTimestamp = _timestamp,
+            };
+            obus.Clear();
+            owners.Clear();
+            return result;
+        }
+
+        private void ProcessRTPFrame(ReadOnlySpan<byte> payload)
+        {
             throw new NotImplementedException();
+        }
+
+        private Span<byte> PrepareNewObu(int sizeWitoutHeader)
+        {
+            var owner = _memoryPool.Rent(sizeWitoutHeader + 4);
+            owners.Add(owner);
+            var memory = owner.Memory[..(sizeWitoutHeader + 4)];
+            obus.Add(memory);
+            return memory.Span;
         }
     }
 }
