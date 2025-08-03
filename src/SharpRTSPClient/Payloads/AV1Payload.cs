@@ -110,7 +110,6 @@ namespace Rtsp.Rtp
         {
             fragmentedObu.Seek(0, SeekOrigin.Begin);
             int obuLength = (int)fragmentedObu.Length;
-
             int obuHeader = fragmentedObu.ReadByte();
             int obuHeaderLen = 1;
             int obuHeaderExtensions = -1;
