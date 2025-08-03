@@ -67,9 +67,9 @@ namespace Rtsp.Rtp
 
         private Span<byte> PrepareNewObu(int sizeWitoutHeader)
         {
-            var owner = _memoryPool.Rent(sizeWitoutHeader + 4);
+            var owner = _memoryPool.Rent(sizeWitoutHeader);
             owners.Add(owner);
-            var memory = owner.Memory[..(sizeWitoutHeader + 4)];
+            var memory = owner.Memory[..(sizeWitoutHeader)];
             obus.Add(memory);
             return memory.Span;
         }
