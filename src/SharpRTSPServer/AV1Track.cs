@@ -6,6 +6,9 @@ using System.Text;
 
 namespace SharpRTSPServer
 {
+    /// <summary>
+    /// AV1 video track.
+    /// </summary>
     public class AV1Track : TrackBase
     {
         /// <summary>
@@ -106,7 +109,6 @@ namespace SharpRTSPServer
                 packetMTU += -8 - 20 - 16; // -8 for UDP header, -20 for IP header, -16 normal RTP header len. ** LESS RTP EXTENSIONS !!!
 
                 int obuPointer = 0;
-
                 int obuHeader = rawObu[0];
                 int obuHeaderLen = 1;
                 int obuType = (obuHeader & 0x78) >> 3;

@@ -598,11 +598,11 @@ namespace SharpRTSPClient
                     return;
                 }
 
-                using (RawMediaFrame nalUnits = _videoPayloadProcessor.ProcessPacket(rtpPacket)) // this will cache the Packets until there is a Frame
+                using (RawMediaFrame frames = _videoPayloadProcessor.ProcessPacket(rtpPacket)) // this will cache the Packets until there is a Frame
                 {
-                    if (nalUnits.Any())
+                    if (frames.Any())
                     {
-                        ReceivedVideoData?.Invoke(this, new SimpleDataEventArgs(nalUnits.Data, nalUnits.ClockTimestamp, nalUnits.RtpTimestamp));
+                        ReceivedVideoData?.Invoke(this, new SimpleDataEventArgs(frames.Data, frames.ClockTimestamp, frames.RtpTimestamp));
                     }
                 }
             }
