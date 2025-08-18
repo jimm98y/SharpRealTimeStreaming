@@ -59,7 +59,7 @@ internal class RTSPServerWorker : BackgroundService
             var fmp4 = new Container();
             fmp4.Read(_isoStream);
 
-            Mp4Reader inputReader = new Mp4Reader();
+            VideoReader inputReader = new VideoReader();
             inputReader.Parse(fmp4);
             IEnumerable<SharpMP4.Tracks.ITrack> inputTracks = inputReader.GetTracks();
             IEnumerable<byte[]> videoUnits = null;
@@ -109,14 +109,14 @@ internal class RTSPServerWorker : BackgroundService
                     {
                         lock (_syncRoot)
                         {
-                            Mp4Sample sample = inputReader.ReadSample(inputTrack.TrackID);
+                            var sample = inputReader.ReadSample(inputTrack.TrackID);
 
                             if (sample == null)
                             {
                                 foreach (var track in inputReader.Tracks)
                                 {
-                                    track.SampleIndex = 0;
-                                    track.FragmentIndex = 0;
+                                    track.Value.SampleIndex = 0;
+                                    track.Value.FragmentIndex = 0;
                                 }
                                 return;
                             }
@@ -155,14 +155,14 @@ internal class RTSPServerWorker : BackgroundService
                     {
                         lock (_syncRoot)
                         {
-                            Mp4Sample sample = inputReader.ReadSample(inputTrack.TrackID);
+                            var sample = inputReader.ReadSample(inputTrack.TrackID);
 
                             if (sample == null)
                             {
                                 foreach (var track in inputReader.Tracks)
                                 {
-                                    track.SampleIndex = 0;
-                                    track.FragmentIndex = 0;
+                                    track.Value.SampleIndex = 0;
+                                    track.Value.FragmentIndex = 0;
                                 }
                                 return;
                             }
