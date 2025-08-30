@@ -37,7 +37,7 @@ internal class RTSPServerWorker : BackgroundService
         _configuration = configuration;
     }
 
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    protected override Task ExecuteAsync(CancellationToken stoppingToken)
     {
         var _logger = _loggerFactory.CreateLogger<RTSPServerWorker>();
 
@@ -197,6 +197,8 @@ internal class RTSPServerWorker : BackgroundService
 
         _videoTimer?.Start();
         _audioTimer?.Start();
+
+        return Task.CompletedTask;
     }
 
     public override void Dispose()

@@ -1,7 +1,6 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using RTSPServerApp;
-using System;
 
 SharpH26X.Log.SinkDebug = (o, e) => { };
 SharpH26X.Log.SinkInfo = (o, e) => { };
