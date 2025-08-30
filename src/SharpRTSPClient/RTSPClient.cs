@@ -598,11 +598,11 @@ namespace SharpRTSPClient
                     return;
                 }
 
-                using (RawMediaFrame nalUnits = _videoPayloadProcessor.ProcessPacket(rtpPacket)) // this will cache the Packets until there is a Frame
+                using (RawMediaFrame frames = _videoPayloadProcessor.ProcessPacket(rtpPacket)) // this will cache the Packets until there is a Frame
                 {
-                    if (nalUnits.Any())
+                    if (frames.Any())
                     {
-                        ReceivedVideoData?.Invoke(this, new SimpleDataEventArgs(nalUnits.Data, nalUnits.ClockTimestamp, nalUnits.RtpTimestamp));
+                        ReceivedVideoData?.Invoke(this, new SimpleDataEventArgs(frames.Data, frames.ClockTimestamp, frames.RtpTimestamp));
                     }
                 }
             }
@@ -1010,7 +1010,8 @@ namespace SharpRTSPClient
             }
 
             // Examine the SDP
-            _logger.LogDebug("SDP:\n{sdp}", Encoding.UTF8.GetString(message.Data.Span.ToArray()));
+            string sdpText = Encoding.UTF8.GetString(message.Data.Span.ToArray());
+            _logger.LogDebug("SDP:\n{sdp}", sdpText);
 
             SdpFile sdpData;
             using(var ms = new MemoryStream(message.Data.Span.ToArray()))
@@ -1044,15 +1045,26 @@ namespace SharpRTSPClient
                         fmtpPayloadNumber = fmtp.PayloadNumber;
                     }
 
-                    // extract h265 donl if available...
-                    bool h265HasDonl = false;
+                    // extract h265/h266 donl if available...
+                    bool hasDonl = false;
 
-                    if ((rtpmap?.EncodingName?.ToUpperInvariant().Equals("H265") ?? false) && !string.IsNullOrEmpty(fmtp?.FormatParameter))
+                    if (!string.IsNullOrEmpty(fmtp?.FormatParameter))
                     {
-                        var param = H265Parameters.Parse(fmtp.FormatParameter);
-                        if (param.ContainsKey("sprop-max-don-diff") && int.TryParse(param["sprop-max-don-diff"], out int donl) && donl > 0)
+                        if (rtpmap?.EncodingName?.ToUpperInvariant().Equals("H265") ?? false)
                         {
-                            h265HasDonl = true;
+                            var param = H265Parameters.Parse(fmtp.FormatParameter);
+                            if (param.ContainsKey("sprop-max-don-diff") && int.TryParse(param["sprop-max-don-diff"], out int donl) && donl > 0)
+                            {
+                                hasDonl = true;
+                            }
+                        }
+                        else if (rtpmap?.EncodingName?.ToUpperInvariant().Equals("H266") ?? false)
+                        {
+                            var param = H266Parameters.Parse(fmtp.FormatParameter);
+                            if (param.ContainsKey("sprop-max-don-diff") && int.TryParse(param["sprop-max-don-diff"], out int donl) && donl > 0)
+                            {
+                                hasDonl = true;
+                            }
                         }
                     }
 
@@ -1069,7 +1081,13 @@ namespace SharpRTSPClient
                                 _videoPayloadProcessor = new H264Payload(_loggerFactory.CreateLogger<H264Payload>());
                                 break;
                             case "H265":
-                                _videoPayloadProcessor = new H265Payload(h265HasDonl, _loggerFactory.CreateLogger<H265Payload>());
+                                _videoPayloadProcessor = new H265Payload(hasDonl, _loggerFactory.CreateLogger<H265Payload>());
+                                break;
+                            case "H266":
+                                _videoPayloadProcessor = new H266Payload(hasDonl, _loggerFactory.CreateLogger<H266Payload>());
+                                break;
+                            case "AV1":
+                                _videoPayloadProcessor = new AV1Payload(_loggerFactory.CreateLogger<AV1Payload>());
                                 break;
                             case "JPEG":
                                 _videoPayloadProcessor = new JPEGPayload();
@@ -1080,7 +1098,7 @@ namespace SharpRTSPClient
                             default:
                                 _videoPayloadProcessor = null;
                                 break;
-                        };
+                        }
                         _videoPayload = media.PayloadType;
                     }
                     else
@@ -1109,7 +1127,7 @@ namespace SharpRTSPClient
                                         payloadName = string.Empty;
                                     }
                                     break;
-                            };
+                            }
                         }
                     }
 
@@ -1147,6 +1165,27 @@ namespace SharpRTSPClient
                             byte[] pps = vpsSpsPps[1];
                             streamConfigurationData = new H265StreamConfigurationData(null, sps, pps);
                         }
+                    }
+                    else if (_videoPayloadProcessor is H266Payload && fmtp?.FormatParameter != null)
+                    {
+                        // If the rtpmap contains H266 then split the fmtp to get the sprop-dci, sprop-vps, sprop-sps, sprop-pps and sprop-sei
+                        // The RFC makes the DCI, VPS, SPS and PPS OPTIONAL so they may not be present. In which we pass back NULL values
+                        var param = H266Parameters.Parse(fmtp.FormatParameter);
+                        var vpsSpsPps = param.SpropParameterSets;
+                        if (vpsSpsPps.Count >= 5)
+                        {
+                            byte[] dci = vpsSpsPps[0];
+                            byte[] vps = vpsSpsPps[1];
+                            byte[] sps = vpsSpsPps[2];
+                            byte[] pps = vpsSpsPps[3];
+                            byte[] sei = vpsSpsPps[4];
+                            streamConfigurationData = new H266StreamConfigurationData(dci, vps, sps, pps, sei);
+                        }                        
+                    }
+                    else if (_videoPayloadProcessor is AV1Payload && fmtp?.FormatParameter != null)
+                    {
+                        var param = AV1Parameters.Parse(fmtp.FormatParameter);
+                        // TODO: the rtpmap contains AV1
                     }
 
                     // Send the SETUP RTSP command if we have a matching Payload Decoder
@@ -1200,7 +1239,7 @@ namespace SharpRTSPClient
                             default:
                                 (_audioPayloadProcessor, _audioCodec) = (null, "");
                                 break;
-                        };
+                        }
                     }
                     else
                     {
@@ -1226,10 +1265,13 @@ namespace SharpRTSPClient
                             case "AMR":
                                 _audioPayloadProcessor = new AMRPayload();
                                 break;
+                            case "OPUS":
+                                _audioPayloadProcessor = new OpusPayload();
+                                break;
                             default:
                                 _audioPayloadProcessor = null;
                                 break;
-                        };
+                        }
                         if (_audioPayloadProcessor is AACPayload aacPayloadProcessor)
                         {
                             _audioCodec = "AAC";
@@ -1341,7 +1383,7 @@ namespace SharpRTSPClient
                     };
                 default:
                     return null;
-            };
+            }
         }
 
         private void SendKeepAlive(object sender, System.Timers.ElapsedEventArgs e)

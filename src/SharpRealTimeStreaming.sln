@@ -22,6 +22,8 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution 
 		Directory.Build.props = Directory.Build.props
 	EndProjectSection
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RtspRecorderApp", "RtspRecorderApp\RtspRecorderApp.csproj", "{5AC8D49B-E3B5-4FF6-A781-1F88ACF89661}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -52,6 +54,10 @@ Global
 		{CFADBA74-C3EA-4B86-B800-43ECF68D77C4}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{CFADBA74-C3EA-4B86-B800-43ECF68D77C4}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{CFADBA74-C3EA-4B86-B800-43ECF68D77C4}.Release|Any CPU.Build.0 = Release|Any CPU
+		{5AC8D49B-E3B5-4FF6-A781-1F88ACF89661}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{5AC8D49B-E3B5-4FF6-A781-1F88ACF89661}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{5AC8D49B-E3B5-4FF6-A781-1F88ACF89661}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{5AC8D49B-E3B5-4FF6-A781-1F88ACF89661}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -61,6 +67,7 @@ Global
 		{A1E94FC9-5F61-41F3-99AC-3C081E1F965B} = {660C9331-283E-462F-9DB1-1BC2BCB12B2D}
 		{4D660B91-8244-4C49-8A46-E0DA989F5111} = {660C9331-283E-462F-9DB1-1BC2BCB12B2D}
 		{CFADBA74-C3EA-4B86-B800-43ECF68D77C4} = {660C9331-283E-462F-9DB1-1BC2BCB12B2D}
+		{5AC8D49B-E3B5-4FF6-A781-1F88ACF89661} = {660C9331-283E-462F-9DB1-1BC2BCB12B2D}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {BB335B23-D422-4DDC-9B06-833B6E100A0C}
