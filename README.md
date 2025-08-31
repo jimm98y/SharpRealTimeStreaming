@@ -1,5 +1,5 @@
-# SharpRealTimeStreaming
-This is just a thin wrapper around the fantastic SharpRTSP, mostly based off their sample code with some API enhancements to make it easier to use. Added support for streaming AAC and H265 from fragmented MP4.
+# SharpRTSP wrapper
+This is just a thin wrapper around the fantastic SharpRTSP, mostly based off their sample code with some API enhancements to make it easier to use. Added support for streaming Opus, AV1 and H266.
 
 ## SharpRTSPClient
 Simple RTSP client that supports H264, H265, H266, AV1 for video + AAC, Opus, PCMU and PCMA for audio.
@@ -12,9 +12,6 @@ Sample RTSP server for ffmpeg RTP streams. Fully configurable in appsettings.jso
 
 ## Pcap RTSP Server
 PoC of re-playing RTSP from a Wireshark PcapNg file. 
-
-## Remarks
-Still work in progress, APIs are subject to change.
 
 ## Credits
 Most of the work has been done by SharpRTSP (https://github.com/ngraziano/SharpRTSP), this is just a convenience wrapper around it.
