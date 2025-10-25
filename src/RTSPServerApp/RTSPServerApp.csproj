@@ -16,6 +16,7 @@
     <None Remove="Images\sample-clouds-400x300.jpg" />
     <None Remove="Images\sample-green-400x300.jpg" />
     <None Remove="Images\sample-red-400x300.jpg" />
+    <None Remove="testV300.mp4" />
   </ItemGroup>
 
   <ItemGroup>
@@ -31,11 +32,14 @@
     <Content Include="Images\image003.jpg">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
+    <Content Include="testV300.mp4">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
   </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.1" />
-    <PackageReference Include="SharpMP4" Version="0.1.0" />
+    <PackageReference Include="SharpMP4" Version="0.1.1" />
   </ItemGroup>
 
   <ItemGroup>

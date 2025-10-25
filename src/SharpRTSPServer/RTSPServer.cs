@@ -1,6 +1,7 @@
 ﻿using Microsoft.Extensions.Logging;
 using Rtsp;
 using Rtsp.Messages;
+using SharpRTSPServer.Logging;
 using System;
 using System.Buffers;
 using System.Collections.Generic;
@@ -111,24 +112,6 @@ namespace SharpRTSPServer
             _serverListener = new TcpListener(IPAddress.Any, portNumber);
             _loggerFactory = loggerFactory;
             _logger = loggerFactory.CreateLogger<RTSPServer>();
-        }
-
-        public void AddVideoTrack(ITrack track)
-        {
-            if (track != null)
-            {
-                track.Sink = this;
-            }
-            this.VideoTrack = track;
-        }
-
-        public void AddAudioTrack(ITrack track)
-        {
-            if (track != null)
-            {
-                track.Sink = this;
-            }
-            this.AudioTrack = track;
         }
 
         /// <summary>
@@ -498,7 +481,7 @@ namespace SharpRTSPServer
 
         private string GenerateSDP()
         {
-            if(!string.IsNullOrEmpty(_sdp))
+            if (!string.IsNullOrEmpty(_sdp))
                 return _sdp; // sdp
 
             StringBuilder sdp = new StringBuilder();
@@ -522,7 +505,7 @@ namespace SharpRTSPServer
 
         private RTSPConnection ConnectionByRtpTransport(IRtpTransport rtpTransport)
         {
-            if (rtpTransport == null) 
+            if (rtpTransport == null)
                 return null;
 
             lock (_connectionList)
@@ -533,83 +516,12 @@ namespace SharpRTSPServer
 
         private RTSPConnection ConnectionBySessionId(string sessionId)
         {
-            if (sessionId == null) 
+            if (sessionId == null)
                 return null;
 
             lock (_connectionList)
             {
                 return _connectionList.Find(c => c.SessionId == sessionId);
-            }
-        }
-
-        /// <summary>
-        /// Check timeouts.
-        /// </summary>
-        /// <param name="currentRtspCount"></param>
-        /// <param name="currentRtspPlayCount"></param>
-        public void CheckTimeouts(out int currentRtspCount, out int currentRtspPlayCount)
-        {
-            DateTime now = DateTime.UtcNow;
-
-            lock (_connectionList)
-            {
-                currentRtspCount = _connectionList.Count;
-                var timeOut = now.AddSeconds(-RTSP_TIMEOUT);
-
-                // Convert to Array to allow us to delete from rtsp_list
-                foreach (RTSPConnection connection in _connectionList.Where(c => timeOut > c.TimeSinceLastRtspKeepAlive).ToArray())
-                {
-                    _logger.LogDebug("Removing session {sessionId} due to TIMEOUT", connection.SessionId);
-                    RemoveSession(connection);
-                }
-
-                currentRtspPlayCount = _connectionList.Count(c => c.Play);
-            }
-        }
-
-        public bool CanAcceptNewSamples()
-        {
-            CheckTimeouts(out _, out int currentRtspPlayCount);
-
-            if (currentRtspPlayCount == 0)
-                return false;
-
-            return true;
-        }
-
-        public void FeedInRawRTP(int streamType, uint rtpTimestamp, List<Memory<byte>> rtpPackets)
-        {
-            if (streamType != 0 && streamType != 1)
-                throw new ArgumentException("Invalid streamType! Video = 0, Audio = 1");
-
-            lock (_connectionList)
-            {
-                // Go through each RTSP connection and output the RTP on the Session
-                foreach (RTSPConnection connection in _connectionList.ToArray()) // ToArray makes a temp copy of the list. This lets us delete items in the foreach eg when there is Write Error
-                {
-                    // Only process Sessions in Play Mode
-                    if (!connection.Play)
-                        return;
-
-                    var stream = connection.Streams[streamType];
-
-                    if (stream.RtpChannel == null)
-                        return;
-
-                    _logger.LogDebug("Sending RTP session {sessionId} {TransportLogName} RTP timestamp={rtpTimestamp}. Sequence={sequenceNumber}",
-                        connection.SessionId, TransportLogName(stream.RtpChannel), rtpTimestamp, stream.SequenceNumber);
-
-                    if (stream.MustSendRtcpPacket)
-                    {
-                        if (!SendRTCP(rtpTimestamp, connection, stream))
-                        {
-                            RemoveSession(connection);
-                            continue;
-                        }
-                    }
-
-                    SendRawRTP(connection, stream, rtpPackets);
-                }
             }
         }
 
@@ -714,7 +626,7 @@ namespace SharpRTSPServer
 
         private static string TransportLogName(IRtpTransport transport)
         {
-            switch(transport)
+            switch (transport)
             {
                 case RtpTcpTransport _:
                     return "TCP";
@@ -724,7 +636,8 @@ namespace SharpRTSPServer
                     return "UDP";
                 default:
                     return "";
-            };
+            }
+            ;
         }
 
         #region IDisposable
@@ -745,7 +658,7 @@ namespace SharpRTSPServer
                 StopListen();
                 _stopping?.Dispose();
 
-                if(VideoTrack is IDisposable disposableVideoTrack)
+                if (VideoTrack is IDisposable disposableVideoTrack)
                 {
                     disposableVideoTrack.Dispose();
                     VideoTrack = null;
@@ -771,7 +684,7 @@ namespace SharpRTSPServer
                     // we have to fill in the trackID to identify the session in RTSP
                     using (var textReader = new StringReader(sdp))
                     {
-                        while(true)
+                        while (true)
                         {
                             string line = textReader.ReadLine();
 
@@ -780,7 +693,7 @@ namespace SharpRTSPServer
 
                             builder.AppendLine(line);
 
-                            if(line.StartsWith("m="))
+                            if (line.StartsWith("m="))
                             {
                                 builder.AppendLine($"a=control:trackID={mediaIndex++}");
                             }
@@ -796,268 +709,101 @@ namespace SharpRTSPServer
 
         #endregion // IDisposable
 
-        /// <summary>
-        /// An RTPStream can be a Video Stream, Audio Stream or a Metadata Stream.
-        /// </summary>
-        public class RTPStream
-        {
-            /// <summary>
-            /// When true will send out a RTCP packet to match Wall Clock Time to RTP Payload timestamps.
-            /// </summary>
-            public bool MustSendRtcpPacket { get; set; } = false;
-
-            /// <summary>
-            /// Sequence number.
-            /// </summary>
-            public ushort SequenceNumber { get; set; } = 1;
-
-            /// <summary>
-            /// Pair of UDP sockets (data and control) used when sending via UDP.
-            /// </summary>
-            public IRtpTransport RtpChannel { get; set; }
-
-            // <summary>
-            // Time since last RTCP message received - used to spot dead UDP clients.
-            // </summary>
-            //public DateTime TimeSinceLastRtcpKeepalive { get; set; } = DateTime.UtcNow; 
-
-            /// <summary>
-            /// Used in the RTCP Sender Report to state how many RTP packets have been transmitted (for packet loss)
-            /// </summary>
-            public uint RtpPacketCount { get; set; } = 0;
-
-            /// <summary>
-            /// Number of bytes of video that have been transmitted (for average bandwidth monitoring)
-            /// </summary>
-            public uint OctetCount { get; set; } = 0;
-        }
+        #region Track sink
 
         /// <summary>
-        /// The RTSP client connection.
+        /// Check timeouts.
         /// </summary>
-        public class RTSPConnection
+        /// <param name="currentRtspCount"></param>
+        /// <param name="currentRtspPlayCount"></param>
+        public void CheckTimeouts(out int currentRtspCount, out int currentRtspPlayCount)
         {
-            /// <summary>
-            /// RTSP conneciton listener.
-            /// </summary>
-            public RtspListener Listener { get; set; }
+            DateTime now = DateTime.UtcNow;
 
-            // Time since last RTSP message received - used to spot dead UDP clients
-            public DateTime TimeSinceLastRtspKeepAlive { get; private set; } = DateTime.UtcNow;
-
-            /// <summary>
-            /// Set to true when Session is in Play mode.
-            /// </summary>
-            public bool Play { get; set; }
-
-            /// <summary>
-            /// SSRC value used with this client connection.
-            /// </summary>
-            public uint SSRC { get; set; } = (uint)_rand.Next(0, int.MaxValue);
-
-            /// <summary>
-            /// RTSP Session ID used with this client connection.
-            /// </summary>
-            public string SessionId { get; set; } = ""; 
-
-            /// <summary>
-            /// Video stream.
-            /// </summary>
-            public RTPStream Video { get { return Streams[(int)TrackType.Video]; } }
-
-            /// <summary>
-            /// Audio stream.
-            /// </summary>
-            public RTPStream Audio { get { return Streams[(int)TrackType.Audio]; } }
-
-            public RTPStream[] Streams { get; } = new RTPStream[]
+            lock (_connectionList)
             {
-                new RTPStream(),
-                new RTPStream()
-            };
+                currentRtspCount = _connectionList.Count;
+                var timeOut = now.AddSeconds(-RTSP_TIMEOUT);
 
-            /// <summary>
-            /// Update the keepalive.
-            /// </summary>
-            public void UpdateKeepAlive()
-            {
-                TimeSinceLastRtspKeepAlive = DateTime.UtcNow;
+                // Convert to Array to allow us to delete from rtsp_list
+                foreach (RTSPConnection connection in _connectionList.Where(c => timeOut > c.TimeSinceLastRtspKeepAlive).ToArray())
+                {
+                    _logger.LogDebug("Removing session {sessionId} due to TIMEOUT", connection.SessionId);
+                    RemoveSession(connection);
+                }
+
+                currentRtspPlayCount = _connectionList.Count(c => c.Play);
             }
         }
-    }
 
-    public interface IRtpSender
-    {
-        void FeedInRawRTP(int streamType, uint rtpTimestamp, List<Memory<byte>> rtpPackets);
-        bool CanAcceptNewSamples();
-    }
-
-    public interface ITrack
-    {
-        IRtpSender Sink { get; set; }
-
-        /// <summary>
-        /// Codec name.
-        /// </summary>
-        string Codec { get; }
-
-        /// <summary>
-        /// Track ID. Used to identify the track in the SDP.
-        /// </summary>
-        int ID { get; set; }
-
-        /// <summary>
-        /// Payload type.
-        /// </summary>
-        int PayloadType { get; set; }
-
-        /// <summary>
-        /// Is the track ready?
-        /// </summary>
-        bool IsReady { get; }
-
-        /// <summary>
-        /// Build the SDP for this track.
-        /// </summary>
-        /// <param name="sdp">SDP <see cref="StringBuilder"/>.</param>
-        /// <returns><see cref="StringBuilder"/>.</returns>
-        StringBuilder BuildSDP(StringBuilder sdp);
-
-        /// <summary>
-        /// Creates RTP packets.
-        /// </summary>
-        /// <param name="samples">An array of samples.</param>
-        /// <param name="rtpTimestamp">RTP timestamp in the timescale of the track.</param>
-        /// <returns>RTP packets.</returns>
-        (List<Memory<byte>>, List<IMemoryOwner<byte>>) CreateRtpPackets(List<byte[]> samples, uint rtpTimestamp);
-        
-        void FeedInRawSamples(uint rtpTimestamp, List<byte[]> samples);
-    }
-
-    public class CustomLoggerFactory : ILoggerFactory
-    {
-        public void AddProvider(ILoggerProvider provider)
-        { }
-
-        public ILogger CreateLogger(string categoryName)
+        public bool CanAcceptNewSamples()
         {
-            return new CustomLogger();
-        }
+            CheckTimeouts(out _, out int currentRtspPlayCount);
 
-        public void Dispose()
-        { }
-    }
+            if (currentRtspPlayCount == 0)
+                return false;
 
-    public class CustomLogger : ILogger
-    {
-        class CustomLoggerScope<TState> : IDisposable
-        {
-            public CustomLoggerScope(TState state)
-            {
-                State = state;
-            }
-            public TState State { get; }
-            public void Dispose()
-            { }
-        }
-        public IDisposable BeginScope<TState>(TState state)
-        {
-            return new CustomLoggerScope<TState>(state);
-        }
-        public bool IsEnabled(LogLevel logLevel)
-        {
             return true;
         }
-        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception exception, Func<TState, Exception, string> formatter)
+
+        public void FeedInRawRTP(int streamType, uint rtpTimestamp, List<Memory<byte>> rtpPackets)
         {
-            switch (logLevel)
+            if (streamType != 0 && streamType != 1)
+                throw new ArgumentException("Invalid streamType! Video = 0, Audio = 1");
+
+            lock (_connectionList)
             {
-                case LogLevel.Trace:
+                // Go through each RTSP connection and output the RTP on the Session
+                foreach (RTSPConnection connection in _connectionList.ToArray()) // ToArray makes a temp copy of the list. This lets us delete items in the foreach eg when there is Write Error
+                {
+                    // Only process Sessions in Play Mode
+                    if (!connection.Play)
+                        return;
+
+                    var stream = connection.Streams[streamType];
+
+                    if (stream.RtpChannel == null)
+                        return;
+
+                    _logger.LogDebug("Sending RTP session {sessionId} {TransportLogName} RTP timestamp={rtpTimestamp}. Sequence={sequenceNumber}",
+                        connection.SessionId, TransportLogName(stream.RtpChannel), rtpTimestamp, stream.SequenceNumber);
+
+                    if (stream.MustSendRtcpPacket)
                     {
-                        if (SharpRTSPServer.Log.TraceEnabled)
+                        if (!SendRTCP(rtpTimestamp, connection, stream))
                         {
-                            SharpRTSPServer.Log.Trace(formatter.Invoke(state, exception));
+                            RemoveSession(connection);
+                            continue;
                         }
                     }
-                    break;
 
-                case LogLevel.Debug:
-                    {
-                        if (SharpRTSPServer.Log.DebugEnabled)
-                        {
-                            SharpRTSPServer.Log.Debug(formatter.Invoke(state, exception));
-                        }
-                    }
-                    break;
-
-                case LogLevel.Information:
-                    {
-                        if (SharpRTSPServer.Log.InfoEnabled)
-                        {
-                            SharpRTSPServer.Log.Info(formatter.Invoke(state, exception));
-                        }
-                    }
-                    break;
-
-                case LogLevel.Warning:
-                    {
-                        if (SharpRTSPServer.Log.WarnEnabled)
-                        {
-                            SharpRTSPServer.Log.Warn(formatter.Invoke(state, exception));
-                        }
-                    }
-                    break;
-
-                case LogLevel.Error:
-                case LogLevel.Critical:
-                    {
-                        if (SharpRTSPServer.Log.ErrorEnabled)
-                        {
-                            SharpRTSPServer.Log.Error(formatter.Invoke(state, exception));
-                        }
-                    }
-                    break;
-
-                default:
-                    {
-                        Debug.WriteLine($"Unknown trace level: {logLevel}");
-                    }
-                    break;
+                    SendRawRTP(connection, stream, rtpPackets);
+                }
             }
         }
-    }
 
-    internal static class Utilities
-    {
-        public static byte[] FromHexString(string hex)
+        #endregion // Track sink
+
+        #region Tracks
+
+        public void AddVideoTrack(ITrack track)
         {
-#if !NETCOREAPP
-            byte[] raw = new byte[hex.Length / 2];
-            for (int i = 0; i < raw.Length; i++)
+            if (track != null)
             {
-                raw[i] = Convert.ToByte(hex.Substring(i * 2, 2), 16);
+                track.Sink = this;
             }
-            return raw;
-#else
-            return Convert.FromHexString(hex);
-#endif
+            this.VideoTrack = track;
         }
 
-        public static string ToHexString(byte[] data)
+        public void AddAudioTrack(ITrack track)
         {
-#if !NETCOREAPP
-            string hexString = BitConverter.ToString(data);
-            hexString = hexString.Replace("-", "");
-            return hexString;
-#else
-            return Convert.ToHexString(data);
-#endif
+            if (track != null)
+            {
+                track.Sink = this;
+            }
+            this.AudioTrack = track;
         }
-    }
 
-    public enum TrackType : int
-    {
-        Video = 0,
-        Audio = 1
+        #endregion // Tracks
     }
 }

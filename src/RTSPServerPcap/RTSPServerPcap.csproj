@@ -16,7 +16,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Haukcode.PcapngUtils" Version="1.3.33" />
+    <PackageReference Include="Haukcode.PcapngUtils" Version="1.3.35" />
     <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="8.0.1" />
   </ItemGroup>
 

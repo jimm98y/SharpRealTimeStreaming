@@ -1,6 +1,6 @@
 ﻿using System;
 
-namespace SharpRTSPServer
+namespace SharpRTSPServer.Logging
 {
     public static class Log
     {
