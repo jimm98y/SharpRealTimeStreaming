@@ -26,7 +26,7 @@ namespace Rtsp.Rtp
         private DateTime _timestamp;
 
         // Constructor
-        public AV1Payload(ILogger<AV1Payload>? logger, MemoryPool<byte>? memoryPool = null)
+        public AV1Payload(ILogger<AV1Payload> logger, MemoryPool<byte> memoryPool = null)
         {
             _logger = logger as ILogger ?? NullLogger.Instance;
             _memoryPool = memoryPool ?? MemoryPool<byte>.Shared;

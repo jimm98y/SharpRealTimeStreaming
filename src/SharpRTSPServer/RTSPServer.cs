@@ -40,16 +40,6 @@ namespace SharpRTSPServer
         private static readonly Random _rand = new Random();
 
         /// <summary>
-        /// Video track. Must be set before starting the server.
-        /// </summary>
-        private ITrack VideoTrack;
-
-        /// <summary>
-        /// Audio track.
-        /// </summary>
-        private ITrack AudioTrack;
-
-        /// <summary>
         /// SSRC.
         /// </summary>
         public uint SSRC { get; set; } = (uint)_rand.Next(0, int.MaxValue); // 8 hex digits
@@ -66,9 +56,10 @@ namespace SharpRTSPServer
         private CancellationTokenSource _stopping;
         private Thread _listenTread;
         private int _sessionHandle = 1;
-        private string _sdp = null;
         private readonly NetworkCredential _credentials;
         private readonly Authentication _authentication;
+
+        private List<RTSPStreamSource> StreamSources = new List<RTSPStreamSource>();
 
         public bool IsRTSPS { get; set; } = false;
 
@@ -235,6 +226,16 @@ namespace SharpRTSPServer
                 }
             }
 
+            var streamSource = GetStreamSource(message.RtspUri);
+            if(streamSource == null)
+            {
+                // invalid URI
+                RtspResponse notFoundResponse = message.CreateResponse();
+                notFoundResponse.ReturnCode = 404;
+                listener.SendMessage(notFoundResponse);
+                return;
+            }
+
             // Update the RTSP Keepalive Timeout
             lock (_connectionList)
             {
@@ -242,6 +243,11 @@ namespace SharpRTSPServer
                 {
                     // found the connection
                     oneConnection.UpdateKeepAlive();
+
+                    if(!streamSource.ConnectionList.Contains(oneConnection))
+                    {
+                        streamSource.ConnectionList.Add(oneConnection);
+                    }
                     break;
                 }
             }
@@ -412,9 +418,10 @@ namespace SharpRTSPServer
                         // or a SETUP for an Audio Stream.
                         // In the SDP the H264/H265 video track is TrackID 0
                         // and the Audio Track is TrackID 1
-                        RTPStream stream;
-                        if (setupMessage.RtspUri.AbsolutePath.EndsWith($"trackID={VideoTrack?.ID}")) stream = setupConnection.Video;
-                        else if (setupMessage.RtspUri.AbsolutePath.EndsWith($"trackID={AudioTrack?.ID}")) stream = setupConnection.Audio;
+                        var streamSource = GetStreamSource(setupMessage.RtspUri);
+                        RTPStream stream;                        
+                        if (setupMessage.RtspUri.AbsolutePath.EndsWith($"trackID={streamSource.VideoTrack?.ID}")) stream = setupConnection.Video;
+                        else if (setupMessage.RtspUri.AbsolutePath.EndsWith($"trackID={streamSource.AudioTrack?.ID}")) stream = setupConnection.Audio;
                         else continue;// error case - track unknown
                                       // found the connection
                                       // Add the transports to the stream
@@ -456,8 +463,10 @@ namespace SharpRTSPServer
 
             // TODO. Check the requstedUrl is valid. In this example we accept any RTSP URL
 
+            var StreamSource = GetStreamSource(message.RtspUri);
+
             // if the SPS and PPS are not defined yet, we have to return an error
-            if (VideoTrack == null || !VideoTrack.IsReady || (AudioTrack != null && !AudioTrack.IsReady))
+            if (StreamSource.VideoTrack == null || !StreamSource.VideoTrack.IsReady || (StreamSource.AudioTrack != null && !StreamSource.AudioTrack.IsReady))
             {
                 RtspResponse describeResponse2 = message.CreateResponse();
                 describeResponse2.ReturnCode = 400; // 400 Bad Request
@@ -465,7 +474,7 @@ namespace SharpRTSPServer
                 return;
             }
 
-            string sdp = GenerateSDP();
+            string sdp = GenerateSDP(StreamSource);
             byte[] sdpBytes = Encoding.ASCII.GetBytes(sdp);
 
             // Create the reponse to DESCRIBE
@@ -479,10 +488,21 @@ namespace SharpRTSPServer
             listener.SendMessage(describeResponse);
         }
 
-        private string GenerateSDP()
+        private RTSPStreamSource GetStreamSource(Uri rtspUri)
         {
-            if (!string.IsNullOrEmpty(_sdp))
-                return _sdp; // sdp
+            string streamID = rtspUri.AbsolutePath.TrimStart('/').Split('/').First();
+            return GetStreamSource(streamID);
+        }
+
+        private RTSPStreamSource GetStreamSource(string streamID)
+        {
+            return StreamSources.FirstOrDefault(x => x.StreamID == streamID);
+        }
+
+        private string GenerateSDP(RTSPStreamSource streamSource)
+        {
+            if (!string.IsNullOrEmpty(streamSource.Sdp))
+                return streamSource.Sdp; // sdp
 
             StringBuilder sdp = new StringBuilder();
 
@@ -495,10 +515,10 @@ namespace SharpRTSPServer
             sdp.Append("c=IN IP4 0.0.0.0\n");
 
             // VIDEO
-            VideoTrack?.BuildSDP(sdp);
+            streamSource.VideoTrack?.BuildSDP(sdp);
 
             // AUDIO
-            AudioTrack?.BuildSDP(sdp);
+            streamSource.AudioTrack?.BuildSDP(sdp);
 
             return sdp.ToString();
         }
@@ -622,6 +642,10 @@ namespace SharpRTSPServer
             connection.Audio.RtpChannel = null;
             connection.Listener.Dispose();
             _connectionList.Remove(connection);
+            foreach(var streamSource in StreamSources)
+            {
+                streamSource.ConnectionList.Remove(connection);
+            }
         }
 
         private static string TransportLogName(IRtpTransport transport)
@@ -637,7 +661,6 @@ namespace SharpRTSPServer
                 default:
                     return "";
             }
-            ;
         }
 
         #region IDisposable
@@ -658,55 +681,20 @@ namespace SharpRTSPServer
                 StopListen();
                 _stopping?.Dispose();
 
-                if (VideoTrack is IDisposable disposableVideoTrack)
+                var streamSources = StreamSources.ToList();
+                for (int i = 0; i < StreamSources.Count; i++)
                 {
-                    disposableVideoTrack.Dispose();
-                    VideoTrack = null;
-                }
-
-                if (AudioTrack is IDisposable disposableAudioTrack)
-                {
-                    disposableAudioTrack.Dispose();
-                    AudioTrack = null;
-                }
-            }
-        }
-
-        public void OverrideSDP(string sdp, bool mungleSDP = true)
-        {
-            if (mungleSDP)
-            {
-                if (!sdp.Contains("a=control:"))
-                {
-                    StringBuilder builder = new StringBuilder();
-                    int mediaIndex = 0;
-
-                    // we have to fill in the trackID to identify the session in RTSP
-                    using (var textReader = new StringReader(sdp))
+                    var streamSource = streamSources[i];
+                    if (streamSource is IDisposable disposableStreamSource)
                     {
-                        while (true)
-                        {
-                            string line = textReader.ReadLine();
-
-                            if (line == null)
-                                break;
-
-                            builder.AppendLine(line);
-
-                            if (line.StartsWith("m="))
-                            {
-                                builder.AppendLine($"a=control:trackID={mediaIndex++}");
-                            }
-                        }
+                        disposableStreamSource.Dispose();
                     }
-
-                    sdp = builder.ToString();
                 }
+
+                StreamSources.Clear();                
             }
-
-            this._sdp = sdp;
         }
-
+                
         #endregion // IDisposable
 
         #region Track sink
@@ -714,15 +702,18 @@ namespace SharpRTSPServer
         /// <summary>
         /// Check timeouts.
         /// </summary>
+        /// <param name="streamID"></param>
         /// <param name="currentRtspCount"></param>
         /// <param name="currentRtspPlayCount"></param>
-        public void CheckTimeouts(out int currentRtspCount, out int currentRtspPlayCount)
+        public void CheckTimeouts(string streamID, out int currentRtspCount, out int currentRtspPlayCount)
         {
             DateTime now = DateTime.UtcNow;
 
             lock (_connectionList)
             {
-                currentRtspCount = _connectionList.Count;
+                var streamSource = GetStreamSource(streamID);
+
+                currentRtspCount = streamSource.ConnectionList.Count;
                 var timeOut = now.AddSeconds(-RTSP_TIMEOUT);
 
                 // Convert to Array to allow us to delete from rtsp_list
@@ -732,13 +723,13 @@ namespace SharpRTSPServer
                     RemoveSession(connection);
                 }
 
-                currentRtspPlayCount = _connectionList.Count(c => c.Play);
+                currentRtspPlayCount = streamSource.ConnectionList.Count(c => c.Play);
             }
         }
 
-        public bool CanAcceptNewSamples()
+        public bool CanAcceptNewSamples(string streamID)
         {
-            CheckTimeouts(out _, out int currentRtspPlayCount);
+            CheckTimeouts(streamID, out _, out int currentRtspPlayCount);
 
             if (currentRtspPlayCount == 0)
                 return false;
@@ -746,15 +737,17 @@ namespace SharpRTSPServer
             return true;
         }
 
-        public void FeedInRawRTP(int streamType, uint rtpTimestamp, List<Memory<byte>> rtpPackets)
+        public void FeedInRawRTP(string streamID, int streamType, uint rtpTimestamp, List<Memory<byte>> rtpPackets)
         {
             if (streamType != 0 && streamType != 1)
                 throw new ArgumentException("Invalid streamType! Video = 0, Audio = 1");
 
             lock (_connectionList)
             {
+                var streamSource = GetStreamSource(streamID);
+
                 // Go through each RTSP connection and output the RTP on the Session
-                foreach (RTSPConnection connection in _connectionList.ToArray()) // ToArray makes a temp copy of the list. This lets us delete items in the foreach eg when there is Write Error
+                foreach (RTSPConnection connection in streamSource.ConnectionList.ToArray()) // ToArray makes a temp copy of the list. This lets us delete items in the foreach eg when there is Write Error
                 {
                     // Only process Sessions in Play Mode
                     if (!connection.Play)
@@ -786,22 +779,24 @@ namespace SharpRTSPServer
 
         #region Tracks
 
-        public void AddVideoTrack(ITrack track)
+        public void AddStreamSource(RTSPStreamSource streamSource)
         {
-            if (track != null)
-            {
-                track.Sink = this;
-            }
-            this.VideoTrack = track;
-        }
+            if (streamSource == null)
+                throw new ArgumentNullException(nameof(streamSource));
 
-        public void AddAudioTrack(ITrack track)
-        {
-            if (track != null)
+            if (streamSource.VideoTrack != null)
             {
-                track.Sink = this;
+                streamSource.VideoTrack.Sink = this;
+                streamSource.VideoTrack.StreamID = streamSource.StreamID;                
             }
-            this.AudioTrack = track;
+
+            if (streamSource.AudioTrack != null)
+            {
+                streamSource.AudioTrack.Sink = this;
+                streamSource.AudioTrack.StreamID = streamSource.StreamID;
+            }
+
+            this.StreamSources.Add(streamSource);
         }
 
         #endregion // Tracks

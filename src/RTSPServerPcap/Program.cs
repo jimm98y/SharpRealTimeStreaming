@@ -27,8 +27,8 @@ long lastAudioRealTime = -1;
 
 bool _readNext = false;
 Stopwatch _stopwatch = new Stopwatch();
-ProxyTrack videoTrack = null;
-ProxyTrack audioTrack = null;
+ProxyTrack rtspVideoTrack = null;
+ProxyTrack rtspAudioTrack = null;
 var rtspProtocolParser = new RtspProtocolParser();
 
 var sdpTask = Task.Run(() =>
@@ -48,20 +48,21 @@ var sdpTask = Task.Run(() =>
     }
 });
 
+const string STREAM_ID = "stream1";
+
 using (var server = new RTSPServer(port, userName, password))
 {
     await rtspProtocolParser.Sempahore.WaitAsync();
 
-    server.OverrideSDP(rtspProtocolParser.SDP, true);
+    rtspVideoTrack = new ProxyTrack(TrackType.Video);
+    rtspAudioTrack = new ProxyTrack(TrackType.Audio);
 
-    videoTrack = new ProxyTrack(TrackType.Video);
-    server.AddVideoTrack(videoTrack);
+    var streamSource = new RTSPStreamSource(STREAM_ID, rtspVideoTrack, rtspAudioTrack);
+    streamSource.OverrideSDP(rtspProtocolParser.SDP, true);
+    server.AddStreamSource(streamSource);
 
-    audioTrack = new ProxyTrack(TrackType.Audio);
-    server.AddAudioTrack(audioTrack);
-
-    videoTrack?.Start();
-    audioTrack?.Start();
+    rtspVideoTrack?.Start();
+    rtspAudioTrack?.Start();
 
     try
     {
@@ -72,7 +73,7 @@ using (var server = new RTSPServer(port, userName, password))
         Console.WriteLine(ex.ToString());
     }
 
-    Console.WriteLine($"RTSP URL is rtsp://{userName}:{password}@{hostName}:{port}");
+    Console.WriteLine($"RTSP URL is rtsp://{userName}:{password}@{hostName}:{port}/{STREAM_ID}");
 
     Console.WriteLine("Press any key to exit");
     while (!Console.KeyAvailable)
@@ -132,7 +133,7 @@ void ParseData(byte[] data, object header, uint seconds, uint microseconds)
                 {
                     Thread.Sleep(sleep);
                 }
-                videoTrack?.FeedInRawSamples(RTPPacketUtil.ReadTS(data), new List<byte[]> { data });
+                rtspVideoTrack?.FeedInRawSamples(RTPPacketUtil.ReadTS(data), new List<byte[]> { data });
             }
             else if(rtspProtocolParser.Ports.Count > 1 && rtspProtocolParser.Ports[1].Contains(udp.SourcePort) && rtspProtocolParser.Ports[1].Contains(udp.DestinationPort))
             {
@@ -149,7 +150,7 @@ void ParseData(byte[] data, object header, uint seconds, uint microseconds)
                     Thread.Sleep(sleep);
                 }
 
-                audioTrack?.FeedInRawSamples(RTPPacketUtil.ReadTS(data), new List<byte[]> { data });
+                rtspAudioTrack?.FeedInRawSamples(RTPPacketUtil.ReadTS(data), new List<byte[]> { data });
             }
         }
     }

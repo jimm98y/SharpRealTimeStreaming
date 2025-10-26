@@ -9,6 +9,8 @@ namespace SharpRTSPServer
     {
         IRtpSender Sink { get; set; }
 
+        string StreamID { get; set; }
+
         /// <summary>
         /// Codec name.
         /// </summary>
