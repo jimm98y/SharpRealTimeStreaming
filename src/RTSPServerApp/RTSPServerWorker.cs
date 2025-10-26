@@ -17,14 +17,53 @@ namespace RTSPServerApp;
 
 internal class RTSPServerWorker : BackgroundService
 {
+    public class MediaFile
+    {
+        public string FilePath { get; set; }
+        public string StreamID { get; set; }
+    }
+
+    public class MediaFileReader : IDisposable
+    {
+        private bool _disposedValue;
+        public string StreamID { get; }
+        public int VideoRtpBaseTime { get; set; }
+        public Timer VideoTimer { get; set; }
+        public int AaudioRtpBaseTime { get; set; }
+        public Timer AudioTimer { get; set; }
+        public IsoStream IsoStream { get; set; }
+
+        public MediaFileReader(string streamID)
+        {
+            StreamID = streamID;
+        }
+
+        protected virtual void Dispose(bool disposing)
+        {
+            if (!_disposedValue)
+            {
+                if (disposing)
+                {
+                    AudioTimer?.Dispose();
+                    VideoTimer?.Dispose();
+                }
+
+                _disposedValue = true;
+            }
+        }
+
+        public void Dispose()
+        {
+            Dispose(disposing: true);
+            GC.SuppressFinalize(this);
+        }
+    }
+
     private readonly ILoggerFactory _loggerFactory;
     private readonly IConfiguration _configuration;
     private RTSPServer _server;
-    private int _videoRtpBaseTime;
-    private Timer _videoTimer;
-    private int _audioRtpBaseTime;
-    private Timer _audioTimer;
-    private IsoStream _isoStream;
+
+    private List<MediaFileReader> _mediaFileStreamReaders = new List<MediaFileReader>();
 
     private readonly object _syncRoot = new object();
 
@@ -45,158 +84,168 @@ internal class RTSPServerWorker : BackgroundService
         var port = ushort.Parse(_configuration["RTSPServerApp:Port"]);
         var userName = _configuration["RTSPServerApp:UserName"];
         var password = _configuration["RTSPServerApp:Password"];
-        var fileName = _configuration["RTSPServerApp:FilePath"];
+
+        MediaFile[] mediaFiles = _configuration.GetSection("RTSPServerApp:Media").Get<MediaFile[]>();
+        if (mediaFiles == null)
+            return Task.CompletedTask;
 
         _server = new RTSPServer(port, userName, password, _loggerFactory);
+        List<MediaFileReader> mediaFileReaders = new List<MediaFileReader>();
 
-        ITrack rtspVideoTrack = null;
-        ITrack rtspAudioTrack = null;
-
-        if (Path.GetExtension(fileName).ToLowerInvariant() == ".mp4")
+        foreach (var mediaFile in mediaFiles)
         {
-            Stream inputFileStream = new BufferedStream(new FileStream(fileName, FileMode.Open, FileAccess.Read, FileShare.Read));
-            _isoStream = new IsoStream(inputFileStream);
-            var fmp4 = new Container();
-            fmp4.Read(_isoStream);
+            var mediaFileReader = new MediaFileReader(mediaFile.StreamID);
+            ITrack rtspVideoTrack = null;
+            ITrack rtspAudioTrack = null;
 
-            VideoReader inputReader = new VideoReader();
-            inputReader.Parse(fmp4);
-            IEnumerable<SharpMP4.Tracks.ITrack> inputTracks = inputReader.GetTracks();
-            IEnumerable<byte[]> videoUnits = null;
-
-            foreach (var inputTrack in inputTracks)
+            string fileName = mediaFile.FilePath;
+            if (Path.GetExtension(fileName).ToLowerInvariant() == ".mp4")
             {
-                if (inputTrack.HandlerType == HandlerTypes.Video)
+                Stream inputFileStream = new BufferedStream(new FileStream(fileName, FileMode.Open, FileAccess.Read, FileShare.Read));
+                mediaFileReader.IsoStream = new IsoStream(inputFileStream);
+                var fmp4 = new Container();
+                fmp4.Read(mediaFileReader.IsoStream);
+
+                VideoReader inputReader = new VideoReader();
+                inputReader.Parse(fmp4);
+                IEnumerable<SharpMP4.Tracks.ITrack> inputTracks = inputReader.GetTracks();
+                IEnumerable<byte[]> videoUnits = null;
+
+                foreach (var inputTrack in inputTracks)
                 {
-                    videoUnits = inputTrack.GetContainerSamples();
+                    if (inputTrack.HandlerType == HandlerTypes.Video)
+                    {
+                        videoUnits = inputTrack.GetContainerSamples();
 
-                    if (inputTrack is SharpMP4.Tracks.H264Track)
-                    {
-                        var h264Track = new SharpRTSPServer.H264Track();
-                        h264Track.SetParameterSets(videoUnits.First(), videoUnits.Skip(1).First());
-                        rtspVideoTrack = h264Track;
-                    }
-                    else if (inputTrack is SharpMP4.Tracks.H265Track)
-                    {
-                        var h265Track = new SharpRTSPServer.H265Track();
-                        h265Track.SetParameterSets(videoUnits.First(), videoUnits.Skip(1).First(), videoUnits.Skip(2).First());
-                        rtspVideoTrack = h265Track;
-                    }
-                    else if (inputTrack is SharpMP4.Tracks.H266Track)
-                    {
-                        var h266Track = new SharpRTSPServer.H266Track();
-                        h266Track.SetParameterSets(null, null, videoUnits.First(), videoUnits.Skip(1).First(), null);
-                        rtspVideoTrack = h266Track;
-                    }
-                    else if (inputTrack is SharpMP4.Tracks.AV1Track)
-                    {
-                        var av1Track = new SharpRTSPServer.AV1Track();
-                        av1Track.SetOBUs(videoUnits.ToList());
-                        rtspVideoTrack = av1Track;
-                    }
-                    else
-                    {
-                        continue;
-                    }
-
-                    _server.AddVideoTrack(rtspVideoTrack);
-
-                    //rtspVideoTrack.FeedInRawSamples(0, videoUnits.ToList());
-
-                    _videoRtpBaseTime = Random.Shared.Next();
-                    _videoTimer = new Timer(inputTrack.DefaultSampleDuration * 1000d / inputTrack.Timescale);
-                    _videoTimer.Elapsed += (s, e) =>
-                    {
-                        lock (_syncRoot)
+                        if (inputTrack is SharpMP4.Tracks.H264Track)
                         {
-                            var sample = inputReader.ReadSample(inputTrack.TrackID);
-
-                            if (sample == null)
-                            {
-                                foreach (var track in inputReader.Tracks)
-                                {
-                                    track.Value.SampleIndex = 0;
-                                    track.Value.FragmentIndex = 0;
-                                }
-                                return;
-                            }
-                        
-                            IEnumerable<byte[]> units = inputReader.ParseSample(inputTrack.TrackID, sample.Data);
-                            rtspVideoTrack.FeedInRawSamples((uint)unchecked(_videoRtpBaseTime + sample.PTS), units.ToList());
+                            var h264Track = new SharpRTSPServer.H264Track();
+                            h264Track.SetParameterSets(videoUnits.First(), videoUnits.Skip(1).First());
+                            rtspVideoTrack = h264Track;
                         }
-                    };
+                        else if (inputTrack is SharpMP4.Tracks.H265Track)
+                        {
+                            var h265Track = new SharpRTSPServer.H265Track();
+                            h265Track.SetParameterSets(videoUnits.First(), videoUnits.Skip(1).First(), videoUnits.Skip(2).First());
+                            rtspVideoTrack = h265Track;
+                        }
+                        else if (inputTrack is SharpMP4.Tracks.H266Track)
+                        {
+                            var h266Track = new SharpRTSPServer.H266Track();
+                            h266Track.SetParameterSets(null, null, videoUnits.First(), videoUnits.Skip(1).First(), null);
+                            rtspVideoTrack = h266Track;
+                        }
+                        else if (inputTrack is SharpMP4.Tracks.AV1Track)
+                        {
+                            var av1Track = new SharpRTSPServer.AV1Track();
+                            av1Track.SetOBUs(videoUnits.ToList());
+                            rtspVideoTrack = av1Track;
+                        }
+                        else
+                        {
+                            continue;
+                        }
 
-                    break;
+                        mediaFileReader.VideoRtpBaseTime = Random.Shared.Next();
+                        mediaFileReader.VideoTimer = new Timer(inputTrack.DefaultSampleDuration * 1000d / inputTrack.Timescale);
+                        mediaFileReader.VideoTimer.Elapsed += (s, e) =>
+                        {
+                            lock (_syncRoot)
+                            {
+                                var sample = inputReader.ReadSample(inputTrack.TrackID);
+
+                                if (sample == null)
+                                {
+                                    foreach (var track in inputReader.Tracks)
+                                    {
+                                        track.Value.SampleIndex = 0;
+                                        track.Value.FragmentIndex = 0;
+                                    }
+                                    return;
+                                }
+
+                                IEnumerable<byte[]> units = inputReader.ParseSample(inputTrack.TrackID, sample.Data);
+                                rtspVideoTrack.FeedInRawSamples((uint)unchecked(mediaFileReader.VideoRtpBaseTime + sample.PTS), units.ToList());
+                            }
+                        };
+
+                        break;
+                    }
+                }
+
+                foreach (var inputTrack in inputTracks)
+                {
+                    if (inputTrack.HandlerType == HandlerTypes.Sound)
+                    {
+                        if (inputTrack is SharpMP4.Tracks.AACTrack aac)
+                        {
+                            rtspAudioTrack = new SharpRTSPServer.AACTrack(aac.AudioSpecificConfig.ToBytes(), (int)aac.SamplingRate, aac.ChannelCount);
+                        }
+                        else if (inputTrack is SharpMP4.Tracks.OpusTrack opus)
+                        {
+                            rtspAudioTrack = new SharpRTSPServer.OpusTrack();
+                        }
+                        else
+                        {
+                            continue;
+                        }
+
+                        mediaFileReader.AaudioRtpBaseTime = Random.Shared.Next();
+                        mediaFileReader.AudioTimer = new Timer(inputTrack.DefaultSampleDuration * 1000d / inputTrack.Timescale);
+                        mediaFileReader.AudioTimer.Elapsed += (s, e) =>
+                        {
+                            lock (_syncRoot)
+                            {
+                                var sample = inputReader.ReadSample(inputTrack.TrackID);
+
+                                if (sample == null)
+                                {
+                                    foreach (var track in inputReader.Tracks)
+                                    {
+                                        track.Value.SampleIndex = 0;
+                                        track.Value.FragmentIndex = 0;
+                                    }
+                                    return;
+                                }
+
+                                IEnumerable<byte[]> units = inputReader.ParseSample(inputTrack.TrackID, sample.Data);
+                                rtspAudioTrack.FeedInRawSamples((uint)unchecked(mediaFileReader.AaudioRtpBaseTime + sample.PTS), units.ToList());
+                            }
+                        };
+
+                        break;
+                    }
                 }
             }
-
-            foreach (var inputTrack in inputTracks)
+            else
             {
-                if (inputTrack.HandlerType == HandlerTypes.Sound)
+                string[] jpgFiles = Directory.GetFiles(fileName, "*.jpg");
+                int jpgFileIndex = 0;
+
+                rtspVideoTrack = new SharpRTSPServer.MJpegTrack();
+
+                mediaFileReader.VideoTimer = new Timer(1000);
+                mediaFileReader.VideoTimer.Elapsed += (s, e) =>
                 {
-                    if (inputTrack is SharpMP4.Tracks.AACTrack aac)
-                    {
-                        rtspAudioTrack = new SharpRTSPServer.AACTrack(aac.AudioSpecificConfig.ToBytes(), (int)aac.SamplingRate, aac.ChannelCount);
-                    }
-                    else if (inputTrack is SharpMP4.Tracks.OpusTrack opus)
-                    {
-                        rtspAudioTrack = new SharpRTSPServer.OpusTrack();
-                    }
-                    else
-                    {
-                        continue;
-                    }
-
-                    _server.AddAudioTrack(rtspAudioTrack);
-
-                    _audioRtpBaseTime = Random.Shared.Next();
-                    _audioTimer = new Timer(inputTrack.DefaultSampleDuration * 1000d / inputTrack.Timescale);
-                    _audioTimer.Elapsed += (s, e) =>
-                    {
-                        lock (_syncRoot)
-                        {
-                            var sample = inputReader.ReadSample(inputTrack.TrackID);
-
-                            if (sample == null)
-                            {
-                                foreach (var track in inputReader.Tracks)
-                                {
-                                    track.Value.SampleIndex = 0;
-                                    track.Value.FragmentIndex = 0;
-                                }
-                                return;
-                            }
-
-                            IEnumerable<byte[]> units = inputReader.ParseSample(inputTrack.TrackID, sample.Data);
-                            rtspAudioTrack.FeedInRawSamples((uint)unchecked(_audioRtpBaseTime + sample.PTS), units.ToList());
-                        }
-                    };
-
-                    break;
-                }
+                    rtspVideoTrack.FeedInRawSamples((uint)jpgFileIndex * 1000, new List<byte[]> { File.ReadAllBytes(jpgFiles[jpgFileIndex++ % jpgFiles.Length]) });
+                };
             }
-        }
-        else
-        {
-            string[] jpgFiles = Directory.GetFiles(fileName, "*.jpg");
-            int jpgFileIndex = 0;
 
-            rtspVideoTrack = new SharpRTSPServer.MJpegTrack();
-            _server.AddVideoTrack(rtspVideoTrack);
+            var streamSource = new RTSPStreamSource(mediaFile.StreamID, rtspVideoTrack, rtspAudioTrack);
+            _server.AddStreamSource(streamSource);
 
-            _videoTimer = new Timer(1000);
-            _videoTimer.Elapsed += (s, e) =>
-            {
-                rtspVideoTrack.FeedInRawSamples((uint)jpgFileIndex * 1000, new List<byte[]> { File.ReadAllBytes(jpgFiles[jpgFileIndex++ % jpgFiles.Length]) });
-            };
+            mediaFileReaders.Add(mediaFileReader);
         }
 
         _server.StartListen();
 
-        _logger.LogInformation($"RTSP URL is rtsp://{userName}:{password}@{hostName}:{port}");
+        foreach(var mediaFileReader in mediaFileReaders)
+        {
+            mediaFileReader.VideoTimer?.Start();
+            mediaFileReader.AudioTimer?.Start();
 
-        _videoTimer?.Start();
-        _audioTimer?.Start();
+            _logger.LogInformation($"RTSP URL is rtsp://{userName}:{password}@{hostName}:{port}/{mediaFileReader.StreamID}");
+        }
 
         return Task.CompletedTask;
     }
@@ -205,8 +254,13 @@ internal class RTSPServerWorker : BackgroundService
     {
         base.Dispose();
 
-        _videoTimer?.Stop();
-        _audioTimer?.Stop();
+        for (int i = 0; i < _mediaFileStreamReaders.Count; i++)
+        {
+            var stream = _mediaFileStreamReaders[i];
+            stream.Dispose();
+        }
+
+        _mediaFileStreamReaders.Clear();
 
         _server?.Dispose();
     }

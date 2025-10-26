@@ -8,7 +8,7 @@ namespace Rtsp.Rtp
 
     public class OpusPayload : RawPayload
     {
-        public OpusPayload(MemoryPool<byte>? memoryPool = null)
+        public OpusPayload(MemoryPool<byte> memoryPool = null)
             : base(memoryPool)
         {
         }

@@ -60,33 +60,35 @@ else
 if (string.IsNullOrEmpty(videoUri) && string.IsNullOrEmpty(audioUri))
     throw new Exception("Invalid configuration! Either VideoUri, AudioUri or both must be specified!");
 
+const string STREAM_ID = "stream1";
+
 using (var server = new RTSPServer(port, userName, password))
 {
     using (CancellationTokenSource cts = new CancellationTokenSource())
     {
-        ProxyTrack videoTrack = null;
-        ProxyTrack audioTrack = null;
+        ProxyTrack rtspVideoTrack = null;
+        ProxyTrack rtspAudioTrack = null;
         Task videoTask = null;
         Task audioTask = null;
 
         if (!string.IsNullOrEmpty(videoUri))
         {
-            videoTrack = new ProxyTrack(TrackType.Video);
-            videoTask = RunUdpClient(videoTrack, new Uri(videoUri, UriKind.Absolute), cts.Token);
-            server.AddVideoTrack(videoTrack);
+            rtspVideoTrack = new ProxyTrack(TrackType.Video);
+            videoTask = RunUdpClient(rtspVideoTrack, new Uri(videoUri, UriKind.Absolute), cts.Token);
         }
 
         if (!string.IsNullOrEmpty(audioUri))
         {
-            audioTrack = new ProxyTrack(TrackType.Audio);
-            audioTask = RunUdpClient(audioTrack, new Uri(audioUri, UriKind.Absolute), cts.Token);
-            server.AddAudioTrack(audioTrack);
+            rtspAudioTrack = new ProxyTrack(TrackType.Audio);
+            audioTask = RunUdpClient(rtspAudioTrack, new Uri(audioUri, UriKind.Absolute), cts.Token);
         }
 
-        server.OverrideSDP(sdp, true);
+        var streamSource = new RTSPStreamSource(STREAM_ID, rtspVideoTrack, rtspAudioTrack);
+        streamSource.OverrideSDP(sdp, true);
+        server.AddStreamSource(streamSource);
 
-        videoTrack?.Start();
-        audioTrack?.Start();
+        rtspVideoTrack?.Start();
+        rtspAudioTrack?.Start();
 
         try
         {
@@ -97,7 +99,7 @@ using (var server = new RTSPServer(port, userName, password))
             Console.WriteLine(ex.ToString());
         }
 
-        Console.WriteLine($"RTSP URL is rtsp://{userName}:{password}@{hostName}:{port}");
+        Console.WriteLine($"RTSP URL is rtsp://{userName}:{password}@{hostName}:{port}/{STREAM_ID}");
 
         Console.WriteLine("Press any key to exit");
         while (!Console.KeyAvailable)

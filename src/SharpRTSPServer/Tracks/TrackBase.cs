@@ -9,6 +9,8 @@ namespace SharpRTSPServer
     {
         public IRtpSender Sink { get; set; } = null;
 
+        public string StreamID { get; set; } = null;
+
         public abstract string Codec { get; }
 
         public abstract int ID { get; set; }
@@ -29,7 +31,7 @@ namespace SharpRTSPServer
             if (Sink == null)
                 throw new InvalidOperationException("Sink is null!!!");
 
-            if (!Sink.CanAcceptNewSamples())
+            if (!Sink.CanAcceptNewSamples(StreamID))
                 return;
 
             if (ID != (int)TrackType.Video && ID != (int)TrackType.Audio)
@@ -37,7 +39,7 @@ namespace SharpRTSPServer
 
             (List<Memory<byte>> rtpPackets, List<IMemoryOwner<byte>> memoryOwners) = CreateRtpPackets(samples, rtpTimestamp);
 
-            Sink.FeedInRawRTP(ID, rtpTimestamp, rtpPackets);
+            Sink.FeedInRawRTP(StreamID, ID, rtpTimestamp, rtpPackets);
 
             foreach (var owner in memoryOwners)
             {
