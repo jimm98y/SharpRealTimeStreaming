@@ -4,12 +4,12 @@ This is just a thin wrapper around the fantastic SharpRTSP, mostly based off the
 ## SharpRTSPClient
 Simple RTSP client that supports H264, H265, H266, AV1 for video + AAC, Opus, PCMU and PCMA for audio.
 
-[![NuGet version](https://img.shields.io/nuget/v/SharpOnvifClient.svg?style=flat-square)](https://www.nuget.org/packages/SharpOnvifClient)
+[![NuGet version](https://img.shields.io/nuget/v/SharpRTSPClient.svg?style=flat-square)](https://www.nuget.org/packages/SharpRTSPClient)
 
 ## SharpRTSPServer
 Simple RTSP server that supports H264, H265, H266, AV1 for video and AAC, Opus, PCMU and PCMA for audio. 
 
-[![NuGet version](https://img.shields.io/nuget/v/SharpOnvifServer.svg?style=flat-square)](https://www.nuget.org/packages/SharpOnvifServer)
+[![NuGet version](https://img.shields.io/nuget/v/SharpRTSPServer.svg?style=flat-square)](https://www.nuget.org/packages/SharpRTSPServer)
 
 ## FFmpeg RTSP Server
 Sample RTSP server for ffmpeg RTP streams. Fully configurable in appsettings.json.
