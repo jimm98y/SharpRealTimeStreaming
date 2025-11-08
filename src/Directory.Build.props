@@ -17,7 +17,7 @@
 		<AssemblyVersion>1.0.0</AssemblyVersion>
 		<FileVersion>$(Version)</FileVersion>
 		<PackageLicenseExpression>MIT</PackageLicenseExpression>
-		<Description>Simple RTSP client and server. Supports H264, H265, H266, AV1 and AAC.</Description>
+		<Description>Simple RTSP/RTSPS client and server. Supports H264, H265, H266, AV1 and AAC.</Description>
 	</PropertyGroup>
 	
 	<ItemGroup>
