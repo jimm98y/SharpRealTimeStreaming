@@ -7,12 +7,13 @@ using System.Buffers;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.Contracts;
-using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Threading;
+using System.Threading.Tasks;
 
 namespace SharpRTSPServer
 {
@@ -50,35 +51,56 @@ namespace SharpRTSPServer
         public string SessionName { get; set; } = "SharpRTSP Test Camera";
 
         private readonly List<RTSPConnection> _connectionList = new List<RTSPConnection>(); // list of RTSP Listeners
-        private readonly TcpListener _serverListener;
+        private readonly IRtspListenSocket _serverListener;
         private readonly ILoggerFactory _loggerFactory;
         private readonly ILogger _logger;
         private CancellationTokenSource _stopping;
-        private Thread _listenTread;
+        private Task _listenTread;
         private int _sessionHandle = 1;
         private readonly NetworkCredential _credentials;
         private readonly Authentication _authentication;
 
         private List<RTSPStreamSource> StreamSources = new List<RTSPStreamSource>();
 
-        public bool IsRTSPS { get; set; } = false;
+        /// <summary>
+        /// TLS certificate used for RTSPS and HTTPS.
+        /// </summary>
+        public X509Certificate2 TlsCertificate { get; private set; } = null;
+
+        /// <summary>
+        /// Use RTSP/RTSPS over HTTP/HTTPS.
+        /// </summary>
+        public bool UseHttpTunnel { get; private set; } = false;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="RTSPServer"/> class.
         /// </summary>
         /// <param name="portNumber">Port number.</param>
-        /// <param name="userName">username.</param>
-        /// <param name="password">password.</param>
-        public RTSPServer(int portNumber, string userName, string password) : this(portNumber, userName, password, new CustomLoggerFactory())
+        /// <param name="userName">User name.</param>
+        /// <param name="password">Password.</param>
+        public RTSPServer(int portNumber, string userName, string password) : this(portNumber, userName, password, null)
         { }
 
         /// <summary>
         /// Initializes a new instance of the <see cref="RTSPServer"/> class.
         /// </summary>
         /// <param name="portNumber">Port number.</param>
-        /// <param name="userName">username.</param>
-        /// <param name="password">password.</param>
-        public RTSPServer(int portNumber, string userName, string password, ILoggerFactory loggerFactory)
+        /// <param name="userName">User name.</param>
+        /// <param name="password">Password.</param>
+        /// <param name="loggerFactory">Logger factory.</param>
+        public RTSPServer(int portNumber, string userName, string password, ILoggerFactory loggerFactory) : this(portNumber, userName, password, false, null, loggerFactory)
+        { }
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="RTSPServer"/> class.
+        /// </summary>
+        /// <param name="portNumber">Port number.</param>
+        /// <param name="userName">User name.</param>
+        /// <param name="password">Password.</param>
+        /// <param name="useHttpTunnel">RTSP over HTTP.</param>
+        /// <param name="tlsCertificate">TLS certificate used for RTSPS and HTTPS.</param>
+        /// <param name="loggerFactory">Logger factory.</param>
+        public RTSPServer(int portNumber, string userName, string password, bool useHttpTunnel, X509Certificate2 tlsCertificate, ILoggerFactory loggerFactory)
         {
             if (portNumber < IPEndPoint.MinPort || portNumber > IPEndPoint.MaxPort)
             {
@@ -86,6 +108,9 @@ namespace SharpRTSPServer
             }
 
             Contract.EndContractBlock();
+
+            if (loggerFactory == null)
+                loggerFactory = new CustomLoggerFactory();
 
             if (!string.IsNullOrEmpty(userName) && !string.IsNullOrEmpty(password))
             {
@@ -99,8 +124,20 @@ namespace SharpRTSPServer
                 _authentication = null;
             }
 
+            this.UseHttpTunnel = useHttpTunnel;
+            this.TlsCertificate = tlsCertificate;
+
             RtspUtils.RegisterUri();
-            _serverListener = new TcpListener(IPAddress.Any, portNumber);
+
+            var tcpListener = new TcpListener(IPAddress.Any, portNumber);
+            _serverListener = useHttpTunnel switch
+            {
+                true when tlsCertificate is null => new RtspOverHttpListenSocket(tcpListener, loggerFactory),
+                true => new RtspOverHttpTLSListenSocket(tcpListener, tlsCertificate, loggerFactory: loggerFactory),
+                false when tlsCertificate is null => new RtspListenSocket(tcpListener, loggerFactory: loggerFactory),
+                false => new RtspTlsListenSocket(tcpListener, tlsCertificate, loggerFactory: loggerFactory),
+            };
+
             _loggerFactory = loggerFactory;
             _logger = loggerFactory.CreateLogger<RTSPServer>();
         }
@@ -112,32 +149,21 @@ namespace SharpRTSPServer
         {
             _serverListener.Start();
             _stopping = new CancellationTokenSource();
-            _listenTread = new Thread(new ThreadStart(AcceptConnection));
-            _listenTread.Start();
+            _listenTread = Task.Factory.StartNew(async () => await AcceptConnection(_stopping.Token).ConfigureAwait(false),
+                _stopping.Token,
+                TaskCreationOptions.LongRunning,
+                TaskScheduler.Current);
         }
 
-        private void AcceptConnection()
+        private async Task AcceptConnection(CancellationToken cancellationToken)
         {
             try
             {
                 while (_stopping?.IsCancellationRequested == false)
                 {
                     // Wait for an incoming TCP Connection
-                    TcpClient oneClient = _serverListener.AcceptTcpClient();
-                    _logger.LogDebug("Connection from {remoteEndPoint}", oneClient.Client.RemoteEndPoint);
-
-                    // Hand the incoming TCP connection over to the RTSP classes
-                    RtspTcpTransport rtspSocket;
-
-                    if (IsRTSPS)
-                    {
-                        // TODO: untested
-                        rtspSocket = new RtspTcpTlsTransport(oneClient);
-                    }
-                    else
-                    {
-                        rtspSocket = new RtspTcpTransport(oneClient);
-                    }
+                    IRtspTransport rtspSocket = await _serverListener.AcceptAsync(cancellationToken);
+                    _logger.LogDebug("Connection from {remoteEndPoint}", rtspSocket.RemoteEndPoint);
 
                     RtspListener newListener = new RtspListener(rtspSocket, _loggerFactory.CreateLogger<RtspListener>());
                     newListener.MessageReceived += RTSPMessageReceived;
@@ -174,7 +200,7 @@ namespace SharpRTSPServer
         {
             _serverListener.Stop();
             _stopping?.Cancel();
-            _listenTread?.Join();
+            _listenTread?.Wait();
         }
 
         private void RTSPMessageReceived(object sender, RtspChunkEventArgs e)
