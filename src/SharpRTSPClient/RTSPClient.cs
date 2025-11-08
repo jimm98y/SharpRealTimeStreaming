@@ -1320,7 +1320,9 @@ namespace SharpRTSPClient
 
                 if (sdpControl.StartsWith("rtsp://", StringComparison.OrdinalIgnoreCase) ||
                     sdpControl.StartsWith("rtsps://", StringComparison.OrdinalIgnoreCase) ||
-                    sdpControl.StartsWith("http://", StringComparison.OrdinalIgnoreCase))
+                    sdpControl.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+                    sdpControl.StartsWith("https://", StringComparison.OrdinalIgnoreCase)
+                    )
                 {
                     // the "track" or "stream id"
                     string control = sdpControl; //absolute path
