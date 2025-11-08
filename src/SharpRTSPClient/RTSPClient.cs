@@ -251,21 +251,7 @@ namespace SharpRTSPClient
 
             try
             {
-                switch (_uri.Scheme)
-                {
-                    case "http":
-                        {
-                            // to pass the credentials down we cannot use RtspUtils.CreateRtspTransportFromUrl
-                            _rtspSocket = new RtspHttpTransport(_uri, _credentials);
-                        }
-                        break;
-
-                    default:
-                        {
-                            _rtspSocket = Rtsp.RtspUtils.CreateRtspTransportFromUrl(_uri, _userCertificateSelectionCallback);
-                        }
-                        break;
-                }
+                _rtspSocket = Rtsp.RtspUtils.CreateRtspTransportFromUrl(_uri, _credentials, _userCertificateSelectionCallback);
             }
             catch
             {
