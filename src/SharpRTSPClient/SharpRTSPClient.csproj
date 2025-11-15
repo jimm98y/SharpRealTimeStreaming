@@ -1,10 +1,9 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFrameworks>netstandard2.0;net8.0</TargetFrameworks>
-	  <LangVersion>13.0</LangVersion>
-	  <OutputType>Library</OutputType>
-	  <CodeContractsAssemblyMode>0</CodeContractsAssemblyMode>
+    <TargetFrameworks>netstandard2.0;net481;net10.0</TargetFrameworks>
+	<LangVersion>latest</LangVersion>
+	<OutputType>Library</OutputType>
   </PropertyGroup>
 
   <ItemGroup>
