@@ -41,11 +41,6 @@ namespace SharpRTSPServer
         private static readonly Random _rand = new Random();
 
         /// <summary>
-        /// SSRC.
-        /// </summary>
-        public uint SSRC { get; set; } = (uint)_rand.Next(0, int.MaxValue); // 8 hex digits
-
-        /// <summary>
         /// Session name.
         /// </summary>
         public string SessionName { get; set; } = "SharpRTSP Test Camera";
@@ -116,7 +111,7 @@ namespace SharpRTSPServer
             {
                 const string realm = "SharpRTSPServer";
                 _credentials = new NetworkCredential(userName, password);
-                _authentication = new AuthenticationDigest(_credentials, realm, new Random().Next(100000000, 999999999).ToString(), string.Empty);
+                _authentication = new AuthenticationDigest(_credentials, realm, _rand.Next(100000000, 999999999).ToString(), string.Empty);
             }
             else
             {
@@ -173,8 +168,7 @@ namespace SharpRTSPServer
                     {
                         RTSPConnection newConnection = new RTSPConnection()
                         {
-                            Listener = newListener,
-                            SSRC = SSRC,
+                            Listener = newListener
                         };
                         _connectionList.Add(newConnection);
                     }
@@ -367,6 +361,34 @@ namespace SharpRTSPServer
             RtspTransport transportReply = null;
             IRtpTransport rtpTransport = null;
 
+            RTSPStreamSource streamSource = GetStreamSource(setupMessage.RtspUri);
+            if (streamSource == null)
+            {                
+                // track not found
+                RtspResponse setupResponse = setupMessage.CreateResponse();
+                setupResponse.ReturnCode = 404;
+                listener.SendMessage(setupResponse);
+                return;
+            }
+
+            uint trackSSRC;
+            if (streamSource.VideoTrack != null && setupMessage.RtspUri.AbsolutePath.EndsWith($"trackID={streamSource.VideoTrack.ID}"))
+            {
+                trackSSRC = streamSource.VideoTrack.SSRC;
+            }
+            else if (streamSource.AudioTrack != null && setupMessage.RtspUri.AbsolutePath.EndsWith($"trackID={streamSource.AudioTrack.ID}"))
+            {
+                trackSSRC = streamSource.AudioTrack.SSRC;
+            }
+            else
+            {
+                // track not found
+                RtspResponse setupResponse = setupMessage.CreateResponse();
+                setupResponse.ReturnCode = 404;
+                listener.SendMessage(setupResponse);
+                return;
+            }
+
             if (transport.LowerTransport == RtspTransport.LowerTransportType.TCP)
             {
                 Debug.Assert(transport.Interleaved != null, "If transport.Interleaved is null here the program did not handle well connection problem");
@@ -378,7 +400,7 @@ namespace SharpRTSPServer
                 // RTP over RTSP mode
                 transportReply = new RtspTransport()
                 {
-                    SSrc = SSRC.ToString("X8"), // Convert to Hex, padded to 8 characters
+                    SSrc = trackSSRC.ToString("X8"), // Convert to Hex, padded to 8 characters,
                     LowerTransport = RtspTransport.LowerTransportType.TCP,
                     Interleaved = new PortCouple(transport.Interleaved.First, transport.Interleaved.Second)
                 };
@@ -405,7 +427,7 @@ namespace SharpRTSPServer
                 // Pass the Port of the two sockets back in the reply
                 transportReply = new RtspTransport()
                 {
-                    SSrc = SSRC.ToString("X8"), // Convert to Hex, padded to 8 characters
+                    SSrc = trackSSRC.ToString("X8"), // Convert to Hex, padded to 8 characters,
                     LowerTransport = RtspTransport.LowerTransportType.UDP,
                     IsMulticast = false,
                     ServerPort = new PortCouple(udpPair.DataPort, udpPair.ControlPort),
@@ -421,7 +443,7 @@ namespace SharpRTSPServer
                 // Pass the Ports of the two sockets back in the reply
                 transportReply = new RtspTransport()
                 {
-                    SSrc = SSRC.ToString("X8"), // Convert to Hex, padded to 8 characters
+                    SSrc = trackSSRC.ToString("X8"), // Convert to Hex, padded to 8 characters,
                     LowerTransport = RtspTransport.LowerTransportType.UDP,
                     IsMulticast = true,
                     Port = new PortCouple(7000, 7001)  // FIX
@@ -436,6 +458,7 @@ namespace SharpRTSPServer
                 // Update the stream within the session with transport information
                 // If a Session ID is passed in we should match SessionID with other SessionIDs but we can match on RemoteAddress
                 string copyOfSessionId = "";
+
                 lock (_connectionList)
                 {
                     foreach (var setupConnection in _connectionList.Where(connection => connection.Listener.RemoteEndPoint.Address == listener.RemoteEndPoint.Address))
@@ -444,13 +467,21 @@ namespace SharpRTSPServer
                         // or a SETUP for an Audio Stream.
                         // In the SDP the H264/H265 video track is TrackID 0
                         // and the Audio Track is TrackID 1
-                        var streamSource = GetStreamSource(setupMessage.RtspUri);
-                        RTPStream stream;                        
-                        if (setupMessage.RtspUri.AbsolutePath.EndsWith($"trackID={streamSource.VideoTrack?.ID}")) stream = setupConnection.Video;
-                        else if (setupMessage.RtspUri.AbsolutePath.EndsWith($"trackID={streamSource.AudioTrack?.ID}")) stream = setupConnection.Audio;
-                        else continue;// error case - track unknown
-                                      // found the connection
-                                      // Add the transports to the stream
+                        RTPStream stream;
+                        if (setupMessage.RtspUri.AbsolutePath.EndsWith($"trackID={streamSource.VideoTrack?.ID}"))
+                        {
+                            stream = setupConnection.Video;
+                        }
+                        else if (setupMessage.RtspUri.AbsolutePath.EndsWith($"trackID={streamSource.AudioTrack?.ID}"))
+                        {
+                            stream = setupConnection.Audio;
+                        }
+                        else
+                        {
+                            continue;// error case - track unknown
+                                     // found the connection
+                                     // Add the transports to the stream
+                        }
                         stream.RtpChannel = rtpTransport;
                         // When there is Video and Audio there are two SETUP commands.
                         // For the first SETUP command we will generate the connection.sessionId and return a SessionID in the Reply.

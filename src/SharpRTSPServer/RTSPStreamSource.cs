@@ -7,8 +7,6 @@ namespace SharpRTSPServer
 {
     public class RTSPStreamSource : IDisposable
     {
-        private static readonly Random _rand = new Random();
-
         /// <summary>
         /// Stream ID.
         /// </summary>

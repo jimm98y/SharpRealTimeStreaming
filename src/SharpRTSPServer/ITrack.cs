@@ -7,6 +7,8 @@ namespace SharpRTSPServer
 {
     public interface ITrack
     {
+        uint SSRC { get; set; }
+
         IRtpSender Sink { get; set; }
 
         string StreamID { get; set; }

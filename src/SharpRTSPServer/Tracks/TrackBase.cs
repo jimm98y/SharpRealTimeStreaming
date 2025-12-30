@@ -7,6 +7,13 @@ namespace SharpRTSPServer
 {
     public abstract class TrackBase : ITrack
     {
+        private static readonly Random _rand = new Random();
+
+        /// <summary>
+        /// SSRC for this track.
+        /// </summary>
+        public uint SSRC { get; set; } = (uint)_rand.Next(0, int.MaxValue); 
+
         public IRtpSender Sink { get; set; } = null;
 
         public string StreamID { get; set; } = null;
