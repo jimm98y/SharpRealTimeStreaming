@@ -8,8 +8,6 @@ namespace SharpRTSPServer
     /// </summary>
     public class RTSPConnection
     {
-        private static readonly Random _rand = new Random();
-
         /// <summary>
         /// RTSP conneciton listener.
         /// </summary>
@@ -26,7 +24,7 @@ namespace SharpRTSPServer
         /// <summary>
         /// SSRC value used with this client connection.
         /// </summary>
-        public uint SSRC { get; set; } = (uint)_rand.Next(0, int.MaxValue);
+        public uint SSRC { get; set; }
 
         /// <summary>
         /// RTSP Session ID used with this client connection.

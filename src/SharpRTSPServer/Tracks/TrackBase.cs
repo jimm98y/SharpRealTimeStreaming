@@ -10,7 +10,7 @@ namespace SharpRTSPServer
         private static readonly Random _rand = new Random();
 
         /// <summary>
-        /// SSRC for this track.
+        /// SSRC for this track. Each track streamed by this server shall have a unique SSRC.
         /// </summary>
         public uint SSRC { get; set; } = (uint)_rand.Next(0, int.MaxValue); 
 

@@ -461,6 +461,10 @@ namespace SharpRTSPServer
 
                 lock (_connectionList)
                 {
+                    // set SSRC of the connection to the track's SSRC
+                    var connection = _connectionList.Single(x => x.Listener == listener);
+                    connection.SSRC = trackSSRC;
+
                     foreach (var setupConnection in _connectionList.Where(connection => connection.Listener.RemoteEndPoint.Address == listener.RemoteEndPoint.Address))
                     {
                         // Check the Track ID to determine if this is a SETUP for the Video Stream
