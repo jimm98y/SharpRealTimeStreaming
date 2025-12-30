@@ -9,6 +9,7 @@ using System.Diagnostics;
 using System.Diagnostics.Contracts;
 using System.Linq;
 using System.Net;
+using System.Net.Security;
 using System.Net.Sockets;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
@@ -95,7 +96,8 @@ namespace SharpRTSPServer
         /// <param name="useHttpTunnel">RTSP over HTTP.</param>
         /// <param name="tlsCertificate">TLS certificate used for RTSPS and HTTPS.</param>
         /// <param name="loggerFactory">Logger factory.</param>
-        public RTSPServer(int portNumber, string userName, string password, bool useHttpTunnel, X509Certificate2 tlsCertificate, ILoggerFactory loggerFactory)
+        /// <param name="userCertificateValidationCallback">Certificate validaiton callback.</param>
+        public RTSPServer(int portNumber, string userName, string password, bool useHttpTunnel, X509Certificate2 tlsCertificate, ILoggerFactory loggerFactory, RemoteCertificateValidationCallback userCertificateValidationCallback = null)
         {
             if (portNumber < IPEndPoint.MinPort || portNumber > IPEndPoint.MaxPort)
             {
@@ -128,9 +130,9 @@ namespace SharpRTSPServer
             _serverListener = useHttpTunnel switch
             {
                 true when tlsCertificate is null => new RtspOverHttpListenSocket(tcpListener, loggerFactory),
-                true => new RtspOverHttpTLSListenSocket(tcpListener, tlsCertificate, loggerFactory: loggerFactory),
+                true => new RtspOverHttpTLSListenSocket(tcpListener, tlsCertificate, userCertificateValidationCallback, loggerFactory),
                 false when tlsCertificate is null => new RtspListenSocket(tcpListener, loggerFactory: loggerFactory),
-                false => new RtspTlsListenSocket(tcpListener, tlsCertificate, loggerFactory: loggerFactory),
+                false => new RtspTlsListenSocket(tcpListener, tlsCertificate, userCertificateValidationCallback, loggerFactory),
             };
 
             _loggerFactory = loggerFactory;
@@ -536,7 +538,7 @@ namespace SharpRTSPServer
             }
 
             string sdp = GenerateSDP(StreamSource);
-            byte[] sdpBytes = Encoding.ASCII.GetBytes(sdp);
+            byte[] sdpBytes = Encoding.UTF8.GetBytes(sdp);
 
             // Create the reponse to DESCRIBE
             // This must include the Session Description Protocol (SDP)
