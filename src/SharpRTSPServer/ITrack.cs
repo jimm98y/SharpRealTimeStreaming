@@ -14,6 +14,8 @@ namespace SharpRTSPServer
     public interface ITrack
     {
         RtpProfiles RtpProfile { get; set; }
+        string DtlsCertificateFingerprint { get; set; }
+        string DtlsCertificateFingerpringAlgorithm { get; set; }
 
         uint SSRC { get; set; }
 

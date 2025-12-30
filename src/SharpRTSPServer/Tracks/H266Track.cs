@@ -156,6 +156,11 @@ namespace SharpRTSPServer
             additionalParams = additionalParams.TrimStart(';');
 
             sdp.Append($"a=fmtp:{PayloadType}{additionalParams}\n");
+            if (RtpProfile == RtpProfiles.SAVP)
+            {
+                sdp.AppendLine($"a=fingerprint: {DtlsCertificateFingerpringAlgorithm} {DtlsCertificateFingerprint}");
+            }
+
             return sdp;
         }
 

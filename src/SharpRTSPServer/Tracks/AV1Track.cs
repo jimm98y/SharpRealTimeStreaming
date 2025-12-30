@@ -82,6 +82,10 @@ namespace SharpRTSPServer
             sdp.Append($"m=video 0 RTP/{RtpProfile} {PayloadType}\n"); // TODO: AVPF is AVP + Feedback https://aomediacodec.github.io/av1-rtp-spec/v1.0.0.html
             sdp.Append($"a=control:trackID={ID}\n");
             sdp.Append($"a=rtpmap:{PayloadType} {Codec}/{VideoClock}\n");
+            if (RtpProfile == RtpProfiles.SAVP)
+            {
+                sdp.AppendLine($"a=fingerprint: {DtlsCertificateFingerpringAlgorithm} {DtlsCertificateFingerprint}");
+            }
             return sdp;
         }
 

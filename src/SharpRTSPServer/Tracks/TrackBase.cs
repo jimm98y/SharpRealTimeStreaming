@@ -14,6 +14,9 @@ namespace SharpRTSPServer
         /// </summary>
         public RtpProfiles RtpProfile { get; set; } = RtpProfiles.AVP;
 
+        public string DtlsCertificateFingerprint { get; set; }
+        public string DtlsCertificateFingerpringAlgorithm { get; set; } = "SHA-256";
+
         /// <summary>
         /// SSRC for this track. Each track streamed by this server shall have a unique SSRC.
         /// </summary>

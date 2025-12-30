@@ -578,10 +578,16 @@ namespace SharpRTSPServer
             sdp.Append("c=IN IP4 0.0.0.0\n");
 
             // VIDEO
-            streamSource.VideoTrack?.BuildSDP(sdp);
+            if (streamSource.VideoTrack != null)
+            {
+                streamSource.VideoTrack.BuildSDP(sdp);
+            }
 
             // AUDIO
-            streamSource.AudioTrack?.BuildSDP(sdp);
+            if (streamSource.AudioTrack != null)
+            {
+                streamSource.AudioTrack.BuildSDP(sdp);
+            }
 
             return sdp.ToString();
         }

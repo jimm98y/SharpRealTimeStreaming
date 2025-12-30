@@ -89,6 +89,10 @@ namespace SharpRTSPServer
 
             // The RTP clock rate in "a=rtpmap" MUST be 48000, and the number of channels MUST be 2.
             sdp.Append($"a=rtpmap:{PayloadType} {Codec}/{SamplingRate}/{Channels}\n");
+            if (RtpProfile == RtpProfiles.SAVP)
+            {
+                sdp.AppendLine($"a=fingerprint: {DtlsCertificateFingerpringAlgorithm} {DtlsCertificateFingerprint}");
+            }
 
             return sdp;
         }
