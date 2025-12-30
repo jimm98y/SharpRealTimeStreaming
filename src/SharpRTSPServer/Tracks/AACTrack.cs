@@ -103,7 +103,7 @@ namespace SharpRTSPServer
         /// <returns><see cref="StringBuilder"/>.</returns>
         public override StringBuilder BuildSDP(StringBuilder sdp)
         {
-            sdp.Append($"m=audio 0 RTP/AVP {PayloadType}\n"); // <---- Payload Type 0 means G711 ULAW, 96+ means dynamic payload type
+            sdp.Append($"m=audio 0 RTP/{RtpProfile} {PayloadType}\n"); // <---- Payload Type 0 means G711 ULAW, 96+ means dynamic payload type
             sdp.Append($"a=control:trackID={ID}\n");
             sdp.Append($"a=rtpmap:{PayloadType} {Codec}/{SamplingRate}/{Channels}\n");
             sdp.Append($"a=fmtp:{PayloadType} profile-level-id={GetAACProfileLevel(SamplingRate, Channels)}; " +

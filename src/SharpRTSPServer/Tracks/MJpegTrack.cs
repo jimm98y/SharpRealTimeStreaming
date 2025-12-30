@@ -26,7 +26,7 @@ namespace SharpRTSPServer
         public override StringBuilder BuildSDP(StringBuilder sdp)
         {
             return sdp
-                .Append("m=video 0 RTP/AVP ").Append(PayloadType).AppendLine()
+                .Append($"m=video 0 RTP/{RtpProfile} ").Append(PayloadType).AppendLine()
                 .Append("a=control:trackID=").Append(ID).AppendLine()
                 ;
         }

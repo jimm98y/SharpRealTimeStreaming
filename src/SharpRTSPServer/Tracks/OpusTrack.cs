@@ -84,7 +84,7 @@ namespace SharpRTSPServer
                 if (Log.WarnEnabled) Log.Warn($"Opus track set to use unsupported channels {Channels}. Opus requires 2.");
             }
 
-            sdp.Append($"m=audio 0 RTP/AVP {PayloadType}\n"); // <---- Payload Type 0 means G711 ULAW, 96+ means dynamic payload type
+            sdp.Append($"m=audio 0 RTP/{RtpProfile} {PayloadType}\n"); // <---- Payload Type 0 means G711 ULAW, 96+ means dynamic payload type
             sdp.Append($"a=control:trackID={ID}\n");
 
             // The RTP clock rate in "a=rtpmap" MUST be 48000, and the number of channels MUST be 2.
