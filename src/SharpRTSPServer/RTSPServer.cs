@@ -59,6 +59,8 @@ namespace SharpRTSPServer
         private readonly NetworkCredential _credentials;
         private readonly Authentication _authentication;
 
+        public string SrtpCryptoSuite { get; set; } = null;
+
         private List<RTSPStreamSource> StreamSources = new List<RTSPStreamSource>();
 
         /// <summary>
@@ -77,7 +79,11 @@ namespace SharpRTSPServer
         /// <param name="portNumber">Port number.</param>
         /// <param name="userName">User name.</param>
         /// <param name="password">Password.</param>
-        public RTSPServer(int portNumber, string userName, string password) : this(portNumber, userName, password, null)
+        public RTSPServer(
+            int portNumber, 
+            string userName, 
+            string password) 
+            : this(portNumber, userName, password, null)
         { }
 
         /// <summary>
@@ -87,7 +93,12 @@ namespace SharpRTSPServer
         /// <param name="userName">User name.</param>
         /// <param name="password">Password.</param>
         /// <param name="loggerFactory">Logger factory.</param>
-        public RTSPServer(int portNumber, string userName, string password, ILoggerFactory loggerFactory) : this(portNumber, userName, password, false, null, loggerFactory)
+        public RTSPServer(
+            int portNumber, 
+            string userName, 
+            string password, 
+            ILoggerFactory loggerFactory) 
+            : this(portNumber, userName, password, false, null, loggerFactory)
         { }
 
         /// <summary>
@@ -100,7 +111,37 @@ namespace SharpRTSPServer
         /// <param name="tlsCertificate">TLS certificate used for RTSPS and HTTPS.</param>
         /// <param name="loggerFactory">Logger factory.</param>
         /// <param name="userCertificateValidationCallback">Certificate validaiton callback.</param>
-        public RTSPServer(int portNumber, string userName, string password, bool useHttpTunnel, X509Certificate2 tlsCertificate, ILoggerFactory loggerFactory, RemoteCertificateValidationCallback userCertificateValidationCallback = null)
+        public RTSPServer(
+            int portNumber,
+            string userName,
+            string password,
+            bool useHttpTunnel,
+            X509Certificate2 tlsCertificate,
+            ILoggerFactory loggerFactory,
+            RemoteCertificateValidationCallback userCertificateValidationCallback = null)
+            : this(portNumber, userName, password, false, null, null, loggerFactory)
+        { }
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="RTSPServer"/> class.
+        /// </summary>
+        /// <param name="portNumber">Port number.</param>
+        /// <param name="userName">User name.</param>
+        /// <param name="password">Password.</param>
+        /// <param name="useHttpTunnel">RTSP over HTTP.</param>
+        /// <param name="tlsCertificate">TLS certificate used for RTSPS and HTTPS.</param>
+        /// <param name="srtpCryptoSuite">SRTP crypto suite <see cref="SrtpCryptoSuites"/>.</param>
+        /// <param name="loggerFactory">Logger factory.</param>
+        /// <param name="userCertificateValidationCallback">Certificate validaiton callback.</param>
+        public RTSPServer(
+            int portNumber,
+            string userName, 
+            string password,
+            bool useHttpTunnel,
+            X509Certificate2 tlsCertificate,
+            string srtpCryptoSuite,
+            ILoggerFactory loggerFactory, 
+            RemoteCertificateValidationCallback userCertificateValidationCallback = null)
         {
             if (portNumber < IPEndPoint.MinPort || portNumber > IPEndPoint.MaxPort)
             {
@@ -126,6 +167,7 @@ namespace SharpRTSPServer
 
             this.UseHttpTunnel = useHttpTunnel;
             this.TlsCertificate = tlsCertificate;
+            this.SrtpCryptoSuite = srtpCryptoSuite;
 
             RtspUtils.RegisterUri();
 
@@ -589,20 +631,19 @@ namespace SharpRTSPServer
 
                 if(streamSource.VideoTrack.RtpProfile == RtpProfiles.SAVP)
                 {
-                    byte[] masterKeySalt = connection.Video.PrepareSrtpContext();
-                    string srtpProfile = GetSrtpProfileName(connection.Video.Context.EncodeRtpContext.ProtectionProfile);
+                    byte[] masterKeySalt = connection.Video.PrepareSrtpContext(SrtpCryptoSuite);
                     byte[] mki = connection.Video.Context.EncodeRtpContext.Mki;
 
                     string optionalMki = "";
                     if(mki.Length > 0)
                     {
+                        // ffplay does not seem to support MKI or any optional parameters in crypto
                         optionalMki = $"|{new BigInteger(connection.Video.Context.EncodeRtpContext.Mki)}:{connection.Video.Context.EncodeRtpContext.Mki.Length}";
                     }
 
                     // https://www.rfc-editor.org/rfc/rfc4568.txt
                     // appending a zero byte at the end to yield always positive value of the BigInteger
-                    // ffplay does not seem to support MKI or any optional parameters in crypto
-                    sdp.AppendLine($"a=crypto:1 {srtpProfile} inline:{Convert.ToBase64String(masterKeySalt)}{optionalMki}");
+                    sdp.AppendLine($"a=crypto:1 {SrtpCryptoSuite} inline:{Convert.ToBase64String(masterKeySalt)}{optionalMki}");
                 }
             }
 
@@ -613,40 +654,23 @@ namespace SharpRTSPServer
 
                 if (streamSource.AudioTrack.RtpProfile == RtpProfiles.SAVP)
                 {
-                    byte[] masterKeySalt = connection.Audio.PrepareSrtpContext();
-                    string srtpProfile = GetSrtpProfileName(connection.Audio.Context.EncodeRtpContext.ProtectionProfile);
+                    byte[] masterKeySalt = connection.Audio.PrepareSrtpContext(SrtpCryptoSuite);
                     byte[] mki = connection.Video.Context.EncodeRtpContext.Mki;
 
                     string optionalMki = "";
                     if (mki.Length > 0)
                     {
+                        // ffplay does not seem to support MKI or any optional parameters in crypto
                         optionalMki = $"|{new BigInteger(connection.Video.Context.EncodeRtpContext.Mki)}:{connection.Video.Context.EncodeRtpContext.Mki.Length}";
                     }
 
                     // https://www.rfc-editor.org/rfc/rfc4568.txt
                     // appending a zero byte at the end to yield always positive value of the BigInteger
-                    // ffplay does not seem to support MKI or any optional parameters in crypto
-                    sdp.AppendLine($"a=crypto:1 {srtpProfile} inline:{Convert.ToBase64String(masterKeySalt)}{optionalMki}"); 
+                    sdp.AppendLine($"a=crypto:1 {SrtpCryptoSuite} inline:{Convert.ToBase64String(masterKeySalt)}{optionalMki}"); 
                 }
             }
 
             return sdp.ToString();
-        }
-
-        private string GetSrtpProfileName(int protectionProfile)
-        {
-            switch(protectionProfile)
-            {
-                case ExtendedSrtpProtectionProfile.SRTP_AES128_CM_HMAC_SHA1_80:
-                    return "AES_CM_128_HMAC_SHA1_80";
-                case ExtendedSrtpProtectionProfile.SRTP_AES128_CM_HMAC_SHA1_32:
-                    return "AES_CM_128_HMAC_SHA1_32";
-                case ExtendedSrtpProtectionProfile.SRTP_F8_128_HMAC_SHA1_80:
-                    return "F8_128_HMAC_SHA1_80";
-
-                default:
-                    throw new NotSupportedException();
-            }
         }
 
         private RTSPConnection ConnectionByRtpTransport(IRtpTransport rtpTransport)
