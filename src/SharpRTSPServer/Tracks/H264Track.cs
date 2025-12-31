@@ -151,10 +151,6 @@ namespace SharpRTSPServer
             sdp.Append($"a=control:trackID={ID}\n");
             sdp.Append($"a=rtpmap:{PayloadType} {Codec}/{VideoClock}\n");
             sdp.Append($"a=fmtp:{PayloadType} profile-level-id={profileLevelIdStr}; sprop-parameter-sets={spsStr},{ppsStr}\n");
-            if (RtpProfile == RtpProfiles.SAVP)
-            {
-                sdp.AppendLine($"a=fingerprint: {DtlsCertificateFingerpringAlgorithm} {DtlsCertificateFingerprint}");
-            }
 
             return sdp;
         }

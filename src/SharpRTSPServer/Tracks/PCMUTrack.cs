@@ -50,10 +50,7 @@ namespace SharpRTSPServer
             sdp.Append($"m=audio 0 RTP/{RtpProfile} {PayloadType}\n");
             sdp.Append($"a=control:trackID={ID}\n");
             sdp.Append($"a=rtpmap:{PayloadType} {Codec}/{SamplingRate}\n");
-            if (RtpProfile == RtpProfiles.SAVP)
-            {
-                sdp.AppendLine($"a=fingerprint: {DtlsCertificateFingerpringAlgorithm} {DtlsCertificateFingerprint}");
-            }
+
             return sdp;
         }
 

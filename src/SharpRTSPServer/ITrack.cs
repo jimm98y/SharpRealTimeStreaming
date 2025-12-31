@@ -8,14 +8,14 @@ namespace SharpRTSPServer
     public enum RtpProfiles
     {
         AVP,
-        SAVP
+        // AVPF,
+        SAVP,
+        // SAVPF
     }
 
     public interface ITrack
     {
         RtpProfiles RtpProfile { get; set; }
-        string DtlsCertificateFingerprint { get; set; }
-        string DtlsCertificateFingerpringAlgorithm { get; set; }
 
         uint SSRC { get; set; }
 

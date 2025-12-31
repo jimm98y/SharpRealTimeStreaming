@@ -2,6 +2,7 @@
 using Rtsp;
 using Rtsp.Messages;
 using SharpRTSPServer.Logging;
+using SharpSRTP.SRTP;
 using System;
 using System.Buffers;
 using System.Collections.Generic;
@@ -11,6 +12,7 @@ using System.Linq;
 using System.Net;
 using System.Net.Security;
 using System.Net.Sockets;
+using System.Numerics;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Threading;
@@ -50,6 +52,7 @@ namespace SharpRTSPServer
         private readonly IRtspListenSocket _serverListener;
         private readonly ILoggerFactory _loggerFactory;
         private readonly ILogger _logger;
+
         private CancellationTokenSource _stopping;
         private Task _listenTread;
         private int _sessionHandle = 1;
@@ -537,7 +540,7 @@ namespace SharpRTSPServer
                 return;
             }
 
-            string sdp = GenerateSDP(StreamSource);
+            string sdp = GenerateSDP(StreamSource, listener);
             byte[] sdpBytes = Encoding.UTF8.GetBytes(sdp);
 
             // Create the reponse to DESCRIBE
@@ -562,10 +565,12 @@ namespace SharpRTSPServer
             return StreamSources.FirstOrDefault(x => x.StreamID == streamID);
         }
 
-        private string GenerateSDP(RTSPStreamSource streamSource)
+        private string GenerateSDP(RTSPStreamSource streamSource, RtspListener listener)
         {
             if (!string.IsNullOrEmpty(streamSource.Sdp))
                 return streamSource.Sdp; // sdp
+
+            RTSPConnection connection = ConnectionByListener(listener);
 
             StringBuilder sdp = new StringBuilder();
 
@@ -581,15 +586,67 @@ namespace SharpRTSPServer
             if (streamSource.VideoTrack != null)
             {
                 streamSource.VideoTrack.BuildSDP(sdp);
+
+                if(streamSource.VideoTrack.RtpProfile == RtpProfiles.SAVP)
+                {
+                    byte[] masterKeySalt = connection.Video.PrepareSrtpContext();
+                    string srtpProfile = GetSrtpProfileName(connection.Video.Context.EncodeRtpContext.ProtectionProfile);
+                    byte[] mki = connection.Video.Context.EncodeRtpContext.Mki;
+
+                    string optionalMki = "";
+                    if(mki.Length > 0)
+                    {
+                        optionalMki = $"|{new BigInteger(connection.Video.Context.EncodeRtpContext.Mki)}:{connection.Video.Context.EncodeRtpContext.Mki.Length}";
+                    }
+
+                    // https://www.rfc-editor.org/rfc/rfc4568.txt
+                    // appending a zero byte at the end to yield always positive value of the BigInteger
+                    // ffplay does not seem to support MKI or any optional parameters in crypto
+                    sdp.AppendLine($"a=crypto:1 {srtpProfile} inline:{Convert.ToBase64String(masterKeySalt)}{optionalMki}");
+                }
             }
 
             // AUDIO
             if (streamSource.AudioTrack != null)
             {
                 streamSource.AudioTrack.BuildSDP(sdp);
+
+                if (streamSource.AudioTrack.RtpProfile == RtpProfiles.SAVP)
+                {
+                    byte[] masterKeySalt = connection.Audio.PrepareSrtpContext();
+                    string srtpProfile = GetSrtpProfileName(connection.Audio.Context.EncodeRtpContext.ProtectionProfile);
+                    byte[] mki = connection.Video.Context.EncodeRtpContext.Mki;
+
+                    string optionalMki = "";
+                    if (mki.Length > 0)
+                    {
+                        optionalMki = $"|{new BigInteger(connection.Video.Context.EncodeRtpContext.Mki)}:{connection.Video.Context.EncodeRtpContext.Mki.Length}";
+                    }
+
+                    // https://www.rfc-editor.org/rfc/rfc4568.txt
+                    // appending a zero byte at the end to yield always positive value of the BigInteger
+                    // ffplay does not seem to support MKI or any optional parameters in crypto
+                    sdp.AppendLine($"a=crypto:1 {srtpProfile} inline:{Convert.ToBase64String(masterKeySalt)}{optionalMki}"); 
+                }
             }
 
             return sdp.ToString();
+        }
+
+        private string GetSrtpProfileName(int protectionProfile)
+        {
+            switch(protectionProfile)
+            {
+                case ExtendedSrtpProtectionProfile.SRTP_AES128_CM_HMAC_SHA1_80:
+                    return "AES_CM_128_HMAC_SHA1_80";
+                case ExtendedSrtpProtectionProfile.SRTP_AES128_CM_HMAC_SHA1_32:
+                    return "AES_CM_128_HMAC_SHA1_32";
+                case ExtendedSrtpProtectionProfile.SRTP_F8_128_HMAC_SHA1_80:
+                    return "F8_128_HMAC_SHA1_80";
+
+                default:
+                    throw new NotSupportedException();
+            }
         }
 
         private RTSPConnection ConnectionByRtpTransport(IRtpTransport rtpTransport)
@@ -614,6 +671,17 @@ namespace SharpRTSPServer
             }
         }
 
+        private RTSPConnection ConnectionByListener(RtspListener listener)
+        {
+            if (listener == null)
+                return null;
+
+            lock (_connectionList)
+            {
+                return _connectionList.Find(c => c.Listener == listener);
+            }
+        }
+
         public void SendRawRTP(RTSPConnection connection, RTPStream stream, List<Memory<byte>> rtpPackets)
         {
             if (!connection.Play)
@@ -622,14 +690,25 @@ namespace SharpRTSPServer
             bool writeError = false;
             uint writtenBytes = 0;
             // There could be more than 1 RTP packet (if the data is fragmented)
-            foreach (var rtpPacket in rtpPackets)
+            foreach (var r in rtpPackets)
             {
+                var rtpPacket = r;
+
                 // Add the specific data for each transmission
                 RTPPacketUtil.WriteSequenceNumber(rtpPacket.Span, stream.SequenceNumber);
                 stream.SequenceNumber++;
 
                 // Add the specific SSRC for each transmission
                 RTPPacketUtil.WriteSSRC(rtpPacket.Span, connection.SSRC);
+
+                if(stream.Context != null)
+                {
+                    byte[] rtp = new byte[rtpPacket.Length + 14];
+                    rtpPacket.CopyTo(rtp);
+                    int ret = stream.Context.EncodeRtpContext.ProtectRtp(rtp, rtpPacket.Length, out var len);
+                    if (ret != 0) throw new Exception("Protect failed!");
+                    rtpPacket = rtp.AsMemory().Slice(0, len);
+                }
 
                 //Debug.Assert(connection.Streams[streamType].RtpChannel != null, "If connection.Streams[streamType].RtpChannel is null here the program did not handle well connection problem");
                 try
@@ -670,7 +749,7 @@ namespace SharpRTSPServer
 
         private bool SendRTCP(uint rtpTimestamp, RTSPConnection connection, RTPStream stream)
         {
-            using (var rtcpOwner = MemoryPool<byte>.Shared.Rent(28))
+            using (var rtcpOwner = MemoryPool<byte>.Shared.Rent(28 + 18))
             {
                 var rtcpSenderReport = rtcpOwner.Memory.Slice(0, 28).Span;
                 const bool hasPadding = false;
@@ -678,6 +757,7 @@ namespace SharpRTSPServer
                 int length = (rtcpSenderReport.Length / 4) - 1; // num 32 bit words minus 1
                 RTCPUtils.WriteRTCPHeader(rtcpSenderReport, RTCPUtils.RTCP_VERSION, hasPadding, reportCount, RTCPUtils.RTCP_PACKET_TYPE_SENDER_REPORT, length, connection.SSRC);
                 RTCPUtils.WriteSenderReport(rtcpSenderReport, DateTime.UtcNow, rtpTimestamp, stream.RtpPacketCount, stream.OctetCount);
+
                 return SendRawRTCP(connection, stream, rtcpSenderReport);
 
                 // Clear the flag. A timer may set this to True again at some point to send regular Sender Reports
@@ -690,6 +770,16 @@ namespace SharpRTSPServer
             try
             {
                 Debug.Assert(stream.RtpChannel != null, "If stream.rtpChannel is null here the program did not handle well connection problem");
+
+                if (stream.Context != null)
+                {
+                    byte[] rtcp = new byte[rtcpSenderReport.Length + 18];
+                    rtcpSenderReport.CopyTo(rtcp);
+                    int ret = stream.Context.EncodeRtcpContext.ProtectRtcp(rtcp, rtcpSenderReport.Length, out var len);
+                    if (ret != 0) throw new Exception("Protect failed!");
+                    rtcpSenderReport = rtcp.AsSpan().Slice(0, len);
+                }
+
                 // Send to the IP address of the Client
                 // Send to the UDP Port the Client gave us in the SETUP command
                 stream.RtpChannel.WriteToControlPort(rtcpSenderReport);
@@ -856,7 +946,7 @@ namespace SharpRTSPServer
             if (streamSource.VideoTrack != null)
             {
                 streamSource.VideoTrack.Sink = this;
-                streamSource.VideoTrack.StreamID = streamSource.StreamID;                
+                streamSource.VideoTrack.StreamID = streamSource.StreamID;
             }
 
             if (streamSource.AudioTrack != null)

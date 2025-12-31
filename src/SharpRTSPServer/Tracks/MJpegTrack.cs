@@ -28,10 +28,7 @@ namespace SharpRTSPServer
             sdp
                 .Append($"m=video 0 RTP/{RtpProfile} ").Append(PayloadType).AppendLine()
                 .Append("a=control:trackID=").Append(ID).AppendLine();
-            if (RtpProfile == RtpProfiles.SAVP)
-            {
-                sdp.AppendLine($"a=fingerprint: {DtlsCertificateFingerpringAlgorithm} {DtlsCertificateFingerprint}");
-            }
+
             return sdp;
         }
 

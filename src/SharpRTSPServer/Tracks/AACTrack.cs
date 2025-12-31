@@ -108,10 +108,7 @@ namespace SharpRTSPServer
             sdp.Append($"a=rtpmap:{PayloadType} {Codec}/{SamplingRate}/{Channels}\n");
             sdp.Append($"a=fmtp:{PayloadType} profile-level-id={GetAACProfileLevel(SamplingRate, Channels)}; " +
                 $"config={Utilities.ToHexString(ConfigDescriptor)}; streamType=5; mode=AAC-hbr; objectType=64; sizeLength=13; indexLength=3; indexDeltaLength=3\n");
-            if (RtpProfile == RtpProfiles.SAVP)
-            {
-                sdp.AppendLine($"a=fingerprint: {DtlsCertificateFingerpringAlgorithm} {DtlsCertificateFingerprint}");
-            }
+
             return sdp;
         }
 

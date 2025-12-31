@@ -1,4 +1,9 @@
-﻿using Rtsp;
+﻿using Org.BouncyCastle.Security;
+using Rtsp;
+using SharpSRTP.SRTP;
+using System;
+using System.Linq;
+using System.Numerics;
 
 namespace SharpRTSPServer
 {
@@ -7,6 +12,37 @@ namespace SharpRTSPServer
     /// </summary>
     public class RTPStream
     {
+        private static SecureRandom _rand = new SecureRandom();
+        public byte[] PrepareSrtpContext(int protectionProfile = ExtendedSrtpProtectionProfile.SRTP_AES128_CM_HMAC_SHA1_80, int mkiLen = 0)
+        {
+            var protectionProfileInfo = DtlsSrtpProtocol.DtlsProtectionProfiles[protectionProfile];
+            int masterKeyLen = protectionProfileInfo.CipherKeyLength >> 3;
+            int masterSaltLen = protectionProfileInfo.CipherSaltLength >> 3;
+
+            // derive the master key + master salt to be sent in SDP  crypto: attribute as per RFC 4568
+            byte[] masterKeySalt = new byte[masterKeyLen + masterSaltLen];
+            _rand.NextBytes(masterKeySalt);
+
+            byte[] MKI = new byte[mkiLen];
+            if (mkiLen > 0)
+            {
+                int mkiValue = _rand.Next(0, int.MaxValue);
+                BigInteger bi = new BigInteger(mkiValue);
+                byte[] mkiValueBytes = bi.ToByteArray();
+                Buffer.BlockCopy(mkiValueBytes, 0, MKI, 0, Math.Min(mkiValueBytes.Length, MKI.Length));
+            }
+
+            var encodeRtpContext = new SrtpContext(protectionProfile, MKI, masterKeySalt.Take(masterKeyLen).ToArray(), masterKeySalt.Skip(masterKeyLen).ToArray(), SrtpContextType.RTP);
+            var encodeRtcpContext = new SrtpContext(protectionProfile, MKI, masterKeySalt.Take(masterKeyLen).ToArray(), masterKeySalt.Skip(masterKeyLen).ToArray(), SrtpContextType.RTCP);
+            var decodeRtpContext = new SrtpContext(protectionProfile, MKI, masterKeySalt.Take(masterKeyLen).ToArray(), masterKeySalt.Skip(masterKeyLen).ToArray(), SrtpContextType.RTP);
+            var decodeRtcpContext = new SrtpContext(protectionProfile, MKI, masterKeySalt.Take(masterKeyLen).ToArray(), masterKeySalt.Skip(masterKeyLen).ToArray(), SrtpContextType.RTCP);
+
+            Context = new SrtpSessionContext(encodeRtpContext, decodeRtpContext, encodeRtcpContext, decodeRtcpContext);
+
+            return masterKeySalt;
+        }
+        public SrtpSessionContext Context { get; set; } = null;
+
         /// <summary>
         /// When true will send out a RTCP packet to match Wall Clock Time to RTP Payload timestamps.
         /// </summary>
