@@ -8,5 +8,9 @@
   <ItemGroup>
     <PackageReference Include="SharpRTSP" Version="1.10.1" />
   </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\SharpSRTP\src\SharpSRTP\SharpSRTP.csproj" />
+  </ItemGroup>
 	
 </Project>
