@@ -46,7 +46,7 @@ namespace SharpRTSPServer
         /// <summary>
         /// Session name.
         /// </summary>
-        public string SessionName { get; set; } = "SharpRTSP Test Camera";
+        public string SessionName { get; set; } = "SharpRTSP";
 
         private readonly List<RTSPConnection> _connectionList = new List<RTSPConnection>(); // list of RTSP Listeners
         private readonly IRtspListenSocket _serverListener;
