@@ -571,7 +571,7 @@ namespace SharpRTSPClient
                     byte[] decoded = rtpData.ToArray();
                     if (VideoContext.DecodeRtpContext.UnprotectRtp(decoded, decoded.Length, out var len) == 0)
                     {
-                        rtpData = decoded.AsMemory();
+                        rtpData = decoded.Take(len).ToArray().AsMemory();
                     }
                     else
                     {
@@ -648,7 +648,7 @@ namespace SharpRTSPClient
                     byte[] decoded = rtpData.ToArray();
                     if (AudioContext.DecodeRtpContext.UnprotectRtp(decoded, decoded.Length, out var len) == 0)
                     {
-                        rtpData = decoded.AsMemory();
+                        rtpData = decoded.Take(len).ToArray().AsMemory();
                     }
                     else
                     {
@@ -719,9 +719,9 @@ namespace SharpRTSPClient
                 if (VideoContext != null)
                 {
                     byte[] decoded = rtcpData.ToArray();
-                    if (VideoContext.DecodeRtpContext.UnprotectRtp(decoded, decoded.Length, out var len) == 0)
+                    if (VideoContext.DecodeRtcpContext.UnprotectRtcp(decoded, decoded.Length, out var len) == 0)
                     {
-                        rtcpData = decoded.AsMemory();
+                        rtcpData = decoded.Take(len).ToArray().AsMemory();
                     }
                     else
                     {
@@ -756,9 +756,9 @@ namespace SharpRTSPClient
                 if (AudioContext != null)
                 {
                     byte[] decoded = rtcpData.ToArray();
-                    if (AudioContext.DecodeRtpContext.UnprotectRtp(decoded, decoded.Length, out var len) == 0)
+                    if (AudioContext.DecodeRtcpContext.UnprotectRtcp(decoded, decoded.Length, out var len) == 0)
                     {
-                        rtcpData = decoded.AsMemory();
+                        rtcpData = decoded.Take(len).ToArray().AsMemory();
                     }
                     else
                     {
@@ -1428,7 +1428,7 @@ namespace SharpRTSPClient
                             }
 
                             // SRTP crypto context
-                            SrtpKeys keys = SrtpProtocol.GenerateMasterKeys(cryptoSuite, MKI);
+                            SrtpKeys keys = SrtpProtocol.GenerateMasterKeys(cryptoSuite, MKI, masterKeySalt);
                             var encodeRtpContext = new SrtpContext(keys.ProtectionProfile, MKI, keys.MasterKey, keys.MasterSalt, SrtpContextType.RTP);
                             var encodeRtcpContext = new SrtpContext(keys.ProtectionProfile, MKI, keys.MasterKey, keys.MasterSalt, SrtpContextType.RTCP);
                             var decodeRtpContext = new SrtpContext(keys.ProtectionProfile, MKI, keys.MasterKey, keys.MasterSalt, SrtpContextType.RTP);
