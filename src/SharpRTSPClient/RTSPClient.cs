@@ -4,6 +4,7 @@ using Rtsp.Messages;
 using Rtsp.Onvif;
 using Rtsp.Rtp;
 using Rtsp.Sdp;
+using SharpSRTP.SRTP;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -11,6 +12,7 @@ using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Security;
+using System.Numerics;
 using System.Text;
 
 namespace SharpRTSPClient
@@ -111,6 +113,9 @@ namespace SharpRTSPClient
         /// Audio SSRC.
         /// </summary>
         public uint AudioSSRC { get; set; } = (uint)_rand.Next(20000, 29999);
+        
+        public SrtpSessionContext VideoContext { get; private set; }
+        public SrtpSessionContext AudioContext { get; private set; }
 
         static RTSPClient()
         {
@@ -505,6 +510,13 @@ namespace SharpRTSPClient
         /// <param name="rtcp">RTCP message bytes.</param>
         public void SendVideoRTCP(byte[] rtcp)
         {
+            if (VideoContext != null)
+            {
+                byte[] rtcpBuffer = new byte[rtcp.Length + 18];
+                VideoContext.EncodeRtcpContext.ProtectRtcp(rtcpBuffer, rtcp.Length, out int len);
+                rtcp = rtcpBuffer.Take(len).ToArray();
+            }
+
             _videoRtpTransport.WriteToControlPort(rtcp);
         }
 
@@ -514,6 +526,13 @@ namespace SharpRTSPClient
         /// <param name="rtcp">RTCP message bytes.</param>
         public void SendAudioRTCP(byte[] rtcp)
         {
+            if (AudioContext != null)
+            {
+                byte[] rtcpBuffer = new byte[rtcp.Length + 18];
+                AudioContext.EncodeRtcpContext.ProtectRtcp(rtcpBuffer, rtcp.Length, out int len);
+                rtcp = rtcpBuffer.Take(len).ToArray();
+            }
+
             _audioRtpTransport.WriteToControlPort(rtcp);
         }
 
@@ -546,7 +565,22 @@ namespace SharpRTSPClient
 
             using (var data = e.Data)
             {
-                var rtpPacket = new RtpPacket(data.Data.Span);
+                var rtpData = data.Data;
+                if (VideoContext != null)
+                {
+                    byte[] decoded = rtpData.ToArray();
+                    if (VideoContext.DecodeRtpContext.UnprotectRtp(decoded, decoded.Length, out var len) == 0)
+                    {
+                        rtpData = decoded.AsMemory();
+                    }
+                    else
+                    {
+                        _logger.LogError("Unprotect RTP failed");
+                        return;
+                    }
+                }
+
+                var rtpPacket = new RtpPacket(rtpData.Span);
 
                 if (rtpPacket.PayloadType != _videoPayload)
                 {
@@ -557,7 +591,7 @@ namespace SharpRTSPClient
 
                 ReceivedRawVideoRTP?.Invoke(this,
                     new RawRtpDataEventArgs(
-                        data.Data,
+                        rtpData,
                         rtpPacket.CsrcCount,
                         rtpPacket.ExtensionHeaderId,
                         rtpPacket.HasPadding,
@@ -608,8 +642,23 @@ namespace SharpRTSPClient
 
             using (var data = e.Data)
             {
+                var rtpData = data.Data;
+                if (AudioContext != null)
+                {
+                    byte[] decoded = rtpData.ToArray();
+                    if (AudioContext.DecodeRtpContext.UnprotectRtp(decoded, decoded.Length, out var len) == 0)
+                    {
+                        rtpData = decoded.AsMemory();
+                    }
+                    else
+                    {
+                        _logger.LogError("Unprotect RTP failed");
+                        return;
+                    }
+                }
+
                 // Received some Audio Data on the correct channel.
-                var rtpPacket = new RtpPacket(data.Data.Span);
+                var rtpPacket = new RtpPacket(rtpData.Span);
 
                 // Check the payload type in the RTP packet matches the Payload Type value from the SDP
                 if (rtpPacket.PayloadType != _audioPayload)
@@ -620,7 +669,7 @@ namespace SharpRTSPClient
 
                 ReceivedRawAudioRTP?.Invoke(this,
                    new RawRtpDataEventArgs(
-                        data.Data,
+                        rtpData,
                         rtpPacket.CsrcCount,
                         rtpPacket.ExtensionHeaderId,
                         rtpPacket.HasPadding,
@@ -666,12 +715,27 @@ namespace SharpRTSPClient
 
             using (var data = e.Data)
             {
-                ReceivedRawVideoRTCP?.Invoke(this, new RawRtcpDataEventArgs(data.Data));
+                var rtcpData = data.Data;
+                if (VideoContext != null)
+                {
+                    byte[] decoded = rtcpData.ToArray();
+                    if (VideoContext.DecodeRtpContext.UnprotectRtp(decoded, decoded.Length, out var len) == 0)
+                    {
+                        rtcpData = decoded.AsMemory();
+                    }
+                    else
+                    {
+                        _logger.LogError("Unprotect RTCP failed");
+                        return;
+                    }
+                }
+
+                ReceivedRawVideoRTCP?.Invoke(this, new RawRtcpDataEventArgs(rtcpData));
 
                 if (!ProcessRTCP)
                     return;
 
-                var reports = ParseRTCPAndGenerateReponse(data, VideoSSRC);
+                var reports = ParseRTCPAndGenerateReponse(rtcpData, VideoSSRC);
                 foreach (var report in reports)
                 {
                     ((IRtpTransport)sender).WriteToControlPort(report);
@@ -688,12 +752,27 @@ namespace SharpRTSPClient
 
             using (var data = e.Data)
             {
+                var rtcpData = data.Data;
+                if (AudioContext != null)
+                {
+                    byte[] decoded = rtcpData.ToArray();
+                    if (AudioContext.DecodeRtpContext.UnprotectRtp(decoded, decoded.Length, out var len) == 0)
+                    {
+                        rtcpData = decoded.AsMemory();
+                    }
+                    else
+                    {
+                        _logger.LogError("Unprotect RTCP failed");
+                        return;
+                    }
+                }
+
                 ReceivedRawAudioRTCP?.Invoke(this, new RawRtcpDataEventArgs(data.Data));
 
                 if (!ProcessRTCP)
                     return;
 
-                var reports = ParseRTCPAndGenerateReponse(data, AudioSSRC);
+                var reports = ParseRTCPAndGenerateReponse(rtcpData, AudioSSRC);
                 foreach (var report in reports)
                 {
                     ((IRtpTransport)sender).WriteToControlPort(report);
@@ -701,7 +780,7 @@ namespace SharpRTSPClient
             }
         }
 
-        private List<byte[]> ParseRTCPAndGenerateReponse(RtspData data, uint ssrc)
+        private List<byte[]> ParseRTCPAndGenerateReponse(Memory<byte> data, uint ssrc)
         {
             List<byte[]> reports = new List<byte[]>();
 
@@ -714,9 +793,9 @@ namespace SharpRTSPClient
 
             // There can be multiple RTCP packets transmitted together. Loop ever each one
             int packetIndex = 0;
-            var span = data.Data.Span;
+            var span = data.Span;
 
-            while (packetIndex < data.Data.Length)
+            while (packetIndex < data.Length)
             {
                 //int rtcpVersion = (span[packetIndex + 0] >> 6);
                 //int rtcpPadding = (span[packetIndex + 0] >> 5) & 0x01;
@@ -1061,7 +1140,7 @@ namespace SharpRTSPClient
                     {
                         // found a valid codec
                         payloadName = rtpmap.EncodingName.ToUpperInvariant();
-                        switch(payloadName)
+                        switch (payloadName)
                         {
                             case "H264":
                                 _videoPayloadProcessor = new H264Payload(_loggerFactory.CreateLogger<H264Payload>());
@@ -1093,7 +1172,7 @@ namespace SharpRTSPClient
                         if (media.PayloadType < 96)
                         {
                             // PayloadType is a static value, so we can use it to determine the codec
-                            switch(media.PayloadType)
+                            switch (media.PayloadType)
                             {
                                 case 26:
                                     {
@@ -1166,7 +1245,7 @@ namespace SharpRTSPClient
                             byte[] pps = vpsSpsPps[3];
                             byte[] sei = vpsSpsPps[4];
                             streamConfigurationData = new H266StreamConfigurationData(dci, vps, sps, pps, sei);
-                        }                        
+                        }
                     }
                     else if (_videoPayloadProcessor is AV1Payload && fmtp?.FormatParameter != null)
                     {
@@ -1189,9 +1268,12 @@ namespace SharpRTSPClient
                             setupMessage.AddTransport(transport);
                             setupMessage.AddAuthorization(_authentication, _uri, _rtspSocket.NextCommandIndex());
                             if (_playbackSession) { setupMessage.AddRequireOnvifRequest(); }
-                            
+
                             // Add SETUP message to list of mesages to send
                             _setupMessages.Enqueue(setupMessage);
+
+                            VideoContext = PrepareSrtpContext(media);
+
                             NewVideoStream?.Invoke(this, new NewStreamEventArgs(media.PayloadType, payloadName, streamConfigurationData));
                         }
                         break;
@@ -1292,6 +1374,9 @@ namespace SharpRTSPClient
                             }
                             // Add SETUP message to list of mesages to send
                             _setupMessages.Enqueue(setupMessage);
+
+                            AudioContext = PrepareSrtpContext(media);
+
                             NewAudioStream?.Invoke(this, new NewStreamEventArgs(media.PayloadType, _audioCodec, streamConfigurationData));
                         }
                         break;
@@ -1308,6 +1393,68 @@ namespace SharpRTSPClient
 
             // Send the FIRST SETUP message and remove it from the list of Setup Messages
             _rtspClient?.SendMessage(_setupMessages.Dequeue());
+        }
+
+        private SrtpSessionContext PrepareSrtpContext(Media media)
+        {
+            if (media.RtpType != null && media.RtpType.EndsWith("/SAVP"))
+            {
+                var crypto = media.Attributs.FirstOrDefault(x => x.Key == "crypto");
+                if (crypto != null)
+                {
+                    byte[] MKI = null;
+                    byte[] masterKeySalt = null;
+
+                    string[] cryptoParts = crypto.Value.Split(' ');
+                    if (cryptoParts.Length == 3)
+                    {
+                        string cryptoSuite = cryptoParts[1];
+
+                        if (cryptoParts[2].StartsWith("inline:"))
+                        {
+                            string[] inlineParts = cryptoParts[2].Substring(7).Split('|');
+                            masterKeySalt = Convert.FromBase64String(inlineParts[0]);
+                            if (inlineParts.Length > 1)
+                            {
+                                if (inlineParts.Length > 2)
+                                {
+                                    string lifetime = inlineParts[1];
+                                    MKI = ParseMKI(inlineParts[2]);
+                                }
+                                else if (inlineParts[1].Contains(':'))
+                                {
+                                    MKI = ParseMKI(inlineParts[1]);
+                                }
+                            }
+
+                            // SRTP crypto context
+                            SrtpKeys keys = SrtpProtocol.GenerateMasterKeys(cryptoSuite, MKI);
+                            var encodeRtpContext = new SrtpContext(keys.ProtectionProfile, MKI, keys.MasterKey, keys.MasterSalt, SrtpContextType.RTP);
+                            var encodeRtcpContext = new SrtpContext(keys.ProtectionProfile, MKI, keys.MasterKey, keys.MasterSalt, SrtpContextType.RTCP);
+                            var decodeRtpContext = new SrtpContext(keys.ProtectionProfile, MKI, keys.MasterKey, keys.MasterSalt, SrtpContextType.RTP);
+                            var decodeRtcpContext = new SrtpContext(keys.ProtectionProfile, MKI, keys.MasterKey, keys.MasterSalt, SrtpContextType.RTCP);
+
+                            return new SrtpSessionContext(encodeRtpContext, decodeRtpContext, encodeRtcpContext, decodeRtcpContext);
+                        }
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        private static byte[] ParseMKI(string sdpMki)
+        {
+            string[] mkiParts = sdpMki.Split(':');
+            if (mkiParts.Length == 2)
+            {
+                byte[] mkiValue = new BigInteger(int.Parse(mkiParts[0])).ToByteArray();
+                byte[] MKI = new byte[int.Parse(mkiParts[1])];
+                Buffer.BlockCopy(mkiValue, 0, MKI, 0, mkiValue.Length);
+                return MKI;
+            }
+
+            return null;
         }
 
         private Uri GetControlUri(Media media)
