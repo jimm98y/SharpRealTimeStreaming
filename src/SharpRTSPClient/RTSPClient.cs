@@ -1397,7 +1397,8 @@ namespace SharpRTSPClient
 
         public virtual SrtpSessionContext PrepareSrtpContext(Media media)
         {
-            if (media.RtpType != null && media.RtpType.EndsWith("/SAVP"))
+#warning TODO: uncomment this after SharpRTSP is updated with the Media changes
+            //if (media.RtpType != null && media.RtpType.EndsWith("/SAVP"))
             {
                 var crypto = media.Attributs.FirstOrDefault(x => x.Key == "crypto");
                 if (crypto != null)
