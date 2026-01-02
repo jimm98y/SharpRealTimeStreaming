@@ -773,7 +773,7 @@ namespace SharpRTSPServer
 
         private bool SendRTCP(uint rtpTimestamp, RTSPConnection connection, RTPStream stream)
         {
-            using (var rtcpOwner = MemoryPool<byte>.Shared.Rent(28 + 18))
+            using (var rtcpOwner = MemoryPool<byte>.Shared.Rent(28))
             {
                 var rtcpSenderReport = rtcpOwner.Memory.Slice(0, 28).Span;
                 const bool hasPadding = false;
