@@ -512,7 +512,7 @@ namespace SharpRTSPClient
         {
             if (VideoContext != null)
             {
-                byte[] rtcpBuffer = new byte[rtcp.Length + 18];
+                byte[] rtcpBuffer = new byte[VideoContext.EncodeRtcpContext.CalculateRequiredSrtcpPayloadLength(rtcp.Length)];
                 VideoContext.EncodeRtcpContext.ProtectRtcp(rtcpBuffer, rtcp.Length, out int len);
                 rtcp = rtcpBuffer.Take(len).ToArray();
             }
@@ -528,7 +528,7 @@ namespace SharpRTSPClient
         {
             if (AudioContext != null)
             {
-                byte[] rtcpBuffer = new byte[rtcp.Length + 18];
+                byte[] rtcpBuffer = new byte[AudioContext.EncodeRtcpContext.CalculateRequiredSrtcpPayloadLength(rtcp.Length)];
                 AudioContext.EncodeRtcpContext.ProtectRtcp(rtcpBuffer, rtcp.Length, out int len);
                 rtcp = rtcpBuffer.Take(len).ToArray();
             }

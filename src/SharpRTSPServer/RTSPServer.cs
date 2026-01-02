@@ -727,7 +727,7 @@ namespace SharpRTSPServer
 
                 if(stream.Context != null)
                 {
-                    byte[] rtp = new byte[rtpPacket.Length + 14];
+                    byte[] rtp = new byte[stream.Context.EncodeRtpContext.CalculateRequiredSrtpPayloadLength(rtpPacket.Length)];
                     rtpPacket.CopyTo(rtp);
                     int ret = stream.Context.EncodeRtpContext.ProtectRtp(rtp, rtpPacket.Length, out var len);
                     if (ret != 0) throw new Exception("Protect failed!");
@@ -797,7 +797,7 @@ namespace SharpRTSPServer
 
                 if (stream.Context != null)
                 {
-                    byte[] rtcp = new byte[rtcpSenderReport.Length + 18];
+                    byte[] rtcp = new byte[stream.Context.EncodeRtcpContext.CalculateRequiredSrtcpPayloadLength(rtcpSenderReport.Length)];
                     rtcpSenderReport.CopyTo(rtcp);
                     int ret = stream.Context.EncodeRtcpContext.ProtectRtcp(rtcp, rtcpSenderReport.Length, out var len);
                     if (ret != 0) throw new Exception("Protect failed!");
