@@ -1395,7 +1395,7 @@ namespace SharpRTSPClient
             _rtspClient?.SendMessage(_setupMessages.Dequeue());
         }
 
-        private SrtpSessionContext PrepareSrtpContext(Media media)
+        public virtual SrtpSessionContext PrepareSrtpContext(Media media)
         {
             if (media.RtpType != null && media.RtpType.EndsWith("/SAVP"))
             {
@@ -1427,14 +1427,8 @@ namespace SharpRTSPClient
                                 }
                             }
 
-                            // SRTP crypto context
-                            SrtpKeys keys = SrtpProtocol.GenerateMasterKeys(cryptoSuite, MKI, masterKeySalt);
-                            var encodeRtpContext = new SrtpContext(keys.ProtectionProfile, MKI, keys.MasterKey, keys.MasterSalt, SrtpContextType.RTP);
-                            var encodeRtcpContext = new SrtpContext(keys.ProtectionProfile, MKI, keys.MasterKey, keys.MasterSalt, SrtpContextType.RTCP);
-                            var decodeRtpContext = new SrtpContext(keys.ProtectionProfile, MKI, keys.MasterKey, keys.MasterSalt, SrtpContextType.RTP);
-                            var decodeRtcpContext = new SrtpContext(keys.ProtectionProfile, MKI, keys.MasterKey, keys.MasterSalt, SrtpContextType.RTCP);
-
-                            return new SrtpSessionContext(encodeRtpContext, decodeRtpContext, encodeRtcpContext, decodeRtcpContext);
+                            SrtpKeys keys = SrtpProtocol.CreateMasterKeys(cryptoSuite, MKI, masterKeySalt);
+                            return SrtpProtocol.CreateSrtpSessionContext(keys);
                         }
                     }
                 }

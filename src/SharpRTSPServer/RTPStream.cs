@@ -16,15 +16,10 @@ namespace SharpRTSPServer
                 throw new ArgumentNullException("SRTP Crypto suite not selected!");
 
             // derive the master key + master salt to be sent in SDP crypto: attribute as per RFC 4568
-            byte[] MKI = SrtpProtocol.GenerateMki(mkiLen);            
-            SrtpKeys keys = SrtpProtocol.GenerateMasterKeys(cryptoSuite, MKI);
+            byte[] MKI = SrtpProtocol.GenerateMki(mkiLen);
 
-            var encodeRtpContext = new SrtpContext(keys.ProtectionProfile, MKI, keys.MasterKey, keys.MasterSalt, SrtpContextType.RTP);
-            var encodeRtcpContext = new SrtpContext(keys.ProtectionProfile, MKI, keys.MasterKey, keys.MasterSalt, SrtpContextType.RTCP);
-            var decodeRtpContext = new SrtpContext(keys.ProtectionProfile, MKI, keys.MasterKey, keys.MasterSalt, SrtpContextType.RTP);
-            var decodeRtcpContext = new SrtpContext(keys.ProtectionProfile, MKI, keys.MasterKey, keys.MasterSalt, SrtpContextType.RTCP);
-
-            Context = new SrtpSessionContext(encodeRtpContext, decodeRtpContext, encodeRtcpContext, decodeRtcpContext);
+            SrtpKeys keys = SrtpProtocol.CreateMasterKeys(cryptoSuite, MKI);
+            Context = SrtpProtocol.CreateSrtpSessionContext(keys);
 
             return keys.MasterKeySalt;
         }
