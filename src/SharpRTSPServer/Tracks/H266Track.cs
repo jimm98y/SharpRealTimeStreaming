@@ -148,7 +148,7 @@ namespace SharpRTSPServer
             if (SEI != null && SEI.Length > 0)
                 sei = "; sprop-sei=" + Convert.ToBase64String(SEI);
             
-            sdp.Append($"m=video 0 RTP/AVP {PayloadType}\n");
+            sdp.Append($"m=video 0 RTP/{RtpProfile} {PayloadType}\n");
             sdp.Append($"a=control:trackID={ID}\n");
             sdp.Append($"a=rtpmap:{PayloadType} {Codec}/{VideoClock}\n");
 
@@ -156,6 +156,7 @@ namespace SharpRTSPServer
             additionalParams = additionalParams.TrimStart(';');
 
             sdp.Append($"a=fmtp:{PayloadType}{additionalParams}\n");
+
             return sdp;
         }
 

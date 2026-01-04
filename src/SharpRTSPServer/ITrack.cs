@@ -5,8 +5,18 @@ using System.Text;
 
 namespace SharpRTSPServer
 {
+    public enum RtpProfiles
+    {
+        AVP,
+        // AVPF,
+        SAVP,
+        // SAVPF
+    }
+
     public interface ITrack
     {
+        RtpProfiles RtpProfile { get; set; }
+
         uint SSRC { get; set; }
 
         IRtpSender Sink { get; set; }

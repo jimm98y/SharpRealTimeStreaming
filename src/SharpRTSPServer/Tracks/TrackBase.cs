@@ -10,6 +10,11 @@ namespace SharpRTSPServer
         private static readonly Random _rand = new Random();
 
         /// <summary>
+        /// RTP profile.
+        /// </summary>
+        public RtpProfiles RtpProfile { get; set; } = RtpProfiles.AVP;
+
+        /// <summary>
         /// SSRC for this track. Each track streamed by this server shall have a unique SSRC.
         /// </summary>
         public uint SSRC { get; set; } = (uint)_rand.Next(0, int.MaxValue); 

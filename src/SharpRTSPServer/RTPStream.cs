@@ -1,4 +1,6 @@
 ﻿using Rtsp;
+using SharpSRTP.SRTP;
+using System;
 
 namespace SharpRTSPServer
 {
@@ -7,6 +9,21 @@ namespace SharpRTSPServer
     /// </summary>
     public class RTPStream
     {
+        public SrtpSessionContext Context { get; set; } = null;
+        public byte[] PrepareSrtpContext(string cryptoSuite, int mkiLen = 0)
+        {
+            if (string.IsNullOrEmpty(cryptoSuite))
+                throw new ArgumentNullException("SRTP Crypto suite not selected!");
+
+            // derive the master key + master salt to be sent in SDP crypto: attribute as per RFC 4568
+            byte[] MKI = SrtpProtocol.GenerateMki(mkiLen);
+
+            SrtpKeys keys = SrtpProtocol.CreateMasterKeys(cryptoSuite, MKI);
+            Context = SrtpProtocol.CreateSrtpSessionContext(keys);
+
+            return keys.MasterKeySalt;
+        }
+
         /// <summary>
         /// When true will send out a RTCP packet to match Wall Clock Time to RTP Payload timestamps.
         /// </summary>
