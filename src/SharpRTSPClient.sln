@@ -1,7 +1,7 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio Version 17
-VisualStudioVersion = 17.9.34607.119
+# Visual Studio Version 18
+VisualStudioVersion = 18.1.11312.151 d18.0
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "SharpRTSPClient", "SharpRTSPClient\SharpRTSPClient.csproj", "{9D0C2B4B-9114-4FF9-8CED-C8D798E0EC44}"
 EndProject
@@ -15,6 +15,8 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution 
 	EndProjectSection
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RtspRecorderApp", "RtspRecorderApp\RtspRecorderApp.csproj", "{5AC8D49B-E3B5-4FF6-A781-1F88ACF89661}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SrtpClientSample", "SrtpClientSample\SrtpClientSample.csproj", "{36FC051C-D3AB-347A-AEE5-400CF1F880FC}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -34,6 +36,10 @@ Global
 		{5AC8D49B-E3B5-4FF6-A781-1F88ACF89661}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{5AC8D49B-E3B5-4FF6-A781-1F88ACF89661}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{5AC8D49B-E3B5-4FF6-A781-1F88ACF89661}.Release|Any CPU.Build.0 = Release|Any CPU
+		{36FC051C-D3AB-347A-AEE5-400CF1F880FC}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{36FC051C-D3AB-347A-AEE5-400CF1F880FC}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{36FC051C-D3AB-347A-AEE5-400CF1F880FC}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{36FC051C-D3AB-347A-AEE5-400CF1F880FC}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -41,6 +47,7 @@ Global
 	GlobalSection(NestedProjects) = preSolution
 		{A98D08A3-1617-4953-AB98-11CFB6159529} = {660C9331-283E-462F-9DB1-1BC2BCB12B2D}
 		{5AC8D49B-E3B5-4FF6-A781-1F88ACF89661} = {660C9331-283E-462F-9DB1-1BC2BCB12B2D}
+		{36FC051C-D3AB-347A-AEE5-400CF1F880FC} = {660C9331-283E-462F-9DB1-1BC2BCB12B2D}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {BB335B23-D422-4DDC-9B06-833B6E100A0C}
