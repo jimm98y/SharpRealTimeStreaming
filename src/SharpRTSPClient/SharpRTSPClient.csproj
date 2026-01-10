@@ -12,7 +12,7 @@
 			<PrivateAssets>all</PrivateAssets>
 			<IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
 		</PackageReference>
-		<PackageReference Include="SharpSRTP" Version="0.0.1" />
+		<PackageReference Include="SharpSRTP" Version="0.1.0" />
 	</ItemGroup>
 
 </Project>

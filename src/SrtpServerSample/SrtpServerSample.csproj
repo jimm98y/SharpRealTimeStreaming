@@ -26,7 +26,6 @@
     <PackageReference Include="BouncyCastle.Cryptography" Version="2.6.2" />
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.1" />
     <PackageReference Include="SharpMP4" Version="0.2.1" />
-    <PackageReference Include="SharpSRTP" Version="0.0.1" />
   </ItemGroup>
 
   <ItemGroup>
