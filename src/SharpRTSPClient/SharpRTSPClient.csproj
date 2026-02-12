@@ -7,12 +7,12 @@
   </PropertyGroup>
 
 	<ItemGroup>
-		<PackageReference Include="SharpRTSP" Version="1.10.2" />
-		<PackageReference Include="Meziantou.Polyfill" Version="1.0.99" Condition="'$(TargetFramework)' == 'netstandard2.0' Or '$(TargetFramework)' == 'netstandard2.1'">
+		<PackageReference Include="SharpRTSP" Version="1.11.0" />
+		<PackageReference Include="Meziantou.Polyfill" Version="1.0.101" Condition="'$(TargetFramework)' == 'netstandard2.0' Or '$(TargetFramework)' == 'netstandard2.1'">
 			<PrivateAssets>all</PrivateAssets>
 			<IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
 		</PackageReference>
-		<PackageReference Include="SharpSRTP" Version="0.3.0" />
+		<PackageReference Include="SharpSRTP" Version="0.3.1" />
 	</ItemGroup>
 
 </Project>

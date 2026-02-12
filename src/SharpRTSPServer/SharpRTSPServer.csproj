@@ -6,8 +6,8 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="SharpRTSP" Version="1.10.2" />
-    <PackageReference Include="SharpSRTP" Version="0.3.0" />
+    <PackageReference Include="SharpRTSP" Version="1.11.0" />
+    <PackageReference Include="SharpSRTP" Version="0.3.1" />
   </ItemGroup>
 	
 </Project>
