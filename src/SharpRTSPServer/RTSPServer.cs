@@ -632,13 +632,13 @@ namespace SharpRTSPServer
                 if(streamSource.VideoTrack.RtpProfile == RtpProfiles.SAVP)
                 {
                     byte[] masterKeySalt = connection.Video.PrepareSrtpContext(SrtpCryptoSuite);
-                    byte[] mki = connection.Video.Context.EncodeRtpContext.Mki;
+                    byte[] mki = connection.Video.Context.EncodeRtpContext.Mki.ToArray();
 
                     string optionalMki = "";
                     if(mki.Length > 0)
                     {
                         // ffplay does not seem to support MKI or any optional parameters in crypto
-                        optionalMki = $"|{new BigInteger(connection.Video.Context.EncodeRtpContext.Mki)}:{connection.Video.Context.EncodeRtpContext.Mki.Length}";
+                        optionalMki = $"|{new BigInteger(connection.Video.Context.EncodeRtpContext.Mki.ToArray())}:{connection.Video.Context.EncodeRtpContext.Mki.Length}";
                     }
 
                     // https://www.rfc-editor.org/rfc/rfc4568.txt
@@ -654,14 +654,14 @@ namespace SharpRTSPServer
 
                 if (streamSource.AudioTrack.RtpProfile == RtpProfiles.SAVP)
                 {
-                    byte[] masterKeySalt = connection.Audio.PrepareSrtpContext(SrtpCryptoSuite);
-                    byte[] mki = connection.Video.Context.EncodeRtpContext.Mki;
+                    var masterKeySalt = connection.Audio.PrepareSrtpContext(SrtpCryptoSuite);
+                    var mki = connection.Video.Context.EncodeRtpContext.Mki;
 
                     string optionalMki = "";
                     if (mki.Length > 0)
                     {
                         // ffplay does not seem to support MKI or any optional parameters in crypto
-                        optionalMki = $"|{new BigInteger(connection.Video.Context.EncodeRtpContext.Mki)}:{connection.Video.Context.EncodeRtpContext.Mki.Length}";
+                        optionalMki = $"|{new BigInteger(connection.Video.Context.EncodeRtpContext.Mki.ToArray())}:{connection.Video.Context.EncodeRtpContext.Mki.Length}";
                     }
 
                     // https://www.rfc-editor.org/rfc/rfc4568.txt

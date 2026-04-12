@@ -10,6 +10,7 @@ namespace SharpRTSPServer
     public class RTPStream
     {
         public SrtpSessionContext Context { get; set; } = null;
+
         public byte[] PrepareSrtpContext(string cryptoSuite, int mkiLen = 0)
         {
             if (string.IsNullOrEmpty(cryptoSuite))
@@ -21,7 +22,7 @@ namespace SharpRTSPServer
             SrtpKeys keys = SrtpProtocol.CreateMasterKeys(cryptoSuite, MKI);
             Context = SrtpProtocol.CreateSrtpSessionContext(keys);
 
-            return keys.MasterKeySalt;
+            return keys.MasterKeySalt.ToArray();
         }
 
         /// <summary>
