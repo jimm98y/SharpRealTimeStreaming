@@ -39,7 +39,7 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.5" />
-    <PackageReference Include="SharpMP4" Version="0.2.2" />
+    <PackageReference Include="SharpMP4" Version="0.3.0" />
   </ItemGroup>
 
   <ItemGroup>
