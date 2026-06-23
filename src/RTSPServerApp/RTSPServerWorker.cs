@@ -147,6 +147,16 @@ internal class RTSPServerWorker : BackgroundService
                         }
 
                         mediaFileReader.VideoRtpBaseTime = Random.Shared.Next();
+
+                        // sample.PTS is expressed in the MP4 *media* timescale (mdhd, e.g. 12288 for this file),
+                        //  but the video RTP/SDP clock is 90000 Hz. Feeding the raw PTS makes the RTP timestamps
+                        //  advance ~7x too slowly, so the client renders choppy video. We must rescale the PTS
+                        //  into the 90 kHz domain. Note: inputTrack.Timescale cannot be used as the divisor - for
+                        //  fragmented MP4 it falls back to the SPS VUI timing (48 here), which does not match the
+                        //  media timescale the PTS values are actually expressed in.
+                        uint sourceVideoTimescale = GetMediaTimescale(fmp4, inputTrack.TrackID);
+                        const int VIDEO_RTP_CLOCK = 90000;
+
                         mediaFileReader.VideoTimer = new Timer(inputTrack.DefaultSampleDuration * 1000d / inputTrack.Timescale);
                         mediaFileReader.VideoTimer.Elapsed += (s, e) =>
                         {
@@ -165,7 +175,9 @@ internal class RTSPServerWorker : BackgroundService
                                 }
 
                                 IEnumerable<byte[]> units = inputReader.ParseSample(inputTrack.TrackID, sample.Data);
-                                rtspVideoTrack.FeedInRawSamples((uint)unchecked(mediaFileReader.VideoRtpBaseTime + sample.PTS), units.ToList());
+
+                                long videoPts = (long)sample.PTS * VIDEO_RTP_CLOCK / sourceVideoTimescale;
+                                rtspVideoTrack.FeedInRawSamples((uint)unchecked(mediaFileReader.VideoRtpBaseTime + videoPts), units.ToList());
                             }
                         };
 
@@ -248,6 +260,27 @@ internal class RTSPServerWorker : BackgroundService
         }
 
         return Task.CompletedTask;
+    }
+
+    // Returns the media (mdhd) timescale for the given track. This is the clock the sample PTS/DTS values are
+    //  expressed in, which (for fragmented MP4) is not necessarily the same as ITrack.Timescale.
+    private static uint GetMediaTimescale(Container container, uint trackID)
+    {
+        foreach (var moov in container.Children.OfType<MovieBox>())
+        {
+            foreach (var trak in moov.Children.OfType<TrackBox>())
+            {
+                var tkhd = trak.Children.OfType<TrackHeaderBox>().FirstOrDefault();
+                if (tkhd == null || tkhd.TrackID != trackID)
+                    continue;
+
+                var mdhd = trak.Children.OfType<MediaBox>().Single()
+                    .Children.OfType<MediaHeaderBox>().Single();
+                return mdhd.Timescale;
+            }
+        }
+
+        throw new InvalidOperationException($"Could not find media timescale for track {trackID}.");
     }
 
     public override void Dispose()
