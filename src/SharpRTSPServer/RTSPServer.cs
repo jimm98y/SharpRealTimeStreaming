@@ -366,6 +366,17 @@ namespace SharpRTSPServer
 
                         // Allow video and audio to go to this client
                         connection.Play = true;
+                        TrackBase tarck = (TrackBase)StreamSources.First(s => s.ConnectionList.Contains(connection)).VideoTrack;
+                       
+                        (List<Memory<byte>> rtpPackets, List<IMemoryOwner<byte>> memoryOwners) = tarck.CreateRtpPackets(tarck.IDRPacket.Item1, tarck.IDRPacket.Item2); 
+                        foreach (Memory<byte> packet in rtpPackets)
+                        {
+                            connection.Video.RtpChannel.WriteToDataPort(packet.Span);
+                        }
+                        foreach (var owner in memoryOwners)
+                        {
+                            owner.Dispose();
+                        }
                     }
                     return;
                 case RtspRequestPause pauseMessage:

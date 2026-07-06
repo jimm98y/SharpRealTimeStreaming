@@ -17,7 +17,7 @@ namespace SharpRTSPServer
         /// <summary>
         /// SSRC for this track. Each track streamed by this server shall have a unique SSRC.
         /// </summary>
-        public uint SSRC { get; set; } = (uint)_rand.Next(0, int.MaxValue); 
+        public uint SSRC { get; set; } = (uint)_rand.Next(0, int.MaxValue);
 
         public IRtpSender Sink { get; set; } = null;
 
@@ -35,8 +35,30 @@ namespace SharpRTSPServer
         public abstract bool IsReady { get; }
 
         public abstract StringBuilder BuildSDP(StringBuilder sdp);
+        private readonly object _idrPacketLock = new();
+        private (List< ReadOnlyMemory<byte>>,uint) _idrPacket;
+
+        public (List<ReadOnlyMemory<byte>>, uint) IDRPacket
+        {
+            get
+            {
+                lock (_idrPacketLock)
+                {
+                    return _idrPacket;
+                }
+            }
+            set
+            {
+                lock (_idrPacketLock)
+                {
+                    _idrPacket = value;
+                }
+            }
+        }
+
 
         public abstract (List<Memory<byte>>, List<IMemoryOwner<byte>>) CreateRtpPackets(List<ReadOnlyMemory<byte>> samples, uint rtpTimestamp);
+
 
         public virtual void FeedInRawSamples(uint rtpTimestamp, List<ReadOnlyMemory<byte>> samples)
         {
