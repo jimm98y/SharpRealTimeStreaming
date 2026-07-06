@@ -1,4 +1,4 @@
-﻿using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using SharpISOBMFF;
@@ -176,7 +176,7 @@ namespace SrtpServerSample
                                     }
 
                                     IEnumerable<byte[]> units = inputReader.ParseSample(inputTrack.TrackID, sample.Data);
-                                    rtspVideoTrack.FeedInRawSamples((uint)unchecked(mediaFileReader.VideoRtpBaseTime + sample.PTS), units.ToList());
+                                    rtspVideoTrack.FeedInRawSamples((uint)unchecked(mediaFileReader.VideoRtpBaseTime + sample.PTS), units.Select(u => (ReadOnlyMemory<byte>)u).ToList());
                                 }
                             };
 
@@ -220,7 +220,7 @@ namespace SrtpServerSample
                                     }
 
                                     IEnumerable<byte[]> units = inputReader.ParseSample(inputTrack.TrackID, sample.Data);
-                                    rtspAudioTrack.FeedInRawSamples((uint)unchecked(mediaFileReader.AaudioRtpBaseTime + sample.PTS), units.ToList());
+                                    rtspAudioTrack.FeedInRawSamples((uint)unchecked(mediaFileReader.AaudioRtpBaseTime + sample.PTS), units.Select(u => (ReadOnlyMemory<byte>)u).ToList());
                                 }
                             };
 
@@ -238,7 +238,7 @@ namespace SrtpServerSample
                     mediaFileReader.VideoTimer = new Timer(1000);
                     mediaFileReader.VideoTimer.Elapsed += (s, e) =>
                     {
-                        rtspVideoTrack.FeedInRawSamples((uint)jpgFileIndex * 1000, new List<byte[]> { File.ReadAllBytes(jpgFiles[jpgFileIndex++ % jpgFiles.Length]) });
+                        rtspVideoTrack.FeedInRawSamples((uint)jpgFileIndex * 1000, new List<ReadOnlyMemory<byte>> { File.ReadAllBytes(jpgFiles[jpgFileIndex++ % jpgFiles.Length]) });
                     };
                 }
 

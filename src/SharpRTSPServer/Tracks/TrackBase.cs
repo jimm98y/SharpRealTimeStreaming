@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Buffers;
 using System.Collections.Generic;
 using System.Text;
@@ -36,9 +36,9 @@ namespace SharpRTSPServer
 
         public abstract StringBuilder BuildSDP(StringBuilder sdp);
 
-        public abstract (List<Memory<byte>>, List<IMemoryOwner<byte>>) CreateRtpPackets(List<byte[]> samples, uint rtpTimestamp);
+        public abstract (List<Memory<byte>>, List<IMemoryOwner<byte>>) CreateRtpPackets(List<ReadOnlyMemory<byte>> samples, uint rtpTimestamp);
 
-        public virtual void FeedInRawSamples(uint rtpTimestamp, List<byte[]> samples)
+        public virtual void FeedInRawSamples(uint rtpTimestamp, List<ReadOnlyMemory<byte>> samples)
         {
             if (Sink == null)
                 throw new InvalidOperationException("Sink is null!!!");

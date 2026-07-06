@@ -1,4 +1,4 @@
-﻿using Haukcode.PcapngUtils;
+using Haukcode.PcapngUtils;
 using Haukcode.PcapngUtils.Common;
 using Haukcode.PcapngUtils.PcapNG.BlockTypes;
 using Microsoft.Extensions.Configuration;
@@ -133,7 +133,7 @@ void ParseData(byte[] data, object header, uint seconds, uint microseconds)
                 {
                     Thread.Sleep(sleep);
                 }
-                rtspVideoTrack?.FeedInRawSamples(RTPPacketUtil.ReadTS(data), new List<byte[]> { data });
+                rtspVideoTrack?.FeedInRawSamples(RTPPacketUtil.ReadTS(data), new List<  ReadOnlyMemory<byte>> { data });
             }
             else if(rtspProtocolParser.Ports.Count > 1 && rtspProtocolParser.Ports[1].Contains(udp.SourcePort) && rtspProtocolParser.Ports[1].Contains(udp.DestinationPort))
             {
@@ -150,7 +150,7 @@ void ParseData(byte[] data, object header, uint seconds, uint microseconds)
                     Thread.Sleep(sleep);
                 }
 
-                rtspAudioTrack?.FeedInRawSamples(RTPPacketUtil.ReadTS(data), new List<byte[]> { data });
+                rtspAudioTrack?.FeedInRawSamples(RTPPacketUtil.ReadTS(data), new List<ReadOnlyMemory<byte>> { data });
             }
         }
     }

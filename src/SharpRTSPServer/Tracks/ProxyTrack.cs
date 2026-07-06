@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Buffers;
 using System.Collections.Generic;
 using System.Text;
@@ -40,14 +40,14 @@ namespace SharpRTSPServer
             _isReady = true;
         }
 
-        public override (List<Memory<byte>>, List<IMemoryOwner<byte>>) CreateRtpPackets(List<byte[]> samples, uint rtpTimestamp)
+        public override (List<Memory<byte>>, List<IMemoryOwner<byte>>) CreateRtpPackets(List<ReadOnlyMemory<byte>> samples, uint rtpTimestamp)
         {
             List<Memory<byte>> rtpPackets = new List<Memory<byte>>();
             List<IMemoryOwner<byte>> memoryOwners = new List<IMemoryOwner<byte>>();
             var owner = MemoryPool<byte>.Shared.Rent(samples[0].Length);
             memoryOwners.Add(owner);
             var rtpPacket = owner.Memory.Slice(0, samples[0].Length);
-            MemoryExtensions.CopyTo(samples[0], rtpPacket);
+            samples[0].Span.CopyTo(rtpPacket.Span);
             rtpPackets.Add(rtpPacket);
             return (rtpPackets, memoryOwners);
         }

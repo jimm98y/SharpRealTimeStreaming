@@ -1,4 +1,4 @@
-﻿using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging;
 using Rtsp;
 using Rtsp.Messages;
 using SharpRTSPServer.Logging;
@@ -743,7 +743,7 @@ namespace SharpRTSPServer
                     var channel = stream.RtpChannel;
                     if (channel != null)
                     {
-                        channel.WriteToDataPort(rtpPacket.Span);
+                       _= channel.WriteToDataPortAsync(rtpPacket);
                         writtenBytes += (uint)rtpPacket.Span.Length;
                     }
                     else

@@ -1,4 +1,4 @@
-﻿using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using SharpISOBMFF;
@@ -177,7 +177,7 @@ internal class RTSPServerWorker : BackgroundService
                                 IEnumerable<byte[]> units = inputReader.ParseSample(inputTrack.TrackID, sample.Data);
 
                                 long videoPts = (long)sample.PTS * VIDEO_RTP_CLOCK / sourceVideoTimescale;
-                                rtspVideoTrack.FeedInRawSamples((uint)unchecked(mediaFileReader.VideoRtpBaseTime + videoPts), units.ToList());
+                                rtspVideoTrack.FeedInRawSamples((uint)unchecked(mediaFileReader.VideoRtpBaseTime + videoPts), units.Select(u => (ReadOnlyMemory<byte>)u).ToList());
                             }
                         };
 
@@ -221,7 +221,7 @@ internal class RTSPServerWorker : BackgroundService
                                 }
 
                                 IEnumerable<byte[]> units = inputReader.ParseSample(inputTrack.TrackID, sample.Data);
-                                rtspAudioTrack.FeedInRawSamples((uint)unchecked(mediaFileReader.AaudioRtpBaseTime + sample.PTS), units.ToList());
+                                rtspAudioTrack.FeedInRawSamples((uint)unchecked(mediaFileReader.AaudioRtpBaseTime + sample.PTS), units.Select(u => (ReadOnlyMemory<byte>)u).ToList());
                             }
                         };
 
@@ -239,7 +239,7 @@ internal class RTSPServerWorker : BackgroundService
                 mediaFileReader.VideoTimer = new Timer(1000);
                 mediaFileReader.VideoTimer.Elapsed += (s, e) =>
                 {
-                    rtspVideoTrack.FeedInRawSamples((uint)jpgFileIndex * 1000, new List<byte[]> { File.ReadAllBytes(jpgFiles[jpgFileIndex++ % jpgFiles.Length]) });
+                    rtspVideoTrack.FeedInRawSamples((uint)jpgFileIndex * 1000, new List<ReadOnlyMemory<byte>> { File.ReadAllBytes(jpgFiles[jpgFileIndex++ % jpgFiles.Length]) });
                 };
             }
 

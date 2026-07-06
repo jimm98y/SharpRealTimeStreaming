@@ -1,4 +1,4 @@
-﻿using SharpRTSPServer.Logging;
+using SharpRTSPServer.Logging;
 using System;
 using System.Buffers;
 using System.Collections.Generic;
@@ -99,7 +99,7 @@ namespace SharpRTSPServer
         /// <param name="samples">An array of Opus fragments. By default single fragment is expected.</param>
         /// <param name="rtpTimestamp">RTP timestamp in the timescale of the track.</param>
         /// <returns>RTP packets.</returns>
-        public override (List<Memory<byte>>, List<IMemoryOwner<byte>>) CreateRtpPackets(List<byte[]> samples, uint rtpTimestamp)
+        public override (List<Memory<byte>>, List<IMemoryOwner<byte>>) CreateRtpPackets(List<ReadOnlyMemory<byte>> samples, uint rtpTimestamp)
         {
             List<Memory<byte>> rtpPackets = new List<Memory<byte>>();
             List<IMemoryOwner<byte>> memoryOwners = new List<IMemoryOwner<byte>>();

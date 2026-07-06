@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Buffers;
 using System.Collections.Generic;
 using System.Linq;
@@ -118,7 +118,7 @@ namespace SharpRTSPServer
         /// <param name="samples">An array of AAC fragments. By default single fragment is expected.</param>
         /// <param name="rtpTimestamp">RTP timestamp in the timescale of the track.</param>
         /// <returns>RTP packets.</returns>
-        public override (List<Memory<byte>>, List<IMemoryOwner<byte>>) CreateRtpPackets(List<byte[]> samples, uint rtpTimestamp)
+        public override (List<Memory<byte>>, List<IMemoryOwner<byte>>) CreateRtpPackets(List<ReadOnlyMemory<byte>> samples, uint rtpTimestamp)
         {
             List<Memory<byte>> rtpPackets = new List<Memory<byte>>();
             List<IMemoryOwner<byte>> memoryOwners = new List<IMemoryOwner<byte>>();
@@ -156,15 +156,16 @@ namespace SharpRTSPServer
             return (rtpPackets, memoryOwners);
         }
 
-        private static byte[] AppendAUHeader(byte[] frame)
+        private static Memory<byte> AppendAUHeader(ReadOnlyMemory<byte> frame)
         {
             short frameLen = (short)(frame.Length << 3);
-            byte[] header = new byte[4];
-            header[0] = 0x00;
-            header[1] = 0x10; // 16 bits size of the header
-            header[2] = (byte)((frameLen >> 8) & 0xFF);
-            header[3] = (byte)(frameLen & 0xFF);
-            return header.Concat(frame).ToArray();
+            Memory<byte> header = new byte[4+frame.Length];
+            header.Span[0] = 0x00;
+            header.Span[1] = 0x10; // 16 bits size of the header
+            header.Span[2] = (byte)((frameLen >> 8) & 0xFF);
+            header.Span[3] = (byte)(frameLen & 0xFF);
+            frame.CopyTo(header.Slice(4));
+            return header;
         }
 
         private static int GetAACLevel(int samplingFrequency, int channelConfiguration)
