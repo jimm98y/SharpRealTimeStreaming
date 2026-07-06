@@ -7,13 +7,14 @@ namespace SharpRTSPServer
     {
         public const int RTCP_VERSION = 2;
         public const int RTCP_PACKET_TYPE_SENDER_REPORT = 200;
+        public const int RTCP_PACKET_TYPE_BYE = 203;
 
-        public static void WriteRTCPHeader(Span<byte> rtcp_sender_report, int version, bool hasPadding, int reportCount, int packetType, int length, uint ssrc)
+        public static void WriteRTCPHeader(Span<byte> rtcp, int version, bool hasPadding, int count, int packetType, int length, uint ssrc)
         {
-            rtcp_sender_report[0] = (byte)((version << 6) + ((hasPadding ? 1 : 0) << 5) + reportCount);
-            rtcp_sender_report[1] = (byte)packetType;
-            BinaryPrimitives.WriteUInt16BigEndian(rtcp_sender_report.Slice(2), (ushort)length);
-            BinaryPrimitives.WriteUInt32BigEndian(rtcp_sender_report.Slice(4), ssrc);
+            rtcp[0] = (byte)((version << 6) + ((hasPadding ? 1 : 0) << 5) + count);
+            rtcp[1] = (byte)packetType;
+            BinaryPrimitives.WriteUInt16BigEndian(rtcp.Slice(2), (ushort)length);
+            BinaryPrimitives.WriteUInt32BigEndian(rtcp.Slice(4), ssrc);
         }
 
         public static void WriteSenderReport(Span<byte> rtcpSenderReport, DateTime now, uint rtp_timestamp, uint rtpPacketCount, uint octetCount)

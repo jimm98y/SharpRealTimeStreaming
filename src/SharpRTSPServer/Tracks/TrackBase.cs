@@ -40,10 +40,12 @@ namespace SharpRTSPServer
 
         public virtual void FeedInRawSamples(uint rtpTimestamp, List<byte[]> samples)
         {
-            if (Sink == null)
+            var sink = Sink;
+
+            if (sink == null)
                 throw new InvalidOperationException("Sink is null!!!");
 
-            if (!Sink.CanAcceptNewSamples(StreamID))
+            if (!sink.CanAcceptNewSamples(StreamID))
                 return;
 
             if (ID != (int)TrackType.Video && ID != (int)TrackType.Audio)
@@ -51,7 +53,7 @@ namespace SharpRTSPServer
 
             (List<Memory<byte>> rtpPackets, List<IMemoryOwner<byte>> memoryOwners) = CreateRtpPackets(samples, rtpTimestamp);
 
-            Sink.FeedInRawRTP(StreamID, ID, rtpTimestamp, rtpPackets);
+            sink.FeedInRawRTP(StreamID, ID, rtpTimestamp, rtpPackets);
 
             foreach (var owner in memoryOwners)
             {
