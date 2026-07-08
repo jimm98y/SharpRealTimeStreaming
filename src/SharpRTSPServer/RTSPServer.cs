@@ -80,9 +80,9 @@ namespace SharpRTSPServer
         /// <param name="userName">User name.</param>
         /// <param name="password">Password.</param>
         public RTSPServer(
-            int portNumber, 
-            string userName, 
-            string password) 
+            int portNumber,
+            string userName,
+            string password)
             : this(portNumber, userName, password, null)
         { }
 
@@ -94,10 +94,10 @@ namespace SharpRTSPServer
         /// <param name="password">Password.</param>
         /// <param name="loggerFactory">Logger factory.</param>
         public RTSPServer(
-            int portNumber, 
-            string userName, 
-            string password, 
-            ILoggerFactory loggerFactory) 
+            int portNumber,
+            string userName,
+            string password,
+            ILoggerFactory loggerFactory)
             : this(portNumber, userName, password, false, null, loggerFactory)
         { }
 
@@ -135,12 +135,12 @@ namespace SharpRTSPServer
         /// <param name="userCertificateValidationCallback">Certificate validaiton callback.</param>
         public RTSPServer(
             int portNumber,
-            string userName, 
+            string userName,
             string password,
             bool useHttpTunnel,
             X509Certificate2 tlsCertificate,
             string srtpCryptoSuite,
-            ILoggerFactory loggerFactory, 
+            ILoggerFactory loggerFactory,
             RemoteCertificateValidationCallback userCertificateValidationCallback = null)
         {
             if (portNumber < IPEndPoint.MinPort || portNumber > IPEndPoint.MaxPort)
@@ -294,7 +294,7 @@ namespace SharpRTSPServer
             }
 
             var streamSource = GetStreamSource(message.RtspUri);
-            if(streamSource == null)
+            if (streamSource == null)
             {
                 // invalid URI
                 RtspResponse notFoundResponse = message.CreateResponse();
@@ -311,7 +311,7 @@ namespace SharpRTSPServer
                     // found the connection
                     oneConnection.UpdateKeepAlive();
 
-                    if(!streamSource.ConnectionList.Contains(oneConnection))
+                    if (!streamSource.ConnectionList.Contains(oneConnection))
                     {
                         streamSource.ConnectionList.Add(oneConnection);
                     }
@@ -366,17 +366,20 @@ namespace SharpRTSPServer
 
                         // Allow video and audio to go to this client
                         connection.Play = true;
-                        TrackBase tarck = (TrackBase)StreamSources.First(s => s.ConnectionList.Contains(connection)).VideoTrack;
-                       
-                        (List<Memory<byte>> rtpPackets, List<IMemoryOwner<byte>> memoryOwners) = tarck.CreateRtpPackets(tarck.IDRPacket.Item1, tarck.IDRPacket.Item2); 
-                        foreach (Memory<byte> packet in rtpPackets)
+                        TrackBase track = (TrackBase)StreamSources.First(s => s.ConnectionList.Contains(connection)).VideoTrack;
+                        if (track.IDRPacket.Item1 != null && track.IDRPacket.Item1.Count > 0)
                         {
-                            connection.Video.RtpChannel.WriteToDataPort(packet.Span);
+                            (List<Memory<byte>> rtpPackets, List<IMemoryOwner<byte>> memoryOwners) = track.CreateRtpPackets(track.IDRPacket.Item1, track.IDRPacket.Item2);
+                            foreach (Memory<byte> packet in rtpPackets)
+                            {
+                                connection.Video.RtpChannel.WriteToDataPort(packet.Span);
+                            }
+                            foreach (var owner in memoryOwners)
+                            {
+                                owner.Dispose();
+                            }
                         }
-                        foreach (var owner in memoryOwners)
-                        {
-                            owner.Dispose();
-                        }
+                        
                     }
                     return;
                 case RtspRequestPause pauseMessage:
@@ -421,7 +424,7 @@ namespace SharpRTSPServer
 
             RTSPStreamSource streamSource = GetStreamSource(setupMessage.RtspUri);
             if (streamSource == null)
-            {                
+            {
                 // track not found
                 RtspResponse setupResponse = setupMessage.CreateResponse();
                 setupResponse.ReturnCode = 404;
@@ -640,13 +643,13 @@ namespace SharpRTSPServer
             {
                 streamSource.VideoTrack.BuildSDP(sdp);
 
-                if(streamSource.VideoTrack.RtpProfile == RtpProfiles.SAVP)
+                if (streamSource.VideoTrack.RtpProfile == RtpProfiles.SAVP)
                 {
                     byte[] masterKeySalt = connection.Video.PrepareSrtpContext(SrtpCryptoSuite);
                     byte[] mki = connection.Video.Context.EncodeRtpContext.Mki.ToArray();
 
                     string optionalMki = "";
-                    if(mki.Length > 0)
+                    if (mki.Length > 0)
                     {
                         // ffplay does not seem to support MKI or any optional parameters in crypto
                         optionalMki = $"|{new BigInteger(connection.Video.Context.EncodeRtpContext.Mki.ToArray())}:{connection.Video.Context.EncodeRtpContext.Mki.Length}";
@@ -677,7 +680,7 @@ namespace SharpRTSPServer
 
                     // https://www.rfc-editor.org/rfc/rfc4568.txt
                     // appending a zero byte at the end to yield always positive value of the BigInteger
-                    sdp.AppendLine($"a=crypto:1 {SrtpCryptoSuite} inline:{Convert.ToBase64String(masterKeySalt)}{optionalMki}"); 
+                    sdp.AppendLine($"a=crypto:1 {SrtpCryptoSuite} inline:{Convert.ToBase64String(masterKeySalt)}{optionalMki}");
                 }
             }
 
@@ -736,7 +739,7 @@ namespace SharpRTSPServer
                 // Add the specific SSRC for each transmission
                 RTPPacketUtil.WriteSSRC(rtpPacket.Span, connection.SSRC);
 
-                if(stream.Context != null)
+                if (stream.Context != null)
                 {
                     byte[] rtp = new byte[stream.Context.CalculateRequiredSrtpPayloadLength(rtpPacket.Length)];
                     rtpPacket.CopyTo(rtp);
@@ -754,7 +757,7 @@ namespace SharpRTSPServer
                     var channel = stream.RtpChannel;
                     if (channel != null)
                     {
-                       _= channel.WriteToDataPortAsync(rtpPacket);
+                        channel.WriteToDataPort(rtpPacket.Span);
                         writtenBytes += (uint)rtpPacket.Span.Length;
                     }
                     else
@@ -836,7 +839,7 @@ namespace SharpRTSPServer
             connection.Audio.RtpChannel = null;
             connection.Listener.Dispose();
             _connectionList.Remove(connection);
-            foreach(var streamSource in StreamSources)
+            foreach (var streamSource in StreamSources)
             {
                 streamSource.ConnectionList.Remove(connection);
             }
@@ -885,10 +888,10 @@ namespace SharpRTSPServer
                     }
                 }
 
-                StreamSources.Clear();                
+                StreamSources.Clear();
             }
         }
-                
+
         #endregion // IDisposable
 
         #region Track sink
