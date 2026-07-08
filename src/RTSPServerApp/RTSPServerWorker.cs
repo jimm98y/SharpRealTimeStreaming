@@ -263,8 +263,7 @@ internal class RTSPServerWorker : BackgroundService
                 mediaFileReader.VideoTimer = new Timer(1000);
                 mediaFileReader.VideoTimer.Elapsed += (s, e) =>
                 {
-
-                     rtspVideoTrack.FeedInRawSamples((uint)jpgFileIndex * 1000, new List<ReadOnlyMemory<byte>> { File.ReadAllBytes(jpgFiles[jpgFileIndex++ % jpgFiles.Length]) });
+                    rtspVideoTrack.FeedInRawSamples((uint)jpgFileIndex * 1000, new List<ReadOnlyMemory<byte>> { File.ReadAllBytes(jpgFiles[jpgFileIndex++ % jpgFiles.Length]) });
 
                     if(jpgFileIndex % jpgFiles.Length == 0)
                     {
@@ -274,7 +273,6 @@ internal class RTSPServerWorker : BackgroundService
                             _server.RemoveStreamSource(streamSource);
                         }
                     }
-
                 };
             }
 
