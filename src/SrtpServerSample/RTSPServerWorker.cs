@@ -261,8 +261,7 @@ namespace SrtpServerSample
                     mediaFileReader.VideoTimer = new Timer(1000);
                     mediaFileReader.VideoTimer.Elapsed += (s, e) =>
                     {
-
-                         rtspVideoTrack.FeedInRawSamples((uint)jpgFileIndex * 1000, new List<ReadOnlyMemory<byte>> { File.ReadAllBytes(jpgFiles[jpgFileIndex++ % jpgFiles.Length]) });
+                        rtspVideoTrack.FeedInRawSamples((uint)jpgFileIndex * 1000, new List<ReadOnlyMemory<byte>> { File.ReadAllBytes(jpgFiles[jpgFileIndex++ % jpgFiles.Length]) });
 
                         if (jpgFileIndex % jpgFiles.Length == 0)
                         {
@@ -272,7 +271,6 @@ namespace SrtpServerSample
                                 _server.RemoveStreamSource(streamSource);
                             }
                         }
-
                     };
                 }
 
