@@ -45,7 +45,7 @@ namespace SharpRTSPClient
         public event EventHandler<NewStreamEventArgs> NewAudioStream;
         public event EventHandler<SimpleDataEventArgs> ReceivedVideoData;
         public event EventHandler<SimpleDataEventArgs> ReceivedAudioData;
-        public event EventHandler<EventArgs> Stopped;
+        public event EventHandler<StoppedEventArgs> Stopped;
 
         public bool ProcessRTCP { get; set; } = true; // answer RTCP
         public event EventHandler<RawRtcpDataEventArgs> ReceivedRawVideoRTCP;
@@ -262,7 +262,7 @@ namespace SharpRTSPClient
             {
                 _rtspSocketStatus = RtspStatus.ConnectFailed;
                 _logger.LogWarning("Error - did not connect");
-                Stopped?.Invoke(this, EventArgs.Empty);
+                Stopped?.Invoke(this, new StoppedEventArgs(StoppedReason.ConnectionFailed));
                 return;
             }
 
@@ -270,7 +270,7 @@ namespace SharpRTSPClient
             {
                 _rtspSocketStatus = RtspStatus.ConnectFailed;
                 _logger.LogWarning("Error - did not connect");
-                Stopped?.Invoke(this, EventArgs.Empty);
+                Stopped?.Invoke(this, new StoppedEventArgs(StoppedReason.ConnectionFailed));
                 return;
             }
 
@@ -464,9 +464,14 @@ namespace SharpRTSPClient
             teardown_message.AddAuthorization(_authentication, _uri, _rtspSocket?.NextCommandIndex() ?? 0);
             _rtspClient?.SendMessage(teardown_message);
 
+            TeardownClient();
+        }
+
+        private void TeardownClient()
+        {
             // Stop the keepalive timer
             var keepaliveTimer = _keepaliveTimer;
-            if(keepaliveTimer != null)
+            if (keepaliveTimer != null)
             {
                 keepaliveTimer.Elapsed -= SendKeepAlive;
                 keepaliveTimer.Dispose();
@@ -863,6 +868,14 @@ namespace SharpRTSPClient
                         _logger.LogDebug($"Error writing RTCP packet: {ex.Message}.");
                     }
                 }
+                else if (rtcpPacketType == 203)
+                {
+                    // We have received a BYE message
+                    _logger.LogDebug("RTCP BYE message received");
+
+                    Stopped?.Invoke(this, new StoppedEventArgs(StoppedReason.RtcpBye));
+                    TeardownClient();
+                }
 
                 packetIndex += (rtcpLength + 1) * 4;
             }
@@ -884,11 +897,19 @@ namespace SharpRTSPClient
             {
                 _logger.LogDebug("Got Error in RTSP Reply {returnCode} {returnMessage}", message.ReturnCode, message.ReturnMessage);
 
+                if (message.ReturnCode == 404)
+                {
+                    _logger.LogError("Fail to find resource stopping here");
+                    StopClient();
+                    Stopped?.Invoke(this, new StoppedEventArgs(StoppedReason.NotFound));
+                    return;
+                }
+
                 if (message.ReturnCode == 401 && message.OriginalRequest?.Headers.ContainsKey(RtspHeaderNames.Authorization) == true)
                 {
                     _logger.LogError("Fail to authenticate stopping here");
                     StopClient();
-                    Stopped?.Invoke(this, EventArgs.Empty);
+                    Stopped?.Invoke(this, new StoppedEventArgs(StoppedReason.Unauthorized));
                     return;
                 }
 
@@ -1590,6 +1611,25 @@ namespace SharpRTSPClient
 
     public interface IStreamConfigurationData
     { }
+
+    public enum StoppedReason
+    {
+        Unknown,
+        ConnectionFailed,
+        Unauthorized,
+        RtcpBye,
+        NotFound,
+    }
+
+    public class StoppedEventArgs : EventArgs
+    {
+        public StoppedEventArgs(StoppedReason reason)
+        {
+            this.Reason = reason;
+        }
+
+        public StoppedReason Reason { get; private set; }
+    }
 
     public class SimpleDataEventArgs : EventArgs
     {

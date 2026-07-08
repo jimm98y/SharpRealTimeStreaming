@@ -6,6 +6,7 @@ using SharpSRTP.SRTP;
 using System;
 using System.Buffers;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Diagnostics.Contracts;
 using System.Linq;
@@ -771,7 +772,7 @@ namespace SharpRTSPServer
             }
         }
 
-        private bool SendRTCP(uint rtpTimestamp, RTSPConnection connection, RTPStream stream)
+        private bool SendRTCPSenderReport(uint rtpTimestamp, RTSPConnection connection, RTPStream stream)
         {
             using (var rtcpOwner = MemoryPool<byte>.Shared.Rent(28))
             {
@@ -786,6 +787,20 @@ namespace SharpRTSPServer
 
                 // Clear the flag. A timer may set this to True again at some point to send regular Sender Reports
                 //HACK  connection.must_send_rtcp_packet = false; // A Timer may set this to true again later in case it is used as a Keepalive (eg IndigoVision)
+            }
+        }
+
+        private bool SendRTCPBye(RTSPConnection connection, RTPStream stream)
+        {
+            using (var rtcpOwner = MemoryPool<byte>.Shared.Rent(8))
+            {
+                var rtcpBye = rtcpOwner.Memory.Slice(0, 8).Span;
+                const bool hasPadding = false;
+                const int sourceCount = 1; 
+                int length = (rtcpBye.Length / 4) - 1; // num 32 bit words minus 1
+                RTCPUtils.WriteRTCPHeader(rtcpBye, RTCPUtils.RTCP_VERSION, hasPadding, sourceCount, RTCPUtils.RTCP_PACKET_TYPE_BYE, length, connection.SSRC);
+
+                return SendRawRTCP(connection, stream, rtcpBye);
             }
         }
 
@@ -806,7 +821,7 @@ namespace SharpRTSPServer
 
                 // Send to the IP address of the Client
                 // Send to the UDP Port the Client gave us in the SETUP command
-                stream.RtpChannel.WriteToControlPort(rtcpSenderReport);
+                stream.RtpChannel?.WriteToControlPort(rtcpSenderReport);
             }
             catch (Exception e)
             {
@@ -946,7 +961,7 @@ namespace SharpRTSPServer
 
                     if (stream.MustSendRtcpPacket)
                     {
-                        if (!SendRTCP(rtpTimestamp, connection, stream))
+                        if (!SendRTCPSenderReport(rtpTimestamp, connection, stream))
                         {
                             RemoveSession(connection);
                             continue;
@@ -980,6 +995,47 @@ namespace SharpRTSPServer
             }
 
             this.StreamSources.Add(streamSource);
+        }
+
+        public void RemoveStreamSource(RTSPStreamSource streamSource)
+        {
+            if (streamSource == null)
+                throw new ArgumentNullException(nameof(streamSource));
+
+            lock (_connectionList)
+            {
+                if (!this.StreamSources.Contains(streamSource))
+                {
+                    return;
+                }
+
+                if (streamSource.VideoTrack != null)
+                {
+                    streamSource.VideoTrack.Sink = null;
+                }
+
+                if (streamSource.AudioTrack != null)
+                {
+                    streamSource.AudioTrack.Sink = null;
+                }
+
+                foreach (RTSPConnection connection in streamSource.ConnectionList.ToArray())
+                {
+                    foreach (var stream in connection.Streams)
+                    {
+                        SendRTCPBye(connection, stream);
+                    }
+
+                    RemoveSession(connection);
+                }
+
+                this.StreamSources.Remove(streamSource);
+            }
+        }
+
+        public ReadOnlyCollection<RTSPStreamSource> GetStreamSources()
+        {
+            return new ReadOnlyCollection<RTSPStreamSource>(this.StreamSources);
         }
 
         #endregion // Tracks

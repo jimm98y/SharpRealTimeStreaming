@@ -21,6 +21,7 @@ internal class RTSPServerWorker : BackgroundService
     {
         public string FilePath { get; set; }
         public string StreamID { get; set; }
+        public bool Shuffle { get; set; }
     }
 
     public class MediaFileReader : IDisposable
@@ -29,7 +30,7 @@ internal class RTSPServerWorker : BackgroundService
         public string StreamID { get; }
         public int VideoRtpBaseTime { get; set; }
         public Timer VideoTimer { get; set; }
-        public int AaudioRtpBaseTime { get; set; }
+        public int AudioRtpBaseTime { get; set; }
         public Timer AudioTimer { get; set; }
         public IsoStream IsoStream { get; set; }
 
@@ -92,6 +93,7 @@ internal class RTSPServerWorker : BackgroundService
         _server = new RTSPServer(port, userName, password, _loggerFactory);
         List<MediaFileReader> mediaFileReaders = new List<MediaFileReader>();
 
+
         foreach (var mediaFile in mediaFiles)
         {
             var mediaFileReader = new MediaFileReader(mediaFile.StreamID);
@@ -99,6 +101,8 @@ internal class RTSPServerWorker : BackgroundService
             ITrack rtspAudioTrack = null;
 
             string fileName = mediaFile.FilePath;
+            RTSPStreamSource streamSource = null;
+
             if (Path.GetExtension(fileName).ToLowerInvariant() == ".mp4")
             {
                 Stream inputFileStream = new BufferedStream(new FileStream(fileName, FileMode.Open, FileAccess.Read, FileShare.Read));
@@ -166,11 +170,21 @@ internal class RTSPServerWorker : BackgroundService
 
                                 if (sample == null)
                                 {
-                                    foreach (var track in inputReader.Tracks)
+                                    if (mediaFile.Shuffle)
                                     {
-                                        track.Value.SampleIndex = 0;
-                                        track.Value.FragmentIndex = 0;
+                                        foreach (var track in inputReader.Tracks)
+                                        {
+                                            track.Value.SampleIndex = 0;
+                                            track.Value.FragmentIndex = 0;
+                                        }
                                     }
+                                    else
+                                    {
+                                        // end streaming
+                                        mediaFileReader.VideoTimer.Stop();
+                                        _server.RemoveStreamSource(streamSource);
+                                    }
+
                                     return;
                                 }
 
@@ -202,7 +216,7 @@ internal class RTSPServerWorker : BackgroundService
                             continue;
                         }
 
-                        mediaFileReader.AaudioRtpBaseTime = Random.Shared.Next();
+                        mediaFileReader.AudioRtpBaseTime = Random.Shared.Next();
                         mediaFileReader.AudioTimer = new Timer(inputTrack.DefaultSampleDuration * 1000d / inputTrack.Timescale);
                         mediaFileReader.AudioTimer.Elapsed += (s, e) =>
                         {
@@ -212,16 +226,26 @@ internal class RTSPServerWorker : BackgroundService
 
                                 if (sample == null)
                                 {
-                                    foreach (var track in inputReader.Tracks)
+                                    if (mediaFile.Shuffle)
                                     {
-                                        track.Value.SampleIndex = 0;
-                                        track.Value.FragmentIndex = 0;
+                                        foreach (var track in inputReader.Tracks)
+                                        {
+                                            track.Value.SampleIndex = 0;
+                                            track.Value.FragmentIndex = 0;
+                                        }
                                     }
+                                    else
+                                    {
+                                        // end streaming
+                                        mediaFileReader.AudioTimer.Stop();
+                                        _server.RemoveStreamSource(streamSource);
+                                    }
+                                    
                                     return;
                                 }
 
                                 IEnumerable<byte[]> units = inputReader.ParseSample(inputTrack.TrackID, sample.Data);
-                                rtspAudioTrack.FeedInRawSamples((uint)unchecked(mediaFileReader.AaudioRtpBaseTime + sample.PTS), units.ToList());
+                                rtspAudioTrack.FeedInRawSamples((uint)unchecked(mediaFileReader.AudioRtpBaseTime + sample.PTS), units.ToList());
                             }
                         };
 
@@ -240,10 +264,19 @@ internal class RTSPServerWorker : BackgroundService
                 mediaFileReader.VideoTimer.Elapsed += (s, e) =>
                 {
                     rtspVideoTrack.FeedInRawSamples((uint)jpgFileIndex * 1000, new List<byte[]> { File.ReadAllBytes(jpgFiles[jpgFileIndex++ % jpgFiles.Length]) });
+
+                    if(jpgFileIndex % jpgFiles.Length == 0)
+                    {
+                        if(!mediaFile.Shuffle)
+                        {
+                            mediaFileReader.VideoTimer.Stop();
+                            _server.RemoveStreamSource(streamSource);
+                        }
+                    }
                 };
             }
 
-            var streamSource = new RTSPStreamSource(mediaFile.StreamID, rtspVideoTrack, rtspAudioTrack);
+            streamSource = new RTSPStreamSource(mediaFile.StreamID, rtspVideoTrack, rtspAudioTrack);
             _server.AddStreamSource(streamSource);
 
             mediaFileReaders.Add(mediaFileReader);

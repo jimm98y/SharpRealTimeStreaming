@@ -23,6 +23,7 @@ namespace SrtpServerSample
         {
             public string FilePath { get; set; }
             public string StreamID { get; set; }
+            public bool Shuffle { get; set; }
         }
 
         public class MediaFileReader : IDisposable
@@ -31,7 +32,7 @@ namespace SrtpServerSample
             public string StreamID { get; }
             public int VideoRtpBaseTime { get; set; }
             public Timer VideoTimer { get; set; }
-            public int AaudioRtpBaseTime { get; set; }
+            public int AudioRtpBaseTime { get; set; }
             public Timer AudioTimer { get; set; }
             public IsoStream IsoStream { get; set; }
 
@@ -109,7 +110,9 @@ namespace SrtpServerSample
                 ITrack rtspVideoTrack = null;
                 ITrack rtspAudioTrack = null;
 
-                string fileName = mediaFile.FilePath;
+                string fileName = mediaFile.FilePath; 
+                RTSPStreamSource streamSource = null;
+
                 if (Path.GetExtension(fileName).ToLowerInvariant() == ".mp4")
                 {
                     Stream inputFileStream = new BufferedStream(new FileStream(fileName, FileMode.Open, FileAccess.Read, FileShare.Read));
@@ -167,11 +170,21 @@ namespace SrtpServerSample
 
                                     if (sample == null)
                                     {
-                                        foreach (var track in inputReader.Tracks)
+                                        if (mediaFile.Shuffle)
                                         {
-                                            track.Value.SampleIndex = 0;
-                                            track.Value.FragmentIndex = 0;
+                                            foreach (var track in inputReader.Tracks)
+                                            {
+                                                track.Value.SampleIndex = 0;
+                                                track.Value.FragmentIndex = 0;
+                                            }
                                         }
+                                        else
+                                        {
+                                            // end streaming
+                                            mediaFileReader.VideoTimer.Stop();
+                                            _server.RemoveStreamSource(streamSource);
+                                        }
+
                                         return;
                                     }
 
@@ -201,7 +214,7 @@ namespace SrtpServerSample
                                 continue;
                             }
 
-                            mediaFileReader.AaudioRtpBaseTime = Random.Shared.Next();
+                            mediaFileReader.AudioRtpBaseTime = Random.Shared.Next();
                             mediaFileReader.AudioTimer = new Timer(inputTrack.DefaultSampleDuration * 1000d / inputTrack.Timescale);
                             mediaFileReader.AudioTimer.Elapsed += (s, e) =>
                             {
@@ -211,16 +224,26 @@ namespace SrtpServerSample
 
                                     if (sample == null)
                                     {
-                                        foreach (var track in inputReader.Tracks)
+                                        if (mediaFile.Shuffle)
                                         {
-                                            track.Value.SampleIndex = 0;
-                                            track.Value.FragmentIndex = 0;
+                                            foreach (var track in inputReader.Tracks)
+                                            {
+                                                track.Value.SampleIndex = 0;
+                                                track.Value.FragmentIndex = 0;
+                                            }
                                         }
+                                        else
+                                        {
+                                            // end streaming
+                                            mediaFileReader.AudioTimer.Stop();
+                                            _server.RemoveStreamSource(streamSource);
+                                        }
+
                                         return;
                                     }
 
                                     IEnumerable<byte[]> units = inputReader.ParseSample(inputTrack.TrackID, sample.Data);
-                                    rtspAudioTrack.FeedInRawSamples((uint)unchecked(mediaFileReader.AaudioRtpBaseTime + sample.PTS), units.ToList());
+                                    rtspAudioTrack.FeedInRawSamples((uint)unchecked(mediaFileReader.AudioRtpBaseTime + sample.PTS), units.ToList());
                                 }
                             };
 
@@ -239,6 +262,15 @@ namespace SrtpServerSample
                     mediaFileReader.VideoTimer.Elapsed += (s, e) =>
                     {
                         rtspVideoTrack.FeedInRawSamples((uint)jpgFileIndex * 1000, new List<byte[]> { File.ReadAllBytes(jpgFiles[jpgFileIndex++ % jpgFiles.Length]) });
+
+                        if (jpgFileIndex % jpgFiles.Length == 0)
+                        {
+                            if (!mediaFile.Shuffle)
+                            {
+                                mediaFileReader.VideoTimer.Stop();
+                                _server.RemoveStreamSource(streamSource);
+                            }
+                        }
                     };
                 }
 
@@ -253,7 +285,7 @@ namespace SrtpServerSample
                     rtspAudioTrack.RtpProfile = RtpProfiles.SAVP;
                 }
 
-                var streamSource = new RTSPStreamSource(mediaFile.StreamID, rtspVideoTrack, rtspAudioTrack);
+                streamSource = new RTSPStreamSource(mediaFile.StreamID, rtspVideoTrack, rtspAudioTrack);
                 _server.AddStreamSource(streamSource);
 
                 mediaFileReaders.Add(mediaFileReader);
