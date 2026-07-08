@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Buffers;
 using System.Buffers.Binary;
 using System.Collections.Generic;
@@ -33,7 +33,7 @@ namespace SharpRTSPServer
         }
 
         /// <inheritdoc/>
-        public override (List<Memory<byte>>, List<IMemoryOwner<byte>>) CreateRtpPackets(List<byte[]> samples, uint rtpTimestamp)
+        public override (List<Memory<byte>>, List<IMemoryOwner<byte>>) CreateRtpPackets(List<ReadOnlyMemory<byte>> samples, uint rtpTimestamp)
         {
             if (samples.Count != 1)
             {
@@ -52,7 +52,7 @@ namespace SharpRTSPServer
                                                  //const ushort SosMarker = 0xFFDA; // SOS - Start of Scan marker
                 const ushort EoiMarker = 0xFFD9; // EOI - End of Image marker
 
-                var jpegImage = samples[i].AsSpan();
+                var jpegImage = samples[i].Span;
 
                 var header = BinaryPrimitives.ReadUInt16BigEndian(jpegImage);
                 if (header != SoiMarker)
@@ -72,7 +72,7 @@ namespace SharpRTSPServer
                 var firstQuantizationtable = ReadOnlySpan<byte>.Empty;
                 var secondQuantizationtable = ReadOnlySpan<byte>.Empty;
 
-                Span<byte> reader;
+                ReadOnlySpan<byte> reader;
                 var jpegInfo = ParseJpeg(jpegImage, out firstQuantizationtable, out secondQuantizationtable, out reader);
 
                 // Build a list of 1 or more RTP packets
@@ -225,11 +225,11 @@ namespace SharpRTSPServer
         /// <exception cref="NotSupportedException">Thrown when JPEG image passed to this function does not meet the criteria for being used in RTP without re-encoding. 
         /// The criteria are: image dimensions must be less than or equal to 2040 x 2040 pixels and chroma subsampling must be set to 4:2:0 or 4:2:2.
         /// </exception>
-        public static (int width, int height, int bpp, byte type) ParseJpeg(Span<byte> jpegImage, out ReadOnlySpan<byte> firstQuantizationTable, out ReadOnlySpan<byte> secondQuantizationTable, out Span<byte> imageData)
+        public static (int width, int height, int bpp, byte type) ParseJpeg(ReadOnlySpan<byte> jpegImage, out ReadOnlySpan<byte> firstQuantizationTable, out ReadOnlySpan<byte> secondQuantizationTable, out ReadOnlySpan<byte> imageData)
         {
             firstQuantizationTable = ReadOnlySpan<byte>.Empty;
             secondQuantizationTable = ReadOnlySpan<byte>.Empty;
-            Span<byte> br = jpegImage;
+            ReadOnlySpan<byte> br = jpegImage;
             bool isDriPresent = false;
 
             // JPG magic bytes 

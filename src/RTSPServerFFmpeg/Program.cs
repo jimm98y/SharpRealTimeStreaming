@@ -1,4 +1,4 @@
-﻿using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Configuration;
 using SharpRTSPServer;
 using System;
 using System.Collections.Generic;
@@ -132,7 +132,7 @@ Task RunUdpClient(ProxyTrack track, Uri uri, CancellationToken cancellationToken
                     {
                         byte[] rtp = udpClient.Receive(ref remoteEndPoint);
                         uint rtpTimestamp = RTPPacketUtil.ReadTS(rtp);
-                        track.FeedInRawSamples(rtpTimestamp, new List<byte[]>() { rtp });
+                        track.FeedInRawSamples(rtpTimestamp, new List<ReadOnlyMemory<byte>>() { rtp });
                     }
                     catch (Exception e)
                     {

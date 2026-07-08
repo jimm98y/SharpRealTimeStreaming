@@ -1,4 +1,4 @@
-﻿using Rtsp;
+using Rtsp;
 using System;
 
 namespace SharpRTSPServer

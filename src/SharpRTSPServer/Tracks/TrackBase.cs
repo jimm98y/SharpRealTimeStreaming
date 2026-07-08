@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Buffers;
 using System.Collections.Generic;
 using System.Text;
@@ -17,7 +17,7 @@ namespace SharpRTSPServer
         /// <summary>
         /// SSRC for this track. Each track streamed by this server shall have a unique SSRC.
         /// </summary>
-        public uint SSRC { get; set; } = (uint)_rand.Next(0, int.MaxValue); 
+        public uint SSRC { get; set; } = (uint)_rand.Next(0, int.MaxValue);
 
         public IRtpSender Sink { get; set; } = null;
 
@@ -36,9 +36,10 @@ namespace SharpRTSPServer
 
         public abstract StringBuilder BuildSDP(StringBuilder sdp);
 
-        public abstract (List<Memory<byte>>, List<IMemoryOwner<byte>>) CreateRtpPackets(List<byte[]> samples, uint rtpTimestamp);
+        public abstract (List<Memory<byte>>, List<IMemoryOwner<byte>>) CreateRtpPackets(List<ReadOnlyMemory<byte>> samples, uint rtpTimestamp);
 
-        public virtual void FeedInRawSamples(uint rtpTimestamp, List<byte[]> samples)
+
+        public virtual void FeedInRawSamples(uint rtpTimestamp, List<ReadOnlyMemory<byte>> samples)
         {
             var sink = Sink;
 

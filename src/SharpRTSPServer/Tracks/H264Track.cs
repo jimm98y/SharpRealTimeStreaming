@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Buffers;
 using System.Collections.Generic;
 using System.Text;
@@ -161,7 +161,7 @@ namespace SharpRTSPServer
         /// <param name="samples">An array of H264 NALUs.</param>
         /// <param name="rtpTimestamp">RTP timestamp in the timescale of the track.</param>
         /// <returns>RTP packets.</returns>
-        public override (List<Memory<byte>>, List<IMemoryOwner<byte>>) CreateRtpPackets(List<byte[]> samples, uint rtpTimestamp)
+        public override (List<Memory<byte>>, List<IMemoryOwner<byte>>) CreateRtpPackets(List<ReadOnlyMemory<byte>> samples, uint rtpTimestamp)
         {
             List<Memory<byte>> rtpPackets = new List<Memory<byte>>();
             List<IMemoryOwner<byte>> memoryOwners = new List<IMemoryOwner<byte>>();
@@ -197,7 +197,7 @@ namespace SharpRTSPServer
                     int endBit = 0;
 
                     // consume first byte of the raw_nal. It is used in the FU header
-                    byte firstByte = rawNal[0];
+                    byte firstByte = rawNal.Span[0];
                     nalPointer++;
                     dataRemaining--;
 
@@ -243,7 +243,7 @@ namespace SharpRTSPServer
                         rtpPacket.Span[12] = (byte)((fBit << 7) + (nri << 5) + type);
                         rtpPacket.Span[13] = (byte)((startBit << 7) + (endBit << 6) + (0 << 5) + (firstByte & 0x1F));
 
-                        rawNal.AsSpan(nalPointer, payloadSize).CopyTo(rtpPacket.Slice(14).Span);
+                        rawNal.Span.Slice(nalPointer, payloadSize).CopyTo(rtpPacket.Slice(14).Span);
 
                         nalPointer += payloadSize;
                         dataRemaining -= payloadSize;

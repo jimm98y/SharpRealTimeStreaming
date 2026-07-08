@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Buffers;
 using System.Collections.Generic;
 using System.Text;
@@ -56,8 +56,9 @@ namespace SharpRTSPServer
         /// <param name="samples">An array of samples.</param>
         /// <param name="rtpTimestamp">RTP timestamp in the timescale of the track.</param>
         /// <returns>RTP packets.</returns>
-        (List<Memory<byte>>, List<IMemoryOwner<byte>>) CreateRtpPackets(List<byte[]> samples, uint rtpTimestamp);
+        (List<Memory<byte>>, List<IMemoryOwner<byte>>) CreateRtpPackets(List<ReadOnlyMemory<byte>> samples, uint rtpTimestamp);
 
-        void FeedInRawSamples(uint rtpTimestamp, List<byte[]> samples);
+        void FeedInRawSamples(uint rtpTimestamp, List<ReadOnlyMemory<byte>> samples);
+
     }
 }
