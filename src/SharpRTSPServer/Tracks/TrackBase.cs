@@ -35,27 +35,6 @@ namespace SharpRTSPServer
         public abstract bool IsReady { get; }
 
         public abstract StringBuilder BuildSDP(StringBuilder sdp);
-        private readonly object _idrPacketLock = new();
-        private (List< ReadOnlyMemory<byte>>,uint) _idrPacket;
-
-        public (List<ReadOnlyMemory<byte>>, uint) IDRPacket
-        {
-            get
-            {
-                lock (_idrPacketLock)
-                {
-                    return _idrPacket;
-                }
-            }
-            set
-            {
-                lock (_idrPacketLock)
-                {
-                    _idrPacket = value;
-                }
-            }
-        }
-
 
         public abstract (List<Memory<byte>>, List<IMemoryOwner<byte>>) CreateRtpPackets(List<ReadOnlyMemory<byte>> samples, uint rtpTimestamp);
 

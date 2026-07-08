@@ -60,6 +60,11 @@ namespace SharpRTSPServer
         private readonly NetworkCredential _credentials;
         private readonly Authentication _authentication;
 
+        /// <summary>
+        /// Event raised when an RTSP message is received. Point of extensibility.
+        /// </summary>
+        public event EventHandler<RtspMessageEventArgs> OnRtspMessage;
+
         public string SrtpCryptoSuite { get; set; } = null;
 
         private List<RTSPStreamSource> StreamSources = new List<RTSPStreamSource>();
@@ -325,12 +330,15 @@ namespace SharpRTSPServer
             {
                 case RtspRequestOptions optionsMessage:
                     listener.SendMessage(message.CreateResponse());
+                    OnRtspMessage?.Invoke(sender, new RtspMessageEventArgs(message));
                     return;
                 case RtspRequestDescribe describeMessage:
                     HandleDescribe(listener, message);
+                    OnRtspMessage?.Invoke(sender, new RtspMessageEventArgs(message));
                     return;
                 case RtspRequestSetup setupMessage:
                     HandleSetup(listener, setupMessage);
+                    OnRtspMessage?.Invoke(sender, new RtspMessageEventArgs(message));
                     return;
             }
 
@@ -367,20 +375,8 @@ namespace SharpRTSPServer
 
                         // Allow video and audio to go to this client
                         connection.Play = true;
-                        TrackBase track = (TrackBase)StreamSources.First(s => s.ConnectionList.Contains(connection)).VideoTrack;
-                        if (track.IDRPacket.Item1 != null && track.IDRPacket.Item1.Count > 0)
-                        {
-                            (List<Memory<byte>> rtpPackets, List<IMemoryOwner<byte>> memoryOwners) = track.CreateRtpPackets(track.IDRPacket.Item1, track.IDRPacket.Item2);
-                            foreach (Memory<byte> packet in rtpPackets)
-                            {
-                                connection.Video.RtpChannel.WriteToDataPort(packet.Span);
-                            }
-                            foreach (var owner in memoryOwners)
-                            {
-                                owner.Dispose();
-                            }
-                        }
-                        
+
+                        OnRtspMessage?.Invoke(sender, new RtspMessageEventArgs(message, connection));
                     }
                     return;
                 case RtspRequestPause pauseMessage:
@@ -388,6 +384,7 @@ namespace SharpRTSPServer
                         connection.Play = false;
                         RtspResponse pauseResponse = message.CreateResponse();
                         listener.SendMessage(pauseResponse);
+                        OnRtspMessage?.Invoke(sender, new RtspMessageEventArgs(message, connection));
                     }
                     return;
                 case RtspRequestGetParameter getParameterMessage:
@@ -395,6 +392,7 @@ namespace SharpRTSPServer
                         // Create the reponse to GET_PARAMETER
                         RtspResponse getParameterResponse = message.CreateResponse();
                         listener.SendMessage(getParameterResponse);
+                        OnRtspMessage?.Invoke(sender, new RtspMessageEventArgs(message, connection));
                     }
                     return;
                 case RtspRequestTeardown teardownMessage:
@@ -404,6 +402,7 @@ namespace SharpRTSPServer
                             RemoveSession(connection);
                             listener.Dispose();
                         }
+                        OnRtspMessage?.Invoke(sender, new RtspMessageEventArgs(message, connection));
                     }
                     return;
             }

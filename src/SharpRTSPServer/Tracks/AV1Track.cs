@@ -1,7 +1,6 @@
 using System;
 using System.Buffers;
 using System.Collections.Generic;
-using System.Linq;
 using System.Text;
 
 namespace SharpRTSPServer
@@ -99,7 +98,11 @@ namespace SharpRTSPServer
 
             for (int x = 0; x < samples.Count; x++)
             {
-                var rawObu =new Span<byte>( samples[x].ToArray());
+                var owner = MemoryPool<byte>.Shared.Rent(samples[x].Length);
+                memoryOwners.Add(owner);
+                var rawObu = owner.Memory.Slice(0, samples[x].Length);
+                samples[x].CopyTo(rawObu);
+
                 bool lastObu = false;
                 if (x == samples.Count - 1)
                 {
@@ -110,7 +113,7 @@ namespace SharpRTSPServer
                 packetMTU += -8 - 20 - 16; // -8 for UDP header, -20 for IP header, -16 normal RTP header len. ** LESS RTP EXTENSIONS !!!
 
                 int obuPointer = 0;
-                int obuHeader = rawObu[0];
+                int obuHeader = rawObu.Span[0];
                 int obuHeaderLen = 1;
                 int obuType = (obuHeader & 0x78) >> 3;
 
@@ -133,9 +136,12 @@ namespace SharpRTSPServer
                 // the obu_has_size_field flag in the OBU header.To minimize overhead, the obu_has_size_field flag SHOULD be set to zero in all OBUs.
                 if ((obuHeader & 0x02) == 0x02)
                 {
-                    int len = ReadLeb128(rawObu, obuHeaderLen, out _);
-                    rawObu = rawObu.Slice(0, obuHeaderLen).ToArray().Concat(rawObu.Slice(obuHeaderLen + len).ToArray()).ToArray();
-                    rawObu[0] = (byte)(obuHeader & 0xFD);
+                    int len = ReadLeb128(rawObu.Span, obuHeaderLen, out _);
+
+                    rawObu.Slice(obuHeaderLen + len).CopyTo(rawObu.Slice(obuHeaderLen));
+                    rawObu = rawObu.Slice(0, rawObu.Length - len);
+
+                    rawObu.Span[0] = (byte)(obuHeader & 0xFD);
                 }               
 
                 int dataRemaining = rawObu.Length;
@@ -146,9 +152,9 @@ namespace SharpRTSPServer
 
                     var aggregationHeaderLen = 1;
                     var destSize = 12 + aggregationHeaderLen + payloadSize;
-                    var owner = MemoryPool<byte>.Shared.Rent(destSize);
-                    memoryOwners.Add(owner);
-                    var rtpPacket = owner.Memory.Slice(0, destSize);
+                    var lowner = MemoryPool<byte>.Shared.Rent(destSize);
+                    memoryOwners.Add(lowner);
+                    var rtpPacket = lowner.Memory.Slice(0, destSize);
 
                     // RTP Packet Header
                     // 0 - Version, P, X, CC, M, PT and Sequence Number
@@ -192,7 +198,7 @@ namespace SharpRTSPServer
                     // because w bit is set to 1, we don't need any size
 
                     // payload
-                    rawObu.Slice(obuPointer, payloadSize).CopyTo(rtpPacket.Slice(13).Span);
+                    rawObu.Slice(obuPointer, payloadSize).CopyTo(rtpPacket.Slice(13));
 
                     obuPointer += payloadSize;
                     dataRemaining -= payloadSize;
