@@ -1,4 +1,4 @@
-﻿using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging;
 using Rtsp;
 using Rtsp.Messages;
 using Rtsp.Onvif;
@@ -57,7 +57,7 @@ namespace SharpRTSPClient
 
         public bool AutoPlay { get; set; } = true;
 
-        private enum RtspStatus { WaitingToConnect, Connecting, ConnectFailed, Connected };
+        public enum RtspStatus { WaitingToConnect, Connecting, ConnectFailed, Connected };
 
         private IRtspTransport _rtspSocket; // RTSP connection
         private RtspStatus _rtspSocketStatus = RtspStatus.WaitingToConnect;
@@ -354,6 +354,14 @@ namespace SharpRTSPClient
         }
 
         /// <summary>
+        /// Returns the current RTSP status.
+        /// </summary>
+        /// <returns>The current RTSP status.</returns>
+        public RtspStatus GetRtspStatus()
+        {
+            return _rtspSocketStatus;
+        }
+        /// <summary>
         /// Pause.
         /// </summary>
         /// <exception cref="InvalidOperationException"></exception>
@@ -451,6 +459,7 @@ namespace SharpRTSPClient
         public void Stop()
         {
             StopClient();
+            _rtspSocketStatus = RtspStatus.WaitingToConnect;
         }
 
         private void StopClient()
