@@ -1,4 +1,4 @@
-using Microsoft.Extensions.Logging;
+﻿using Microsoft.Extensions.Logging;
 using Rtsp;
 using Rtsp.Messages;
 using Rtsp.Onvif;
@@ -60,7 +60,7 @@ namespace SharpRTSPClient
         public enum RtspStatus { WaitingToConnect, Connecting, ConnectFailed, Connected };
 
         private IRtspTransport _rtspSocket; // RTSP connection
-        private RtspStatus _rtspSocketStatus = RtspStatus.WaitingToConnect;
+        private volatile RtspStatus _rtspSocketStatus = RtspStatus.WaitingToConnect;
         
         // this wraps around a the RTSP tcpSocket stream
         private RtspListener _rtspClient;
@@ -361,6 +361,7 @@ namespace SharpRTSPClient
         {
             return _rtspSocketStatus;
         }
+
         /// <summary>
         /// Pause.
         /// </summary>
@@ -459,7 +460,6 @@ namespace SharpRTSPClient
         public void Stop()
         {
             StopClient();
-            _rtspSocketStatus = RtspStatus.WaitingToConnect;
         }
 
         private void StopClient()
@@ -478,6 +478,8 @@ namespace SharpRTSPClient
 
         private void TeardownClient()
         {
+            _rtspSocketStatus = RtspStatus.WaitingToConnect;
+
             // Stop the keepalive timer
             var keepaliveTimer = _keepaliveTimer;
             if (keepaliveTimer != null)
