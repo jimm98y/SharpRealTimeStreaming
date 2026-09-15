@@ -57,6 +57,59 @@ namespace SharpRTSPClient
 
         public bool AutoPlay { get; set; } = true;
 
+        /// <summary>
+        /// Default value of <see cref="RtpPortRangeStart"/>.
+        /// </summary>
+        /// <remarks>
+        /// Deliberately above the range SharpRTSPServer allocates from, so a client and a server
+        /// sharing a machine do not compete for the same ports.
+        /// </remarks>
+        public const int DEFAULT_RTP_PORT_RANGE_START = 51000;
+
+        /// <summary>
+        /// Default value of <see cref="RtpPortRangeEnd"/>. 500 pairs.
+        /// </summary>
+        public const int DEFAULT_RTP_PORT_RANGE_END = 52000;
+
+        /// <summary>
+        /// First port of the range the UDP transports are allocated from.
+        /// Change it with <see cref="SetRtpPortRange"/>.
+        /// </summary>
+        public int RtpPortRangeStart { get; private set; } = DEFAULT_RTP_PORT_RANGE_START;
+
+        /// <summary>
+        /// One past the last port of the range the UDP transports are allocated from.
+        /// Change it with <see cref="SetRtpPortRange"/>.
+        /// </summary>
+        public int RtpPortRangeEnd { get; private set; } = DEFAULT_RTP_PORT_RANGE_END;
+
+        /// <summary>
+        /// Sets the range of local ports the video and audio UDP transports are allocated from. Each
+        /// takes one consecutive RTP/RTCP pair, so a connection takes two pairs.
+        /// </summary>
+        /// <param name="firstPort">First port of the range, inclusive.</param>
+        /// <param name="lastPort">Last port of the range, exclusive.</param>
+        /// <remarks>
+        /// Set this before <see cref="Connect(string, RTPTransport, string, string, MediaRequest, bool, RemoteCertificateValidationCallback, bool)"/>.
+        /// Keep it clear of the range an RTSP server on the same machine uses - they would otherwise
+        /// take ports from each other.
+        /// </remarks>
+        public void SetRtpPortRange(int firstPort, int lastPort)
+        {
+            if (firstPort < IPEndPoint.MinPort || firstPort > IPEndPoint.MaxPort)
+                throw new ArgumentOutOfRangeException(nameof(firstPort), firstPort, "The first port is not a port number.");
+
+            if (lastPort < IPEndPoint.MinPort || lastPort > IPEndPoint.MaxPort)
+                throw new ArgumentOutOfRangeException(nameof(lastPort), lastPort, "The last port is not a port number.");
+
+            // the video and audio transports take a pair each, so the range has to hold two
+            if (lastPort - firstPort < 4)
+                throw new ArgumentOutOfRangeException(nameof(lastPort), lastPort, "The port range has to hold at least two RTP/RTCP pairs.");
+
+            RtpPortRangeStart = firstPort;
+            RtpPortRangeEnd = lastPort;
+        }
+
         public enum RtspStatus { WaitingToConnect, Connecting, ConnectFailed, Connected };
 
         private IRtspTransport _rtspSocket; // RTSP connection
@@ -286,9 +339,9 @@ namespace SharpRTSPClient
 
             if (rtpTransport == RTPTransport.UDP)
             {
-                // give a range of 500 pairs (1000 addresses) to try incase some address are in use
-                _videoRtpTransport = new UDPSocket(50000, 51000);
-                _audioRtpTransport = new UDPSocket(50000, 51000);
+                // the range holds one RTP/RTCP pair per transport, see SetRtpPortRange
+                _videoRtpTransport = new UDPSocket(RtpPortRangeStart, RtpPortRangeEnd);
+                _audioRtpTransport = new UDPSocket(RtpPortRangeStart, RtpPortRangeEnd);
             }
 
             if (rtpTransport == RTPTransport.TCP)

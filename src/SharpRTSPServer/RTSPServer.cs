@@ -57,6 +57,20 @@ namespace SharpRTSPServer
         public const int DEFAULT_MAX_CONNECTIONS = 100;
 
         /// <summary>
+        /// Default value of <see cref="RtpPortRangeStart"/>.
+        /// </summary>
+        public const int DEFAULT_RTP_PORT_RANGE_START = 50000;
+
+        /// <summary>
+        /// Default value of <see cref="RtpPortRangeEnd"/>.
+        /// </summary>
+        /// <remarks>
+        /// 500 pairs. The range is deliberately below the one SharpRTSPClient allocates from, so a
+        /// client and a server sharing a machine do not compete for the same ports.
+        /// </remarks>
+        public const int DEFAULT_RTP_PORT_RANGE_END = 51000;
+
+        /// <summary>
         /// Session name.
         /// </summary>
         public string SessionName { get; set; } = "SharpRTSP";
@@ -89,6 +103,52 @@ namespace SharpRTSPServer
         /// up all of the server's memory and UDP ports. Set to zero for no limit.
         /// </summary>
         public int MaxConnections { get; set; } = DEFAULT_MAX_CONNECTIONS;
+
+        /// <summary>
+        /// First port of the range a UDP SETUP allocates its RTP/RTCP pair from.
+        /// Change it with <see cref="SetRtpPortRange"/>.
+        /// </summary>
+        public int RtpPortRangeStart { get; private set; } = DEFAULT_RTP_PORT_RANGE_START;
+
+        /// <summary>
+        /// One past the last port of the range a UDP SETUP allocates its RTP/RTCP pair from.
+        /// Change it with <see cref="SetRtpPortRange"/>.
+        /// </summary>
+        public int RtpPortRangeEnd { get; private set; } = DEFAULT_RTP_PORT_RANGE_END;
+
+        /// <summary>
+        /// Sets the range of local ports a UDP SETUP allocates its RTP/RTCP pair from. Each SETUP
+        /// takes one consecutive pair, so the range holds (<paramref name="lastPort"/> -
+        /// <paramref name="firstPort"/>) / 2 simultaneous UDP sessions. Once they are all taken,
+        /// SETUP answers 461 and the client falls back to a TCP transport.
+        /// </summary>
+        /// <param name="firstPort">First port of the range, inclusive.</param>
+        /// <param name="lastPort">Last port of the range, exclusive.</param>
+        /// <remarks>
+        /// Set this before <see cref="StartListen"/>. Open the range on any firewall or NAT in front
+        /// of the server, and keep it clear of the range an RTSP client on the same machine uses -
+        /// they would otherwise take ports from each other.
+        /// </remarks>
+        public void SetRtpPortRange(int firstPort, int lastPort)
+        {
+            ValidateRtpPortRange(firstPort, lastPort);
+
+            RtpPortRangeStart = firstPort;
+            RtpPortRangeEnd = lastPort;
+        }
+
+        internal static void ValidateRtpPortRange(int firstPort, int lastPort)
+        {
+            if (firstPort < IPEndPoint.MinPort || firstPort > IPEndPoint.MaxPort)
+                throw new ArgumentOutOfRangeException(nameof(firstPort), firstPort, "The first port is not a port number.");
+
+            if (lastPort < IPEndPoint.MinPort || lastPort > IPEndPoint.MaxPort)
+                throw new ArgumentOutOfRangeException(nameof(lastPort), lastPort, "The last port is not a port number.");
+
+            // an RTP/RTCP pair is two consecutive ports, so a range narrower than that holds nothing
+            if (lastPort - firstPort < 2)
+                throw new ArgumentOutOfRangeException(nameof(lastPort), lastPort, "The port range has to hold at least one RTP/RTCP pair.");
+        }
 
         /// <summary>
         /// How clients are challenged to authenticate. <see cref="RtspAuthenticationScheme.Digest"/>
@@ -707,12 +767,17 @@ namespace SharpRTSPServer
                 UDPSocket udpPair;
                 try
                 {
-                    udpPair = new UDPSocket(50000, 51000); // give a range of 500 pairs (1000 addresses) to try incase some address are in use
+                    // the range holds one RTP/RTCP pair per UDP session, see SetRtpPortRange
+                    udpPair = new UDPSocket(RtpPortRangeStart, RtpPortRangeEnd);
                 }
-                catch (SocketException ex)
+                catch (Exception ex) when (ex is InvalidOperationException || ex is SocketException)
                 {
                     // Every pair in the range is taken. Tell the client rather than letting this
                     // surface as an unhandled error, and let it fall back to a TCP transport.
+                    // UDPSocket scans the range itself, swallowing the SocketException from each
+                    // port it cannot bind, and reports the range being used up as an
+                    // InvalidOperationException - so it is that, not a SocketException, that
+                    // normally arrives here.
                     _logger.LogError(ex, "Ran out of UDP ports for SETUP from {remoteEndPoint}", listener.RemoteEndPoint);
                     SendUnsupportedTransport(listener, setupMessage);
                     return;
