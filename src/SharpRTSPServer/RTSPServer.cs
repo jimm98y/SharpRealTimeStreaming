@@ -43,6 +43,11 @@ namespace SharpRTSPServer
 
         private const int RTSP_TIMEOUT = 60;         // 60 seconds
 
+        /// <summary>
+        /// An RTP/RTCP pair is two consecutive ports, RTP on the first.
+        /// </summary>
+        private const int PORTS_PER_RTP_PAIR = 2;
+
         private const int NONCE_BYTES = 16;          // 128 bits of entropy for the digest nonce
         private const int SESSION_ID_BYTES = 12;     // 96 bits of entropy for the RTSP session ID
 
@@ -79,6 +84,11 @@ namespace SharpRTSPServer
         private readonly IRtspListenSocket _serverListener;
         private readonly ILoggerFactory _loggerFactory;
         private readonly ILogger _logger;
+
+        // Where the next RTP/RTCP pair is looked for, see AllocateUdpPair. Read and advanced from the
+        // RTSP receive thread of every connection, so it is guarded.
+        private readonly object _rtpPortCursorLock = new object();
+        private int _rtpPortCursor = -1;
 
         private CancellationTokenSource _stopping;
         private Task _listenThread;
@@ -135,6 +145,11 @@ namespace SharpRTSPServer
 
             RtpPortRangeStart = firstPort;
             RtpPortRangeEnd = lastPort;
+
+            lock (_rtpPortCursorLock)
+            {
+                _rtpPortCursor = -1; // the old cursor means nothing in the new range
+            }
         }
 
         internal static void ValidateRtpPortRange(int firstPort, int lastPort)
@@ -767,8 +782,7 @@ namespace SharpRTSPServer
                 UDPSocket udpPair;
                 try
                 {
-                    // the range holds one RTP/RTCP pair per UDP session, see SetRtpPortRange
-                    udpPair = new UDPSocket(RtpPortRangeStart, RtpPortRangeEnd);
+                    udpPair = AllocateUdpPair();
                 }
                 catch (Exception ex) when (ex is InvalidOperationException || ex is SocketException)
                 {
@@ -1189,6 +1203,53 @@ namespace SharpRTSPServer
                     streamSource.ConnectionList.Remove(connection);
                 }
             }
+        }
+
+        /// <summary>
+        /// Takes the next free RTP/RTCP port pair out of the configured range.
+        /// </summary>
+        /// <remarks>
+        /// UDPSocket always restarts its scan at the port it is handed, so allocating from the start
+        /// of the range every time makes each SETUP fail a bind on every pair this server already
+        /// holds. Those failures are caught and retried, but each one is a first-chance
+        /// SocketException ("Only one usage of each socket address ... is normally permitted"), so a
+        /// second SETUP on the same session reports one, a third two, and so on. Carrying a cursor
+        /// past the last pair handed out means the common case binds on the first try.
+        /// </remarks>
+        private UDPSocket AllocateUdpPair()
+        {
+            int cursor;
+            lock (_rtpPortCursorLock)
+            {
+                cursor = _rtpPortCursor;
+            }
+
+            UDPSocket udpPair = null;
+
+            if (cursor > RtpPortRangeStart && cursor + PORTS_PER_RTP_PAIR <= RtpPortRangeEnd)
+            {
+                try
+                {
+                    udpPair = new UDPSocket(cursor, RtpPortRangeEnd);
+                }
+                catch (Exception ex) when (ex is InvalidOperationException || ex is SocketException)
+                {
+                    // nothing free above the cursor - fall through and sweep the range from the start
+                }
+            }
+
+            // The first allocation, and every one after the cursor has run off the end or found the
+            // tail full. A full sweep is also what tells us the range is really exhausted, so this
+            // is the call whose failure the caller turns into a 461.
+            udpPair = udpPair ?? new UDPSocket(RtpPortRangeStart, RtpPortRangeEnd);
+
+            lock (_rtpPortCursorLock)
+            {
+                int next = udpPair.DataPort + PORTS_PER_RTP_PAIR;
+                _rtpPortCursor = next + PORTS_PER_RTP_PAIR <= RtpPortRangeEnd ? next : RtpPortRangeStart;
+            }
+
+            return udpPair;
         }
 
         /// <summary>

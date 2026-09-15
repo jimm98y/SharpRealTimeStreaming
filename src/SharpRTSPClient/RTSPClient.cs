@@ -11,6 +11,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Net;
+using System.Net.Sockets;
 using System.Net.Security;
 using System.Numerics;
 using System.Text;
@@ -108,6 +109,34 @@ namespace SharpRTSPClient
 
             RtpPortRangeStart = firstPort;
             RtpPortRangeEnd = lastPort;
+        }
+
+        /// <summary>
+        /// Takes an RTP/RTCP port pair, looking from <paramref name="firstPort"/> before falling back
+        /// to the whole range.
+        /// </summary>
+        /// <remarks>
+        /// UDPSocket always restarts its scan at the port it is handed, so allocating the audio
+        /// transport from the start of the range makes it fail a bind on the pair the video
+        /// transport just took. That failure is caught and retried, but it is a first-chance
+        /// SocketException ("Only one usage of each socket address ... is normally permitted") in
+        /// the debugger of anyone using the library.
+        /// </remarks>
+        private UDPSocket AllocateUdpPairAfter(int firstPort)
+        {
+            if (firstPort > RtpPortRangeStart && firstPort + 2 <= RtpPortRangeEnd)
+            {
+                try
+                {
+                    return new UDPSocket(firstPort, RtpPortRangeEnd);
+                }
+                catch (Exception ex) when (ex is InvalidOperationException || ex is SocketException)
+                {
+                    // nothing free above there - sweep the whole range instead
+                }
+            }
+
+            return new UDPSocket(RtpPortRangeStart, RtpPortRangeEnd);
         }
 
         public enum RtspStatus { WaitingToConnect, Connecting, ConnectFailed, Connected };
@@ -340,8 +369,9 @@ namespace SharpRTSPClient
             if (rtpTransport == RTPTransport.UDP)
             {
                 // the range holds one RTP/RTCP pair per transport, see SetRtpPortRange
-                _videoRtpTransport = new UDPSocket(RtpPortRangeStart, RtpPortRangeEnd);
-                _audioRtpTransport = new UDPSocket(RtpPortRangeStart, RtpPortRangeEnd);
+                var videoSocket = new UDPSocket(RtpPortRangeStart, RtpPortRangeEnd);
+                _videoRtpTransport = videoSocket;
+                _audioRtpTransport = AllocateUdpPairAfter(videoSocket.ControlPort + 1);
             }
 
             if (rtpTransport == RTPTransport.TCP)

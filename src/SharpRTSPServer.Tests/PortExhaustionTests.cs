@@ -131,6 +131,82 @@ namespace SharpRTSPServer.Tests
         }
 
         [TestMethod]
+        public void ASecondSetupDoesNotLookAtThePairTheFirstOneTook()
+        {
+            int port = TestPorts.FindFree();
+            using var server = new RTSPServer(port, "admin", "password");
+            server.AddStreamSource(new RTSPStreamSource("stream1", new H264Track(Sps, Pps), null));
+            server.StartListen();
+
+            string baseUri = $"rtsp://127.0.0.1:{port}/stream1";
+
+            using var client = new RtspTestClient(port, "admin", "password");
+            client.Send("OPTIONS", baseUri);
+            client.Send("DESCRIBE", baseUri, "Accept: application/sdp");
+
+            var first = client.Send("SETUP", baseUri + "/trackID=0",
+                "Transport: RTP/AVP;unicast;client_port=40000-40001");
+            Assert.AreEqual(200, first.StatusCode);
+            int firstPort = int.Parse(first.Match(@"server_port=(\d+)"));
+
+            // Tear the session down, freeing that pair, and set up again. The allocation carries a
+            // cursor past the last pair it handed out, so the next SETUP starts its scan above the
+            // pair just released rather than binding over ports the server may still be holding -
+            // which is what produced a first-chance SocketException per live pair.
+            client.Send("TEARDOWN", baseUri, $"Session: {first.Session}");
+
+            using var second = new RtspTestClient(port, "admin", "password");
+            second.Send("OPTIONS", baseUri);
+            second.Send("DESCRIBE", baseUri, "Accept: application/sdp");
+
+            var setup = second.Send("SETUP", baseUri + "/trackID=0",
+                "Transport: RTP/AVP;unicast;client_port=40000-40001");
+            Assert.AreEqual(200, setup.StatusCode);
+            int secondPort = int.Parse(setup.Match(@"server_port=(\d+)"));
+
+            Assert.AreEqual(firstPort + 2, secondPort, "the second SETUP should carry on past the first pair");
+        }
+
+        [TestMethod]
+        public void TheAllocationCursorWrapsBackToTheStartOfTheRange()
+        {
+            int port = TestPorts.FindFree();
+            using var server = new RTSPServer(port, "admin", "password");
+
+            // exactly two pairs, so the third allocation has to wrap
+            const int firstPort = 52000;
+            server.SetRtpPortRange(firstPort, firstPort + 4);
+
+            server.AddStreamSource(new RTSPStreamSource("stream1", new H264Track(Sps, Pps), null));
+            server.StartListen();
+
+            string baseUri = $"rtsp://127.0.0.1:{port}/stream1";
+
+            int Setup(out RtspTestClient client)
+            {
+                client = new RtspTestClient(port, "admin", "password");
+                client.Send("OPTIONS", baseUri);
+                client.Send("DESCRIBE", baseUri, "Accept: application/sdp");
+                var response = client.Send("SETUP", baseUri + "/trackID=0",
+                    "Transport: RTP/AVP;unicast;client_port=40000-40001");
+                Assert.AreEqual(200, response.StatusCode);
+                client.Send("TEARDOWN", baseUri, $"Session: {response.Session}");
+                return int.Parse(response.Match(@"server_port=(\d+)"));
+            }
+
+            int one = Setup(out var c1);
+            using (c1) { }
+            int two = Setup(out var c2);
+            using (c2) { }
+            int three = Setup(out var c3);
+            using (c3) { }
+
+            Assert.AreEqual(firstPort, one);
+            Assert.AreEqual(firstPort + 2, two, "the second pair should come after the first");
+            Assert.AreEqual(firstPort, three, "the cursor should wrap once it runs off the end of the range");
+        }
+
+        [TestMethod]
         public void ATornDownSessionReleasesItsUdpPortsImmediately()
         {
             int port = TestPorts.FindFree();
