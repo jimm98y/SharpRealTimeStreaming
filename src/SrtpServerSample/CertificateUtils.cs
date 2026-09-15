@@ -14,7 +14,6 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net;
-using System.Runtime.InteropServices;
 
 namespace SrtpServerSample
 {
@@ -97,21 +96,16 @@ namespace SrtpServerSample
             {
                 store.Save(pkcs12Stream, password, random);
 
+                // The key deliberately uses the default key set rather than EphemeralKeySet.
+                // SslStream on Windows goes through SChannel, which cannot build server credentials
+                // from an ephemeral key and fails the handshake with "No credentials are available
+                // in the security package". The cost is a key container Windows leaves behind, which
+                // is the accepted trade for a certificate that actually works as a server identity.
                 return System.Security.Cryptography.X509Certificates.X509CertificateLoader.LoadPkcs12Collection(
                     pkcs12Stream.ToArray(),
-                    new string(password),
-                    KeyStorageFlags).Single();
+                    new string(password)).Single();
             }
         }
-
-        /// <summary>
-        /// Keeps the private key in memory where the platform allows it. Without this Windows writes
-        /// the key into the user's key store, where it stays behind after the process exits.
-        /// </summary>
-        private static System.Security.Cryptography.X509Certificates.X509KeyStorageFlags KeyStorageFlags =>
-            RuntimeInformation.IsOSPlatform(OSPlatform.OSX)
-                ? System.Security.Cryptography.X509Certificates.X509KeyStorageFlags.DefaultKeySet // not supported on macOS
-                : System.Security.Cryptography.X509Certificates.X509KeyStorageFlags.EphemeralKeySet;
 
         /// <summary>
         /// Puts the host name into the Subject Alternative Name, as an IP address when it is one and
