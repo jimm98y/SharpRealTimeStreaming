@@ -8,6 +8,7 @@ using SharpRTSPServer;
 
 namespace SharpRTSPServer.Tests
 {
+    [TestClass]
     public class ServerLifecycleTests
     {
         private static readonly byte[] Sps = { 0x67, 0x42, 0x00, 0x1E };
@@ -33,7 +34,7 @@ namespace SharpRTSPServer.Tests
             return !closedByPeer;
         }
 
-        [Fact]
+        [TestMethod]
         public void ConnectionsBeyondTheLimitAreRefused()
         {
             int port = TestPorts.FindFree();
@@ -52,14 +53,14 @@ namespace SharpRTSPServer.Tests
                         var accepted = new TcpClient("127.0.0.1", port);
                         sockets.Add(accepted);
                         WaitForServerToAccept();
-                        Assert.True(ConnectionIsAccepted(accepted), $"connection {i} should have been accepted");
+                        Assert.IsTrue(ConnectionIsAccepted(accepted), $"connection {i} should have been accepted");
                     }
 
                     // the third one is over the limit and must be dropped rather than queued forever
                     var refused = new TcpClient("127.0.0.1", port);
                     sockets.Add(refused);
                     WaitForServerToAccept();
-                    Assert.False(ConnectionIsAccepted(refused), "the connection over the limit should have been refused");
+                    Assert.IsFalse(ConnectionIsAccepted(refused), "the connection over the limit should have been refused");
                 }
                 finally
                 {
@@ -68,7 +69,7 @@ namespace SharpRTSPServer.Tests
             }
         }
 
-        [Fact]
+        [TestMethod]
         public void ConnectionsAreAcceptedWhenTheLimitIsDisabled()
         {
             int port = TestPorts.FindFree();
@@ -87,7 +88,7 @@ namespace SharpRTSPServer.Tests
                         var socket = new TcpClient("127.0.0.1", port);
                         sockets.Add(socket);
                         WaitForServerToAccept();
-                        Assert.True(ConnectionIsAccepted(socket), $"connection {i} should have been accepted");
+                        Assert.IsTrue(ConnectionIsAccepted(socket), $"connection {i} should have been accepted");
                     }
                 }
                 finally
@@ -102,7 +103,7 @@ namespace SharpRTSPServer.Tests
         /// </summary>
         private static void WaitForServerToAccept() => System.Threading.Thread.Sleep(150);
 
-        [Fact]
+        [TestMethod]
         public void DisposingTheServerClosesClientConnections()
         {
             int port = TestPorts.FindFree();
@@ -115,7 +116,7 @@ namespace SharpRTSPServer.Tests
 
                 client = new TcpClient("127.0.0.1", port);
                 WaitForServerToAccept();
-                Assert.True(ConnectionIsAccepted(client));
+                Assert.IsTrue(ConnectionIsAccepted(client));
             }
 
             WaitForServerToAccept();
@@ -123,21 +124,21 @@ namespace SharpRTSPServer.Tests
             using (client)
             {
                 // the server used to leave every client socket open until finalization
-                Assert.False(ConnectionIsAccepted(client), "disposing the server should close client connections");
+                Assert.IsFalse(ConnectionIsAccepted(client), "disposing the server should close client connections");
             }
         }
 
-        [Fact]
+        [TestMethod]
         public void AddingTwoStreamSourcesWithTheSameIdIsRejected()
         {
             using var server = new RTSPServer(TestPorts.FindFree(), "admin", "password");
             server.AddStreamSource(NewStreamSource("stream1"));
 
             // the second would be unreachable, since lookups match the first by ID
-            Assert.Throws<ArgumentException>(() => server.AddStreamSource(NewStreamSource("stream1")));
+            Assert.ThrowsExactly<ArgumentException>(() => server.AddStreamSource(NewStreamSource("stream1")));
         }
 
-        [Fact]
+        [TestMethod]
         public void StreamSourcesCanBeAddedAndRemoved()
         {
             using var server = new RTSPServer(TestPorts.FindFree(), "admin", "password");
@@ -146,13 +147,13 @@ namespace SharpRTSPServer.Tests
 
             server.AddStreamSource(first);
             server.AddStreamSource(second);
-            Assert.Equal(2, server.GetStreamSources().Count);
+            Assert.HasCount(2, server.GetStreamSources());
 
             server.RemoveStreamSource(first);
-            Assert.Equal(new[] { "stream2" }, server.GetStreamSources().Select(s => s.StreamID));
+            CollectionAssert.AreEqual(new[] { "stream2" }, server.GetStreamSources().Select(s => s.StreamID).ToArray());
         }
 
-        [Fact]
+        [TestMethod]
         public void GetStreamSourcesReturnsASnapshotRatherThanTheLiveList()
         {
             using var server = new RTSPServer(TestPorts.FindFree(), "admin", "password");
@@ -161,46 +162,52 @@ namespace SharpRTSPServer.Tests
             var snapshot = server.GetStreamSources();
             server.AddStreamSource(NewStreamSource("stream2"));
 
-            Assert.Single(snapshot);
-            Assert.Equal(2, server.GetStreamSources().Count);
+            Assert.ContainsSingle(snapshot);
+            Assert.HasCount(2, server.GetStreamSources());
         }
 
-        [Fact]
+        [TestMethod]
         public void AddStreamSourceRejectsNull()
         {
             using var server = new RTSPServer(TestPorts.FindFree(), "admin", "password");
 
-            Assert.Throws<ArgumentNullException>(() => server.AddStreamSource(null));
-            Assert.Throws<ArgumentNullException>(() => server.RemoveStreamSource(null));
+            Assert.ThrowsExactly<ArgumentNullException>(() => server.AddStreamSource(null));
+            Assert.ThrowsExactly<ArgumentNullException>(() => server.RemoveStreamSource(null));
         }
 
-        [Fact]
+        [TestMethod]
         public void CheckTimeoutsOnAnUnknownStreamReportsNothingInsteadOfThrowing()
         {
             using var server = new RTSPServer(TestPorts.FindFree(), "admin", "password");
 
             server.CheckTimeouts("no-such-stream", out int count, out int playCount);
 
-            Assert.Equal(0, count);
-            Assert.Equal(0, playCount);
+            Assert.AreEqual(0, count);
+            Assert.AreEqual(0, playCount);
         }
 
-        [Fact]
+        [TestMethod]
         public void FeedingRtpForAnUnknownStreamIsIgnoredInsteadOfThrowing()
         {
             using var server = new RTSPServer(TestPorts.FindFree(), "admin", "password");
 
             var packets = new List<Memory<byte>> { new byte[12] };
-            var exception = Record.Exception(() => server.FeedInRawRTP("no-such-stream", 0, 0, packets));
 
-            Assert.Null(exception);
+            try
+            {
+                server.FeedInRawRTP("no-such-stream", 0, 0, packets);
+            }
+            catch (Exception ex)
+            {
+                Assert.Fail($"feeding an unknown stream threw {ex.GetType().Name}");
+            }
         }
 
-        [Fact]
+        [TestMethod]
         public void PortNumberIsValidated()
         {
-            Assert.Throws<ArgumentOutOfRangeException>(() => new RTSPServer(-1, "admin", "password"));
-            Assert.Throws<ArgumentOutOfRangeException>(() => new RTSPServer(70000, "admin", "password"));
+            Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => new RTSPServer(-1, "admin", "password"));
+            Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => new RTSPServer(70000, "admin", "password"));
         }
     }
 }

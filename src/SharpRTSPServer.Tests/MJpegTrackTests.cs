@@ -5,6 +5,7 @@ using SharpRTSPServer;
 
 namespace SharpRTSPServer.Tests
 {
+    [TestClass]
     public class MJpegTrackTests
     {
         private const byte Sof0 = 0xC0;
@@ -79,123 +80,123 @@ namespace SharpRTSPServer.Tests
             return copies;
         }
 
-        [Fact]
+        [TestMethod]
         public void DimensionsAndBitDepthAreReadFromTheFrameHeader()
         {
             var info = MJpegTrack.ParseJpeg(Jpeg(width: 640, height: 480), out _, out _, out _);
 
-            Assert.Equal(640, info.width);
-            Assert.Equal(480, info.height);
-            Assert.Equal(8, info.bpp);
+            Assert.AreEqual(640, info.width);
+            Assert.AreEqual(480, info.height);
+            Assert.AreEqual(8, info.bpp);
         }
 
-        [Theory]
-        [InlineData(Yuv422, 0)] // RFC 2435 type 0
-        [InlineData(Yuv420, 1)] // RFC 2435 type 1
+        [TestMethod]
+        [DataRow(Yuv422, (byte)0)] // RFC 2435 type 0
+        [DataRow(Yuv420, (byte)1)] // RFC 2435 type 1
         public void ChromaSubsamplingSelectsTheRtpType(byte subsampling, byte expectedType)
         {
             var info = MJpegTrack.ParseJpeg(Jpeg(subsampling: subsampling), out _, out _, out _);
 
-            Assert.Equal(expectedType, info.type);
+            Assert.AreEqual(expectedType, info.type);
         }
 
-        [Fact]
+        [TestMethod]
         public void ARestartIntervalShiftsTheTypeBy64()
         {
             var info = MJpegTrack.ParseJpeg(Jpeg(subsampling: Yuv422, withRestartInterval: true), out _, out _, out _);
 
-            Assert.Equal(64, info.type);
+            Assert.AreEqual(64, info.type);
         }
 
-        [Fact]
+        [TestMethod]
         public void BothQuantizationTablesAreReturned()
         {
             MJpegTrack.ParseJpeg(Jpeg(quantizationTables: 2), out var first, out var second, out _);
 
-            Assert.Equal(64, first.Length);
-            Assert.Equal(64, second.Length);
-            Assert.NotEqual(first.ToArray(), second.ToArray());
+            Assert.AreEqual(64, first.Length);
+            Assert.AreEqual(64, second.Length);
+            CollectionAssert.AreNotEqual(first.ToArray(), second.ToArray());
         }
 
-        [Fact]
+        [TestMethod]
         public void ASingleQuantizationTableLeavesTheSecondEmpty()
         {
             MJpegTrack.ParseJpeg(Jpeg(quantizationTables: 1), out var first, out var second, out _);
 
-            Assert.Equal(64, first.Length);
-            Assert.True(second.IsEmpty);
+            Assert.AreEqual(64, first.Length);
+            Assert.IsTrue(second.IsEmpty);
         }
 
-        [Fact]
+        [TestMethod]
         public void MoreThanTwoQuantizationTablesIsRejected()
         {
-            Assert.Throws<NotSupportedException>(
+            Assert.ThrowsExactly<NotSupportedException>(
                 () => MJpegTrack.ParseJpeg(Jpeg(quantizationTables: 3), out _, out _, out _));
         }
 
-        [Theory]
-        [InlineData(2048, 480)]
-        [InlineData(640, 2048)]
+        [TestMethod]
+        [DataRow(2048, 480)]
+        [DataRow(640, 2048)]
         public void ImagesLargerThanRtpAllowsAreRejected(int width, int height)
         {
             // RFC 2435 caps the dimensions at 2040 x 2040
-            Assert.Throws<NotSupportedException>(
+            Assert.ThrowsExactly<NotSupportedException>(
                 () => MJpegTrack.ParseJpeg(Jpeg(width: width, height: height), out _, out _, out _));
         }
 
-        [Theory]
-        [InlineData((byte)0x11)] // 4:4:4
-        [InlineData((byte)0x12)]
-        [InlineData((byte)0x44)]
+        [TestMethod]
+        [DataRow((byte)0x11)] // 4:4:4
+        [DataRow((byte)0x12)]
+        [DataRow((byte)0x44)]
         public void UnsupportedChromaSubsamplingIsRejected(byte subsampling)
         {
-            Assert.Throws<NotSupportedException>(
+            Assert.ThrowsExactly<NotSupportedException>(
                 () => MJpegTrack.ParseJpeg(Jpeg(subsampling: subsampling), out _, out _, out _));
         }
 
-        [Fact]
+        [TestMethod]
         public void DataThatIsNotAJpegIsRejected()
         {
             byte[] notJpeg = { 0x00, 0x01, 0x02, 0x03, 0x04, 0x05 };
 
-            Assert.Throws<ArgumentException>(
+            Assert.ThrowsExactly<ArgumentException>(
                 () => MJpegTrack.ParseJpeg(notJpeg, out _, out _, out _));
         }
 
-        [Fact]
+        [TestMethod]
         public void FrameWithoutTheStartOfImageMarkerIsRejected()
         {
             var track = new MJpegTrack();
             byte[] jpeg = Jpeg();
             jpeg[0] = 0x00; // break the SOI
 
-            Assert.Throws<InvalidOperationException>(() => Packetize(track, jpeg));
+            Assert.ThrowsExactly<InvalidOperationException>(() => Packetize(track, jpeg));
         }
 
-        [Fact]
+        [TestMethod]
         public void FrameWithoutTheEndOfImageMarkerIsRejected()
         {
             var track = new MJpegTrack();
             byte[] jpeg = Jpeg();
             jpeg[jpeg.Length - 1] = 0x00; // break the EOI
 
-            Assert.Throws<InvalidOperationException>(() => Packetize(track, jpeg));
+            Assert.ThrowsExactly<InvalidOperationException>(() => Packetize(track, jpeg));
         }
 
-        [Theory]
-        [InlineData(0)]
-        [InlineData(1)]
-        [InlineData(2)]
-        [InlineData(3)]
+        [TestMethod]
+        [DataRow(0)]
+        [DataRow(1)]
+        [DataRow(2)]
+        [DataRow(3)]
         public void FrameTooShortToHoldTheMarkersIsRejected(int length)
         {
             var track = new MJpegTrack();
 
             // used to read past the end of the buffer reaching for the SOI and EOI
-            Assert.Throws<InvalidOperationException>(() => Packetize(track, new byte[length]));
+            Assert.ThrowsExactly<InvalidOperationException>(() => Packetize(track, new byte[length]));
         }
 
-        [Fact]
+        [TestMethod]
         public void PacketsCarryTheJpegHeaderAndTheFrameTimestamp()
         {
             var track = new MJpegTrack();
@@ -203,45 +204,48 @@ namespace SharpRTSPServer.Tests
             byte[] packet = Packetize(track, Jpeg(width: 640, height: 480)).First();
 
             // payload type 26 is JPEG
-            Assert.Equal(26, packet[1] & 0x7F);
-            Assert.Equal(90000u, (uint)((packet[4] << 24) | (packet[5] << 16) | (packet[6] << 8) | packet[7]));
+            Assert.AreEqual(26, packet[1] & 0x7F);
+            Assert.AreEqual(90000u, (uint)((packet[4] << 24) | (packet[5] << 16) | (packet[6] << 8) | packet[7]));
 
             // RFC 2435 main header: offset, type, Q, then width and height in 8 pixel units
             int fragmentOffset = (packet[13] << 16) | (packet[14] << 8) | packet[15];
-            Assert.Equal(0, fragmentOffset);
-            Assert.Equal(640 / 8, packet[18]);
-            Assert.Equal(480 / 8, packet[19]);
+            Assert.AreEqual(0, fragmentOffset);
+            Assert.AreEqual(640 / 8, packet[18]);
+            Assert.AreEqual(480 / 8, packet[19]);
         }
 
-        [Fact]
+        [TestMethod]
         public void OnlyTheLastPacketOfAFrameSetsTheMarkerBit()
         {
             var track = new MJpegTrack();
 
             var packets = Packetize(track, Jpeg());
 
-            Assert.All(packets.Take(packets.Count - 1), p => Assert.True((p[1] & 0x80) == 0));
-            Assert.True((packets.Last()[1] & 0x80) != 0);
+            foreach (var p in packets.Take(packets.Count - 1))
+            {
+                Assert.AreEqual(0, p[1] & 0x80);
+            }
+            Assert.AreNotEqual(0, packets.Last()[1] & 0x80);
         }
 
-        [Fact]
+        [TestMethod]
         public void OnlyOneSampleAtATimeIsSupported()
         {
             var track = new MJpegTrack();
             var samples = new List<ReadOnlyMemory<byte>> { Jpeg(), Jpeg() };
 
-            Assert.Throws<InvalidOperationException>(() => track.CreateRtpPackets(samples, 0));
+            Assert.ThrowsExactly<InvalidOperationException>(() => track.CreateRtpPackets(samples, 0));
         }
 
-        [Fact]
+        [TestMethod]
         public void SdpAdvertisesTheStaticJpegPayloadType()
         {
             var track = new MJpegTrack { ID = 0 };
 
             string sdp = track.BuildSDP(new System.Text.StringBuilder()).ToString();
 
-            Assert.Contains("m=video 0 RTP/AVP 26", sdp);
-            Assert.Contains("a=control:trackID=0", sdp);
+            StringAssert.Contains(sdp, "m=video 0 RTP/AVP 26");
+            StringAssert.Contains(sdp, "a=control:trackID=0");
         }
     }
 }

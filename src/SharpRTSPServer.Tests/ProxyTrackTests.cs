@@ -5,6 +5,7 @@ using SharpRTSPServer;
 
 namespace SharpRTSPServer.Tests
 {
+    [TestClass]
     public class ProxyTrackTests
     {
         private static List<byte[]> Packetize(ProxyTrack track, params byte[][] samples)
@@ -20,7 +21,7 @@ namespace SharpRTSPServer.Tests
             return copies;
         }
 
-        [Fact]
+        [TestMethod]
         public void EverySampleIsForwarded()
         {
             var track = new ProxyTrack(TrackType.Video);
@@ -31,66 +32,66 @@ namespace SharpRTSPServer.Tests
             var packets = Packetize(track, first, second, third);
 
             // all three used to be dropped except the first, silently losing media
-            Assert.Equal(3, packets.Count);
-            Assert.Equal(first, packets[0]);
-            Assert.Equal(second, packets[1]);
-            Assert.Equal(third, packets[2]);
+            Assert.HasCount(3, packets);
+            CollectionAssert.AreEqual(first, packets[0]);
+            CollectionAssert.AreEqual(second, packets[1]);
+            CollectionAssert.AreEqual(third, packets[2]);
         }
 
-        [Fact]
+        [TestMethod]
         public void PacketsArePassedThroughByteForByte()
         {
             var track = new ProxyTrack(TrackType.Video);
             byte[] rtp = Enumerable.Range(0, 200).Select(i => (byte)i).ToArray();
 
-            Assert.Equal(rtp, Assert.Single(Packetize(track, rtp)));
+            CollectionAssert.AreEqual(rtp, Assert.ContainsSingle(Packetize(track, rtp)));
         }
 
-        [Fact]
+        [TestMethod]
         public void NoSamplesProducesNoPackets()
         {
             var track = new ProxyTrack(TrackType.Video);
 
             // used to throw IndexOutOfRangeException reaching for samples[0]
-            Assert.Empty(Packetize(track));
+            Assert.IsEmpty(Packetize(track));
         }
 
-        [Fact]
+        [TestMethod]
         public void EmptySamplesAreSkipped()
         {
             var track = new ProxyTrack(TrackType.Video);
 
             var packets = Packetize(track, new byte[0], new byte[] { 9, 9 }, new byte[0]);
 
-            Assert.Equal(new byte[] { 9, 9 }, Assert.Single(packets));
+            CollectionAssert.AreEqual(new byte[] { 9, 9 }, Assert.ContainsSingle(packets));
         }
 
-        [Fact]
+        [TestMethod]
         public void NullSamplesAreRejected()
         {
             var track = new ProxyTrack(TrackType.Video);
 
-            Assert.Throws<ArgumentNullException>(() => track.CreateRtpPackets(null, 0));
+            Assert.ThrowsExactly<ArgumentNullException>(() => track.CreateRtpPackets(null, 0));
         }
 
-        [Fact]
+        [TestMethod]
         public void TrackIsNotReadyUntilItIsStarted()
         {
             var track = new ProxyTrack(TrackType.Audio);
-            Assert.False(track.IsReady);
+            Assert.IsFalse(track.IsReady);
 
             track.Start();
-            Assert.True(track.IsReady);
+            Assert.IsTrue(track.IsReady);
 
             track.Dispose();
-            Assert.False(track.IsReady);
+            Assert.IsFalse(track.IsReady);
         }
 
-        [Fact]
+        [TestMethod]
         public void TrackTypeDeterminesTheId()
         {
-            Assert.Equal((int)TrackType.Video, new ProxyTrack(TrackType.Video).ID);
-            Assert.Equal((int)TrackType.Audio, new ProxyTrack(TrackType.Audio).ID);
+            Assert.AreEqual((int)TrackType.Video, new ProxyTrack(TrackType.Video).ID);
+            Assert.AreEqual((int)TrackType.Audio, new ProxyTrack(TrackType.Audio).ID);
         }
     }
 }

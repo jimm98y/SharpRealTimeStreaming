@@ -5,6 +5,7 @@ using SharpRTSPServer;
 
 namespace SharpRTSPServer.Tests
 {
+    [TestClass]
     public class H264TrackTests
     {
         private const uint Timestamp = 0x11223344;
@@ -45,23 +46,23 @@ namespace SharpRTSPServer.Tests
 
         private static bool IsMarkerSet(byte[] rtpPacket) => (rtpPacket[1] & 0x80) != 0;
 
-        [Fact]
+        [TestMethod]
         public void SmallNal_IsSentAsASingleRtpPacket()
         {
             var track = new H264Track(Sps, Pps);
             byte[] nal = Nal(0x65, 100);
 
-            byte[] packet = Assert.Single(Packetize(track, nal));
+            byte[] packet = Assert.ContainsSingle(Packetize(track, nal));
 
-            Assert.Equal(12 + nal.Length, packet.Length);
-            Assert.Equal(2, packet[0] >> 6);                    // RTP version
-            Assert.Equal(track.PayloadType, packet[1] & 0x7F);  // payload type
-            Assert.Equal(Timestamp, ReadTimestamp(packet));
-            Assert.True(IsMarkerSet(packet));                   // last NAL of the frame
-            Assert.Equal(nal, packet.Skip(12).ToArray());       // payload is the NAL verbatim
+            Assert.HasCount(12 + nal.Length, packet);
+            Assert.AreEqual(2, packet[0] >> 6);                    // RTP version
+            Assert.AreEqual(track.PayloadType, packet[1] & 0x7F);  // payload type
+            Assert.AreEqual(Timestamp, ReadTimestamp(packet));
+            Assert.IsTrue(IsMarkerSet(packet));                   // last NAL of the frame
+            CollectionAssert.AreEqual(nal, packet.Skip(12).ToArray());       // payload is the NAL verbatim
         }
 
-        [Fact]
+        [TestMethod]
         public void LargeNal_IsFragmentedIntoFuAPackets()
         {
             var track = new H264Track(Sps, Pps) { PacketMTU = 1400 };
@@ -69,30 +70,39 @@ namespace SharpRTSPServer.Tests
 
             var packets = Packetize(track, nal);
 
-            Assert.True(packets.Count > 1, "a NAL larger than the MTU must be fragmented");
+            Assert.IsGreaterThan(1, packets.Count, "a NAL larger than the MTU must be fragmented");
 
             foreach (var packet in packets)
             {
-                Assert.Equal(Timestamp, ReadTimestamp(packet));
-                Assert.Equal(28, packet[12] & 0x1F);            // FU-A fragmentation type
-                Assert.Equal(3, (packet[12] >> 5) & 0x03);      // NRI carried over from the NAL
-                Assert.Equal(5, packet[13] & 0x1F);             // original NAL type carried in the FU header
+                Assert.AreEqual(Timestamp, ReadTimestamp(packet));
+                Assert.AreEqual(28, packet[12] & 0x1F);            // FU-A fragmentation type
+                Assert.AreEqual(3, (packet[12] >> 5) & 0x03);      // NRI carried over from the NAL
+                Assert.AreEqual(5, packet[13] & 0x1F);             // original NAL type carried in the FU header
             }
 
             // exactly one start bit, on the first fragment
-            Assert.True((packets.First()[13] & 0x80) != 0);
-            Assert.All(packets.Skip(1), p => Assert.True((p[13] & 0x80) == 0));
+            Assert.AreNotEqual(0, packets.First()[13] & 0x80);
+            foreach (var p in packets.Skip(1))
+            {
+                Assert.AreEqual(0, p[13] & 0x80);
+            }
 
             // exactly one end bit, on the last fragment
-            Assert.True((packets.Last()[13] & 0x40) != 0);
-            Assert.All(packets.Take(packets.Count - 1), p => Assert.True((p[13] & 0x40) == 0));
+            Assert.AreNotEqual(0, packets.Last()[13] & 0x40);
+            foreach (var p in packets.Take(packets.Count - 1))
+            {
+                Assert.AreEqual(0, p[13] & 0x40);
+            }
 
             // only the final fragment of the final NAL marks the end of the frame
-            Assert.True(IsMarkerSet(packets.Last()));
-            Assert.All(packets.Take(packets.Count - 1), p => Assert.False(IsMarkerSet(p)));
+            Assert.IsTrue(IsMarkerSet(packets.Last()));
+            foreach (var p in packets.Take(packets.Count - 1))
+            {
+                Assert.IsFalse(IsMarkerSet(p));
+            }
         }
 
-        [Fact]
+        [TestMethod]
         public void FragmentsReassembleIntoTheOriginalNal()
         {
             var track = new H264Track(Sps, Pps) { PacketMTU = 1400 };
@@ -108,66 +118,69 @@ namespace SharpRTSPServer.Tests
                 reassembled.AddRange(packet.Skip(14));
             }
 
-            Assert.Equal(nal, reassembled.ToArray());
+            CollectionAssert.AreEqual(nal, reassembled.ToArray());
         }
 
-        [Fact]
+        [TestMethod]
         public void OnlyTheLastNalOfAFrameSetsTheMarkerBit()
         {
             var track = new H264Track(Sps, Pps);
 
             var packets = Packetize(track, Nal(0x67, 10), Nal(0x68, 10), Nal(0x65, 10));
 
-            Assert.Equal(3, packets.Count);
-            Assert.False(IsMarkerSet(packets[0]));
-            Assert.False(IsMarkerSet(packets[1]));
-            Assert.True(IsMarkerSet(packets[2]));
+            Assert.HasCount(3, packets);
+            Assert.IsFalse(IsMarkerSet(packets[0]));
+            Assert.IsFalse(IsMarkerSet(packets[1]));
+            Assert.IsTrue(IsMarkerSet(packets[2]));
         }
 
-        [Theory]
-        [InlineData(1)]
-        [InlineData(44)]   // exactly the header overhead, leaving no room for payload
+        [TestMethod]
+        [DataRow(1)]
+        [DataRow(44)]   // exactly the header overhead, leaving no room for payload
         public void PacketMtuTooSmallToCarryPayloadIsRejected(int packetMtu)
         {
             var track = new H264Track(Sps, Pps) { PacketMTU = packetMtu };
 
             // the fragmentation loop would otherwise never make progress
-            Assert.Throws<InvalidOperationException>(() => Packetize(track, Nal(0x65, 5000)));
+            Assert.ThrowsExactly<InvalidOperationException>(() => Packetize(track, Nal(0x65, 5000)));
         }
 
-        [Fact]
+        [TestMethod]
         public void SmallButWorkablePacketMtuStillFragments()
         {
             var track = new H264Track(Sps, Pps) { PacketMTU = 100 };
 
             var packets = Packetize(track, Nal(0x65, 1000));
 
-            Assert.True(packets.Count > 1);
-            Assert.All(packets, p => Assert.True(p.Length <= 14 + 100));
+            Assert.IsGreaterThan(1, packets.Count);
+            foreach (var p in packets)
+            {
+                Assert.IsLessThanOrEqualTo(14 + 100, p.Length);
+            }
         }
 
-        [Fact]
+        [TestMethod]
         public void TrackIsOnlyReadyOnceItHasBothParameterSets()
         {
             var track = new H264Track();
-            Assert.False(track.IsReady);
+            Assert.IsFalse(track.IsReady);
 
             track.SetParameterSets(Sps, Pps);
-            Assert.True(track.IsReady);
+            Assert.IsTrue(track.IsReady);
         }
 
-        [Fact]
+        [TestMethod]
         public void SdpCarriesTheParameterSetsAndProfileLevel()
         {
             var track = new H264Track(Sps, Pps, profileIdc: 77, profileIop: 0, level: 42) { ID = 0 };
 
             string sdp = track.BuildSDP(new System.Text.StringBuilder()).ToString();
 
-            Assert.Contains("m=video 0 RTP/AVP 96", sdp);
-            Assert.Contains("a=control:trackID=0", sdp);
-            Assert.Contains("a=rtpmap:96 H264/90000", sdp);
-            Assert.Contains("profile-level-id=4D002A", sdp); // 77, 0, 42 in hex
-            Assert.Contains($"sprop-parameter-sets={Convert.ToBase64String(Sps)},{Convert.ToBase64String(Pps)}", sdp);
+            StringAssert.Contains(sdp, "m=video 0 RTP/AVP 96");
+            StringAssert.Contains(sdp, "a=control:trackID=0");
+            StringAssert.Contains(sdp, "a=rtpmap:96 H264/90000");
+            StringAssert.Contains(sdp, "profile-level-id=4D002A"); // 77, 0, 42 in hex
+            StringAssert.Contains(sdp, $"sprop-parameter-sets={Convert.ToBase64String(Sps)},{Convert.ToBase64String(Pps)}");
         }
     }
 }
