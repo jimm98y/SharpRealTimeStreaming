@@ -5,6 +5,7 @@ using SharpRTSPServer;
 
 namespace SharpRTSPServer.Tests
 {
+    [TestClass]
     public class TrackApiTests
     {
         private static Type[] PublicTracks() =>
@@ -14,7 +15,7 @@ namespace SharpRTSPServer.Tests
                 .OrderBy(t => t.Name)
                 .ToArray();
 
-        [Fact]
+        [TestMethod]
         public void EveryTrackLivesInTheSameNamespace()
         {
             // PCMATrack was the odd one out in SharpRTSPServer.Tracks, so it needed a different
@@ -24,10 +25,10 @@ namespace SharpRTSPServer.Tests
                 .Select(t => $"{t.Namespace}.{t.Name}")
                 .ToArray();
 
-            Assert.Empty(strays);
+            Assert.IsEmpty(strays);
         }
 
-        [Fact]
+        [TestMethod]
         public void TheDocumentedTracksAreAllPresent()
         {
             var expected = new[]
@@ -38,51 +39,51 @@ namespace SharpRTSPServer.Tests
 
             var actual = PublicTracks().Select(t => t.Name).ToArray();
 
-            Assert.Equal(expected, actual);
+            CollectionAssert.AreEqual(expected, actual);
         }
 
-        public static TheoryData<ITrack, string> DefaultTracks() => new TheoryData<ITrack, string>
+        public static IEnumerable<object[]> DefaultTracks() => new[]
         {
-            { new H264Track(), "H264" },
-            { new H265Track(), "H265" },
-            { new H266Track(), "H266" },
-            { new AV1Track(), "AV1" },
-            { new MJpegTrack(), "JPEG" },
-            { new OpusTrack(), "opus" },
-            { new PCMATrack(), "PCMA" },
-            { new PCMUTrack(), "PCMU" },
-            { new AACTrack(44100, 2), "mpeg4-generic" },
+            new object[] { new H264Track(), "H264" },
+            new object[] { new H265Track(), "H265" },
+            new object[] { new H266Track(), "H266" },
+            new object[] { new AV1Track(), "AV1" },
+            new object[] { new MJpegTrack(), "JPEG" },
+            new object[] { new OpusTrack(), "opus" },
+            new object[] { new PCMATrack(), "PCMA" },
+            new object[] { new PCMUTrack(), "PCMU" },
+            new object[] { new AACTrack(44100, 2), "mpeg4-generic" },
         };
 
-        [Theory]
-        [MemberData(nameof(DefaultTracks))]
+        [TestMethod]
+        [DynamicData(nameof(DefaultTracks))]
         public void TrackReportsItsCodecName(ITrack track, string expectedCodec)
         {
-            Assert.Equal(expectedCodec, track.Codec);
+            Assert.AreEqual(expectedCodec, track.Codec);
         }
 
-        [Fact]
+        [TestMethod]
         public void AudioAndVideoTracksDefaultToTheirConventionalIds()
         {
-            Assert.Equal((int)TrackType.Video, new H264Track().ID);
-            Assert.Equal((int)TrackType.Audio, new AACTrack(44100, 2).ID);
-            Assert.Equal((int)TrackType.Audio, new PCMATrack().ID);
-            Assert.Equal((int)TrackType.Audio, new PCMUTrack().ID);
+            Assert.AreEqual((int)TrackType.Video, new H264Track().ID);
+            Assert.AreEqual((int)TrackType.Audio, new AACTrack(44100, 2).ID);
+            Assert.AreEqual((int)TrackType.Audio, new PCMATrack().ID);
+            Assert.AreEqual((int)TrackType.Audio, new PCMUTrack().ID);
         }
 
-        [Fact]
+        [TestMethod]
         public void TracksDefaultToTheUnencryptedProfile()
         {
-            Assert.Equal(RtpProfiles.AVP, new H264Track().RtpProfile);
-            Assert.Equal(RtpProfiles.SAVP, new H264Track { RtpProfile = RtpProfiles.SAVP }.RtpProfile);
+            Assert.AreEqual(RtpProfiles.AVP, new H264Track().RtpProfile);
+            Assert.AreEqual(RtpProfiles.SAVP, new H264Track { RtpProfile = RtpProfiles.SAVP }.RtpProfile);
         }
 
-        [Fact]
+        [TestMethod]
         public void FeedingSamplesWithoutASinkIsRejected()
         {
             var track = new H264Track(new byte[] { 0x67 }, new byte[] { 0x68 });
 
-            Assert.Throws<InvalidOperationException>(
+            Assert.ThrowsExactly<InvalidOperationException>(
                 () => track.FeedInRawSamples(0, new System.Collections.Generic.List<ReadOnlyMemory<byte>>()));
         }
     }

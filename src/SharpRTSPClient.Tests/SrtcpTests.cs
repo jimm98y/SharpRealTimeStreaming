@@ -5,6 +5,7 @@ using SharpRTSPClient;
 
 namespace SharpRTSPClient.Tests
 {
+    [TestClass]
     public class SrtcpTests
     {
         private const string CryptoSuite = SrtpCryptoSuites.AES_CM_128_HMAC_SHA1_80;
@@ -24,7 +25,7 @@ namespace SharpRTSPClient.Tests
             (byte)(ssrc >> 24), (byte)(ssrc >> 16), (byte)(ssrc >> 8), (byte)ssrc,
         };
 
-        [Fact]
+        [TestMethod]
         public void ProtectedRtcpCarriesThePlaintextHeaderRatherThanZeros()
         {
             byte[] report = ReceiverReport(0xDEADBEEF);
@@ -33,29 +34,29 @@ namespace SharpRTSPClient.Tests
 
             // The first 8 bytes of an SRTCP packet stay in the clear, so they must still be our report.
             // They used to come out as zeros because the payload was never copied into the output buffer.
-            Assert.Equal(report, protectedRtcp.Take(8).ToArray());
+            CollectionAssert.AreEqual(report, protectedRtcp.Take(8).ToArray());
         }
 
-        [Fact]
+        [TestMethod]
         public void ProtectedRtcpIsNotAllZeros()
         {
             byte[] protectedRtcp = RTSPClient.ProtectRtcp(NewContext(), ReceiverReport(0x11223344));
 
-            Assert.Contains(protectedRtcp, b => b != 0);
+            Assert.Contains(b => b != 0, protectedRtcp);
         }
 
-        [Fact]
+        [TestMethod]
         public void ProtectedRtcpIsLongerThanTheInputBecauseOfTheAuthTag()
         {
             byte[] report = ReceiverReport(0x11223344);
 
             byte[] protectedRtcp = RTSPClient.ProtectRtcp(NewContext(), report);
 
-            Assert.True(protectedRtcp.Length > report.Length,
+            Assert.IsGreaterThan(report.Length, protectedRtcp.Length,
                 "SRTCP appends an index and an authentication tag, so the result must grow");
         }
 
-        [Fact]
+        [TestMethod]
         public void ProtectedRtcpRoundTripsBackToThePlaintext()
         {
             // both ends of the same session share the keys, so what one protects the other can unprotect
@@ -69,11 +70,11 @@ namespace SharpRTSPClient.Tests
             byte[] buffer = protectedRtcp.ToArray();
             int result = receiver.DecodeRtcpContext.UnprotectRtcp(buffer, buffer.Length, out int length);
 
-            Assert.Equal(0, result);
-            Assert.Equal(report, buffer.Take(length).ToArray());
+            Assert.AreEqual(0, result);
+            CollectionAssert.AreEqual(report, buffer.Take(length).ToArray());
         }
 
-        [Fact]
+        [TestMethod]
         public void DifferentReportsProduceDifferentProtectedPackets()
         {
             var context = NewContext();
@@ -81,7 +82,7 @@ namespace SharpRTSPClient.Tests
             byte[] first = RTSPClient.ProtectRtcp(context, ReceiverReport(0x11111111));
             byte[] second = RTSPClient.ProtectRtcp(context, ReceiverReport(0x22222222));
 
-            Assert.NotEqual(first, second);
+            Assert.AreNotEqual(first, second);
         }
     }
 }

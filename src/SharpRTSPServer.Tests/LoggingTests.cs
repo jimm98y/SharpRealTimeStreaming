@@ -8,14 +8,15 @@ namespace SharpRTSPServer.Tests
     /// The logger sits on the per-packet send path, so IsEnabled has to tell the truth - otherwise
     /// every call site formats a message that is then discarded.
     /// </summary>
-    [Collection("Logging")] // the Log sinks are process wide, so these must not run alongside each other
-    public class LoggingTests : IDisposable
+    [TestClass]
+    [DoNotParallelize] // the Log sinks are process wide, so this must not run alongside anything that logs
+    public class LoggingTests
     {
         private readonly bool _debugEnabled = Log.DebugEnabled;
         private readonly bool _infoEnabled = Log.InfoEnabled;
         private readonly Action<string, Exception> _sinkDebug = Log.SinkDebug;
 
-        [Fact]
+        [TestMethod]
         public void IsEnabledFollowsTheLogSwitches()
         {
             var logger = new CustomLogger();
@@ -23,20 +24,20 @@ namespace SharpRTSPServer.Tests
             Log.DebugEnabled = false;
             Log.InfoEnabled = true;
 
-            Assert.False(logger.IsEnabled(LogLevel.Debug));
-            Assert.True(logger.IsEnabled(LogLevel.Information));
+            Assert.IsFalse(logger.IsEnabled(LogLevel.Debug));
+            Assert.IsTrue(logger.IsEnabled(LogLevel.Information));
 
             Log.DebugEnabled = true;
-            Assert.True(logger.IsEnabled(LogLevel.Debug));
+            Assert.IsTrue(logger.IsEnabled(LogLevel.Debug));
         }
 
-        [Fact]
+        [TestMethod]
         public void NoneIsNeverEnabled()
         {
-            Assert.False(new CustomLogger().IsEnabled(LogLevel.None));
+            Assert.IsFalse(new CustomLogger().IsEnabled(LogLevel.None));
         }
 
-        [Fact]
+        [TestMethod]
         public void DisabledLevelDoesNotFormatTheMessage()
         {
             ILogger logger = new CustomLogger();
@@ -52,11 +53,11 @@ namespace SharpRTSPServer.Tests
                 logger.Log(LogLevel.Debug, default, "state", null, (s, e) => { formatterCalls++; return s; });
             }
 
-            Assert.Equal(0, formatterCalls);
-            Assert.Equal(0, sinkCalls);
+            Assert.AreEqual(0, formatterCalls);
+            Assert.AreEqual(0, sinkCalls);
         }
 
-        [Fact]
+        [TestMethod]
         public void EnabledLevelReachesTheSink()
         {
             ILogger logger = new CustomLogger();
@@ -67,10 +68,11 @@ namespace SharpRTSPServer.Tests
 
             logger.Log(LogLevel.Debug, default, "hello", null, (s, e) => s);
 
-            Assert.Equal("hello", received);
+            Assert.AreEqual("hello", received);
         }
 
-        public void Dispose()
+        [TestCleanup]
+        public void Cleanup()
         {
             Log.DebugEnabled = _debugEnabled;
             Log.InfoEnabled = _infoEnabled;

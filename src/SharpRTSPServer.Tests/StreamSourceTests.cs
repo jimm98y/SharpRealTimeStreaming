@@ -4,6 +4,7 @@ using SharpRTSPServer;
 
 namespace SharpRTSPServer.Tests
 {
+    [TestClass]
     public class StreamSourceTests
     {
         private const string VideoOnlySdp =
@@ -22,15 +23,15 @@ namespace SharpRTSPServer.Tests
             "m=audio 0 RTP/AVP 97\n" +
             "a=rtpmap:97 mpeg4-generic/44100/2\n";
 
-        [Fact]
+        [TestMethod]
         public void StreamIdIsRequired()
         {
-            Assert.Throws<ArgumentNullException>(() => new RTSPStreamSource(null, null, null));
-            Assert.Throws<ArgumentNullException>(() => new RTSPStreamSource("", null, null));
-            Assert.Throws<ArgumentNullException>(() => new RTSPStreamSource("   ", null, null));
+            Assert.ThrowsExactly<ArgumentNullException>(() => new RTSPStreamSource(null, null, null));
+            Assert.ThrowsExactly<ArgumentNullException>(() => new RTSPStreamSource("", null, null));
+            Assert.ThrowsExactly<ArgumentNullException>(() => new RTSPStreamSource("   ", null, null));
         }
 
-        [Fact]
+        [TestMethod]
         public void OverrideSDP_AddsAControlAttributeAfterEachMediaSection()
         {
             var source = new RTSPStreamSource("stream1", null, null);
@@ -42,11 +43,11 @@ namespace SharpRTSPServer.Tests
             // each m= line must be followed immediately by its control attribute, numbered in order
             int video = lines.IndexOf("m=video 0 RTP/AVP 96");
             int audio = lines.IndexOf("m=audio 0 RTP/AVP 97");
-            Assert.Equal("a=control:trackID=0", lines[video + 1]);
-            Assert.Equal("a=control:trackID=1", lines[audio + 1]);
+            Assert.AreEqual("a=control:trackID=0", lines[video + 1]);
+            Assert.AreEqual("a=control:trackID=1", lines[audio + 1]);
         }
 
-        [Fact]
+        [TestMethod]
         public void OverrideSDP_LeavesAnSdpThatAlreadyHasControlAttributesAlone()
         {
             var source = new RTSPStreamSource("stream1", null, null);
@@ -54,21 +55,21 @@ namespace SharpRTSPServer.Tests
 
             source.OverrideSDP(sdp);
 
-            Assert.Equal(sdp, source.Sdp);
-            Assert.DoesNotContain("trackID=0", source.Sdp);
+            Assert.AreEqual(sdp, source.Sdp);
+            Assert.DoesNotContain("trackID=0", source.Sdp, "the existing control attribute must be left alone");
         }
 
-        [Fact]
+        [TestMethod]
         public void OverrideSDP_CanBeAskedNotToTouchTheSdp()
         {
             var source = new RTSPStreamSource("stream1", null, null);
 
             source.OverrideSDP(VideoOnlySdp, mungleSDP: false);
 
-            Assert.Equal(VideoOnlySdp, source.Sdp);
+            Assert.AreEqual(VideoOnlySdp, source.Sdp);
         }
 
-        [Fact]
+        [TestMethod]
         public void DisposingTheSourceDisposesItsTracks()
         {
             var video = new ProxyTrack(TrackType.Video);
@@ -79,8 +80,8 @@ namespace SharpRTSPServer.Tests
             var source = new RTSPStreamSource("stream1", video, audio);
             source.Dispose();
 
-            Assert.False(video.IsReady);
-            Assert.False(audio.IsReady);
+            Assert.IsFalse(video.IsReady);
+            Assert.IsFalse(audio.IsReady);
         }
     }
 }

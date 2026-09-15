@@ -9,6 +9,7 @@ namespace SharpRTSPClient.Tests
     /// The RTCP parser reads bytes straight off the wire. On UDP transport those bytes can come from
     /// anyone who can reach the client's RTCP port, so malformed input must never throw.
     /// </summary>
+    [TestClass]
     public class RtcpParsingTests
     {
         private const int SenderReport = 200;
@@ -54,20 +55,20 @@ namespace SharpRTSPClient.Tests
             return channel;
         }
 
-        [Fact]
+        [TestMethod]
         public void SenderReport_IsAnsweredWithAReceiverReportCarryingOurSsrc()
         {
             using var client = new RTSPClient();
             var reports = Parse(client, SenderReportPacket(ServerSsrc), FreshChannel());
 
-            byte[] report = Assert.Single(reports);
-            Assert.Equal(8, report.Length);
-            Assert.Equal(2, report[0] >> 6);            // version
-            Assert.Equal(ReceiverReport, report[1]);    // packet type
-            Assert.Equal(OurSsrc, (uint)((report[4] << 24) | (report[5] << 16) | (report[6] << 8) | report[7]));
+            byte[] report = Assert.ContainsSingle(reports);
+            Assert.HasCount(8, report);
+            Assert.AreEqual(2, report[0] >> 6);            // version
+            Assert.AreEqual(ReceiverReport, report[1]);    // packet type
+            Assert.AreEqual(OurSsrc, (uint)((report[4] << 24) | (report[5] << 16) | (report[6] << 8) | report[7]));
         }
 
-        [Fact]
+        [TestMethod]
         public void CompoundPacket_EveryElementIsWalked()
         {
             using var client = new RTSPClient();
@@ -77,53 +78,53 @@ namespace SharpRTSPClient.Tests
                 .Concat(SenderReportPacket(ServerSsrc))
                 .ToArray();
 
-            Assert.Equal(2, Parse(client, data, FreshChannel()).Count);
+            Assert.HasCount(2, Parse(client, data, FreshChannel()));
         }
 
-        [Theory]
-        [InlineData(0)]
-        [InlineData(1)]
-        [InlineData(2)]
-        [InlineData(3)]
-        [InlineData(4)]
-        [InlineData(5)]
-        [InlineData(6)]
-        [InlineData(7)]
+        [TestMethod]
+        [DataRow(0)]
+        [DataRow(1)]
+        [DataRow(2)]
+        [DataRow(3)]
+        [DataRow(4)]
+        [DataRow(5)]
+        [DataRow(6)]
+        [DataRow(7)]
         public void TruncatedHeader_IsIgnoredInsteadOfThrowing(int length)
         {
             using var client = new RTSPClient();
-            Assert.Empty(Parse(client, new byte[length], FreshChannel()));
+            Assert.IsEmpty(Parse(client, new byte[length], FreshChannel()));
         }
 
-        [Fact]
+        [TestMethod]
         public void PacketDeclaringMoreBytesThanTheDatagramHolds_IsIgnored()
         {
             using var client = new RTSPClient();
             // an 8 byte datagram claiming to be 0xFFFF words long
             byte[] data = { 0x80, SenderReport, 0xFF, 0xFF, 1, 2, 3, 4 };
 
-            Assert.Empty(Parse(client, data, FreshChannel()));
+            Assert.IsEmpty(Parse(client, data, FreshChannel()));
         }
 
-        [Fact]
+        [TestMethod]
         public void SenderReportTruncatedBeforeTheRtpTimestamp_IsIgnored()
         {
             using var client = new RTSPClient();
             // a well formed but too short Sender Report - the timestamp fields are simply not there
-            Assert.Empty(Parse(client, Packet(SenderReport, ServerSsrc, bodyBytes: 4), FreshChannel()));
+            Assert.IsEmpty(Parse(client, Packet(SenderReport, ServerSsrc, bodyBytes: 4), FreshChannel()));
         }
 
-        [Fact]
+        [TestMethod]
         public void PacketDeclaringZeroLength_DoesNotLoopForever()
         {
             using var client = new RTSPClient();
             byte[] data = { 0x80, SenderReport, 0x00, 0x00, 1, 2, 3, 4 };
 
             // must return rather than spin on a packet that advances the cursor by nothing
-            Assert.Empty(Parse(client, data, FreshChannel()));
+            Assert.IsEmpty(Parse(client, data, FreshChannel()));
         }
 
-        [Fact]
+        [TestMethod]
         public void RandomBytes_NeverThrow()
         {
             using var client = new RTSPClient();
@@ -141,12 +142,18 @@ namespace SharpRTSPClient.Tests
                 }
 
                 byte[] input = buffer;
-                var exception = Record.Exception(() => Parse(client, input, FreshChannel()));
-                Assert.True(exception is null, $"threw {exception?.GetType().Name} on [{string.Join(",", buffer)}]");
+                try
+                {
+                    Parse(client, input, FreshChannel());
+                }
+                catch (Exception ex)
+                {
+                    Assert.Fail($"threw {ex.GetType().Name} on [{string.Join(",", buffer)}]");
+                }
             }
         }
 
-        [Fact]
+        [TestMethod]
         public void Bye_FromTheStreamingSource_StopsTheClient()
         {
             using var client = new RTSPClient();
@@ -155,10 +162,10 @@ namespace SharpRTSPClient.Tests
 
             Parse(client, Packet(Bye, ServerSsrc), ChannelStreamingFrom(ServerSsrc));
 
-            Assert.Equal(StoppedReason.RtcpBye, reason);
+            Assert.AreEqual(StoppedReason.RtcpBye, reason);
         }
 
-        [Fact]
+        [TestMethod]
         public void Bye_BeforeAnyMediaHasArrived_StopsTheClient()
         {
             using var client = new RTSPClient();
@@ -168,10 +175,10 @@ namespace SharpRTSPClient.Tests
             // we have not seen any RTP yet, so there is nothing to compare the BYE against
             Parse(client, Packet(Bye, ServerSsrc), FreshChannel());
 
-            Assert.Equal(StoppedReason.RtcpBye, reason);
+            Assert.AreEqual(StoppedReason.RtcpBye, reason);
         }
 
-        [Fact]
+        [TestMethod]
         public void Bye_FromAnSsrcWeAreNotStreamingFrom_IsIgnored()
         {
             using var client = new RTSPClient();
@@ -181,7 +188,7 @@ namespace SharpRTSPClient.Tests
             // a spoofed BYE - on UDP anyone who can reach the RTCP port could send this
             Parse(client, Packet(Bye, 0xDEADBEEF), ChannelStreamingFrom(ServerSsrc));
 
-            Assert.Null(reason);
+            Assert.IsNull(reason);
         }
     }
 }
