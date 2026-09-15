@@ -120,6 +120,35 @@ namespace SharpRTSPServer.Tests
             StringAssert.Contains(sdp, "sprop-pps=");
         }
 
+        [TestMethod]
+        public void H265IsReadyWithoutAVps()
+        {
+            // RFC 7798 makes every sprop parameter optional and some cameras only send SPS and PPS.
+            // The client already accepts such a stream, so the server has to be able to serve one.
+            var track = new H265Track();
+            Assert.IsFalse(track.IsReady);
+
+            track.SetParameterSets(null, new byte[] { 0x42, 0x01 }, new byte[] { 0x44, 0x01 });
+            Assert.IsTrue(track.IsReady);
+        }
+
+        [TestMethod]
+        public void H265SdpOmitsParameterSetsItDoesNotHave()
+        {
+            var track = new H265Track();
+            track.SetParameterSets(null, new byte[] { 0x42, 0x01 }, new byte[] { 0x44, 0x01 });
+
+            string sdp = track.BuildSDP(new StringBuilder()).ToString();
+
+            StringAssert.Contains(sdp, "sprop-sps=");
+            StringAssert.Contains(sdp, "sprop-pps=");
+            Assert.DoesNotContain("sprop-vps=", sdp, "a VPS we do not have must not be advertised");
+
+            // and the fmtp line must still be well formed, with no leading separator
+            Assert.DoesNotContain("a=fmtp:96 ;", sdp);
+            Assert.DoesNotContain("a=fmtp:96;", sdp);
+        }
+
         #endregion
 
         #region H266

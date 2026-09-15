@@ -225,6 +225,62 @@ namespace SharpRTSPServer.Tests
         }
 
         [TestMethod]
+        [DataRow("Transport: RTP/AVP/TCP;unicast", "TCP without interleaved channels")]
+        [DataRow("Transport: RTP/AVP;unicast", "UDP without a client port")]
+        [DataRow("Transport: RTP/AVP/TCP", "TCP with nothing else")]
+        [DataRow("Transport: nonsense", "an unparseable transport")]
+        public void MalformedTransportIsAnsweredRatherThanDropped(string transport, string description)
+        {
+            using var client = Connect();
+            client.Send("OPTIONS", BaseUri);
+            client.Send("DESCRIBE", BaseUri, "Accept: application/sdp");
+
+            // These used to dereference null and let the exception escape, so the listener closed the
+            // socket and the client was left waiting for a reply that never came.
+            var response = client.Send("SETUP", TrackUri, transport);
+
+            Assert.AreEqual(461, response.StatusCode, description);
+        }
+
+        [TestMethod]
+        public void SetupWithNoTransportHeaderIsAnswered()
+        {
+            using var client = Connect();
+            client.Send("OPTIONS", BaseUri);
+            client.Send("DESCRIBE", BaseUri, "Accept: application/sdp");
+
+            Assert.AreEqual(461, client.Send("SETUP", TrackUri).StatusCode);
+        }
+
+        [TestMethod]
+        public void AConnectionRejectedAfterPlayingIsFullyTornDown()
+        {
+            using var victim = Connect();
+            string session = EstablishSession(victim);
+            Assert.AreEqual(200, victim.Send("PLAY", BaseUri, $"Session: {session}").StatusCode);
+
+            // The stream source keeps its own list of playing connections. Dropping one from the
+            // connection list alone left it there, streaming to a disposed listener and counting
+            // against nothing, so neither the idle sweep nor the connection limit could see it.
+            Assert.AreEqual(1, PlayingConnectionCount());
+
+            using (var rejected = new RtspTestClient(_port, UserName, "the-wrong-password"))
+            {
+                rejected.Send("OPTIONS", BaseUri);
+            }
+
+            // the victim is untouched by another connection failing to authenticate
+            Assert.AreEqual(1, PlayingConnectionCount());
+            Assert.AreEqual(200, victim.Send("GET_PARAMETER", BaseUri, $"Session: {session}").StatusCode);
+        }
+
+        private int PlayingConnectionCount()
+        {
+            _server.CheckTimeouts(StreamId, out _, out int playing);
+            return playing;
+        }
+
+        [TestMethod]
         public void SetupForAnUnknownTrackIsNotFound()
         {
             using var client = Connect();

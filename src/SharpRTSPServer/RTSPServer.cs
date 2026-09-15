@@ -384,6 +384,45 @@ namespace SharpRTSPServer
             // Cast the 'sender' and 'e' into the RTSP Listener (the Socket) and the RTSP Message
             RtspListener listener = sender as RtspListener ?? throw new ArgumentException("Invalid sender", nameof(sender));
 
+            // Anything that escapes here is swallowed by the listener, which then closes the socket
+            // and leaves the client waiting without a reply. Answer with a 500 instead so the failure
+            // is visible on both ends.
+            try
+            {
+                HandleRtspRequest(listener, sender, e);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error handling an RTSP request from {remoteEndPoint}", listener.RemoteEndPoint);
+                TrySendInternalServerError(listener, e.Message as RtspRequest);
+            }
+        }
+
+        /// <summary>
+        /// Best effort error reply. The connection may already be gone, which is not worth reporting.
+        /// </summary>
+        private void TrySendInternalServerError(RtspListener listener, RtspRequest request)
+        {
+            if (request == null)
+            {
+                return;
+            }
+
+            try
+            {
+                RtspResponse errorResponse = request.CreateResponse();
+                errorResponse.ReturnCode = 500; // Internal Server Error
+                listener.SendMessage(errorResponse);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Could not send the error reply");
+            }
+        }
+
+        private void HandleRtspRequest(RtspListener listener, object sender, RtspChunkEventArgs e)
+        {
+
             if (!(e.Message is RtspRequest message))
             {
                 _logger.LogWarning("RTSP message is not a request. Invalid dialog.");
@@ -414,10 +453,18 @@ namespace SharpRTSPServer
                         authorizationResponse.ReturnCode = 401;
                         listener.SendMessage(authorizationResponse);
 
+                        // Go through RemoveSession rather than just dropping it from the list. A
+                        // connection that had already started playing is also in the stream source's
+                        // list and owns UDP sockets; leaving those behind kept it streaming to nobody,
+                        // invisible to both the idle sweep and the connection limit.
                         lock (_connectionList)
                         {
-                            _connectionList.RemoveAll(c => c.Listener == listener);
+                            foreach (var staleConnection in _connectionList.Where(c => c.Listener == listener).ToArray())
+                            {
+                                RemoveSession(staleConnection);
+                            }
                         }
+
                         listener.Dispose();
                         return;
                     }
@@ -564,7 +611,19 @@ namespace SharpRTSPServer
 
             // FIXME client may send more than one possible transport.
             // very rare
-            RtspTransport transport = setupMessage.GetTransports()[0];
+            RtspTransport transport;
+            try
+            {
+                RtspTransport[] transports = setupMessage.GetTransports();
+                transport = transports.Length > 0 ? transports[0] : null;
+            }
+            catch (Exception ex)
+            {
+                // the Transport header is client supplied, so failing to parse it is their error
+                _logger.LogWarning(ex, "Could not parse the Transport header from {remoteEndPoint}", listener.RemoteEndPoint);
+                SendUnsupportedTransport(listener, setupMessage);
+                return;
+            }
 
             // Construct the Transport: reply from the Server to the client
             RtspTransport transportReply = null;
@@ -601,9 +660,24 @@ namespace SharpRTSPServer
                 return;
             }
 
+            if (transport == null)
+            {
+                // no transport we could even look at
+                SendUnsupportedTransport(listener, setupMessage);
+                return;
+            }
+
             if (transport.LowerTransport == RtspTransport.LowerTransportType.TCP)
             {
-                Debug.Assert(transport.Interleaved != null, "If transport.Interleaved is null here the program did not handle well connection problem");
+                if (transport.Interleaved == null)
+                {
+                    // interleaved channels are required for RTP over RTSP, and the header is
+                    // client supplied, so a missing one is answered rather than dereferenced
+                    _logger.LogWarning("SETUP from {remoteEndPoint} asked for TCP without interleaved channels", listener.RemoteEndPoint);
+                    SendUnsupportedTransport(listener, setupMessage);
+                    return;
+                }
+
                 rtpTransport = new RtpTcpTransport(listener)
                 {
                     DataChannel = transport.Interleaved.First,
@@ -619,7 +693,13 @@ namespace SharpRTSPServer
             }
             else if (transport.LowerTransport == RtspTransport.LowerTransportType.UDP && !transport.IsMulticast)
             {
-                Debug.Assert(transport.ClientPort != null, "If transport.ClientPort is null here the program did not handle well connection problem");
+                if (transport.ClientPort == null)
+                {
+                    // we have nowhere to send the RTP without the client's ports
+                    _logger.LogWarning("SETUP from {remoteEndPoint} asked for UDP without a client port", listener.RemoteEndPoint);
+                    SendUnsupportedTransport(listener, setupMessage);
+                    return;
+                }
 
                 // RTP over UDP mode
                 // Create a pair of UDP sockets - One is for the Data (eg Video/Audio), one is for the RTCP
@@ -715,6 +795,17 @@ namespace SharpRTSPServer
                 setupResponse.ReturnCode = 461;
                 listener.SendMessage(setupResponse);
             }
+        }
+
+        /// <summary>
+        /// Tells the client we cannot provide the transport it asked for, instead of leaving it
+        /// waiting on a connection we dropped.
+        /// </summary>
+        private static void SendUnsupportedTransport(RtspListener listener, RtspRequest setupMessage)
+        {
+            RtspResponse setupResponse = setupMessage.CreateResponse();
+            setupResponse.ReturnCode = 461; // Unsupported Transport
+            listener.SendMessage(setupResponse);
         }
 
         private void HandleDescribe(RtspListener listener, RtspRequest message)

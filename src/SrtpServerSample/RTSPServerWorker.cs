@@ -49,6 +49,7 @@ namespace SrtpServerSample
                     {
                         AudioTimer?.Dispose();
                         VideoTimer?.Dispose();
+                        IsoStream?.Dispose(); // otherwise the file handle stays open for the life of the process
                     }
 
                     _disposedValue = true;
@@ -150,20 +151,41 @@ namespace SrtpServerSample
 
                             if (inputTrack is SharpMP4.Tracks.H264Track)
                             {
+                                var parameterSets = videoUnits.Take(2).ToList();
+                                if (parameterSets.Count < 2)
+                                {
+                                    _logger.LogWarning("Skipping {fileName}: the H264 track has no SPS and PPS.", fileName);
+                                    continue;
+                                }
+
                                 var h264Track = new SharpRTSPServer.H264Track();
-                                h264Track.SetParameterSets(videoUnits.First(), videoUnits.Skip(1).First());
+                                h264Track.SetParameterSets(parameterSets[0], parameterSets[1]);
                                 rtspVideoTrack = h264Track;
                             }
                             else if (inputTrack is SharpMP4.Tracks.H265Track)
                             {
+                                var parameterSets = videoUnits.Take(3).ToList();
+                                if (parameterSets.Count < 3)
+                                {
+                                    _logger.LogWarning("Skipping {fileName}: the H265 track has no VPS, SPS and PPS.", fileName);
+                                    continue;
+                                }
+
                                 var h265Track = new SharpRTSPServer.H265Track();
-                                h265Track.SetParameterSets(videoUnits.First(), videoUnits.Skip(1).First(), videoUnits.Skip(2).First());
+                                h265Track.SetParameterSets(parameterSets[0], parameterSets[1], parameterSets[2]);
                                 rtspVideoTrack = h265Track;
                             }
                             else if (inputTrack is SharpMP4.Tracks.H266Track)
                             {
+                                var parameterSets = videoUnits.Take(2).ToList();
+                                if (parameterSets.Count < 2)
+                                {
+                                    _logger.LogWarning("Skipping {fileName}: the H266 track has no SPS and PPS.", fileName);
+                                    continue;
+                                }
+
                                 var h266Track = new SharpRTSPServer.H266Track();
-                                h266Track.SetParameterSets(null, null, videoUnits.First(), videoUnits.Skip(1).First(), null);
+                                h266Track.SetParameterSets(null, null, parameterSets[0], parameterSets[1], null);
                                 rtspVideoTrack = h266Track;
                             }
                             else if (inputTrack is SharpMP4.Tracks.AV1Track)

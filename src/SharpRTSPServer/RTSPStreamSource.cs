@@ -41,37 +41,79 @@ namespace SharpRTSPServer
 
         public void OverrideSDP(string sdp, bool mungleSDP = true)
         {
+            if (sdp == null)
+                throw new ArgumentNullException(nameof(sdp));
+
             if (mungleSDP)
             {
-                if (!sdp.Contains("a=control:"))
-                {
-                    StringBuilder builder = new StringBuilder();
-                    int mediaIndex = 0;
-
-                    // we have to fill in the trackID to identify the session in RTSP
-                    using (var textReader = new StringReader(sdp))
-                    {
-                        while (true)
-                        {
-                            string line = textReader.ReadLine();
-
-                            if (line == null)
-                                break;
-
-                            builder.AppendLine(line);
-
-                            if (line.StartsWith("m="))
-                            {
-                                builder.AppendLine($"a=control:trackID={mediaIndex++}");
-                            }
-                        }
-                    }
-
-                    sdp = builder.ToString();
-                }
+                sdp = AddMissingTrackControlAttributes(sdp);
             }
 
             this.Sdp = sdp;
+        }
+
+        /// <summary>
+        /// Gives every media section an "a=control:trackID=N" attribute, which is what SETUP uses to
+        /// identify the track. Sections that already have one are left as they are, and an SDP that
+        /// needs nothing added is returned untouched.
+        /// </summary>
+        /// <remarks>
+        /// Only media level attributes count. A session level "a=control:" says nothing about the
+        /// individual tracks, and treating it as if it did left every media section without one.
+        /// </remarks>
+        private static string AddMissingTrackControlAttributes(string sdp)
+        {
+            var lines = new List<string>();
+            using (var textReader = new StringReader(sdp))
+            {
+                string line;
+                while ((line = textReader.ReadLine()) != null)
+                {
+                    lines.Add(line);
+                }
+            }
+
+            // work out which media sections already carry a control attribute
+            var mediaHasControl = new List<bool>();
+            foreach (string line in lines)
+            {
+                if (line.StartsWith("m="))
+                {
+                    mediaHasControl.Add(false);
+                }
+                else if (line.StartsWith("a=control:") && mediaHasControl.Count > 0)
+                {
+                    mediaHasControl[mediaHasControl.Count - 1] = true;
+                }
+            }
+
+            if (mediaHasControl.Count == 0 || mediaHasControl.TrueForAll(hasControl => hasControl))
+            {
+                // nothing to add, so hand back exactly what we were given rather than reformatting it
+                return sdp;
+            }
+
+            // SDP lines are CRLF terminated per RFC 4566
+            const string LineEnding = "\r\n";
+
+            StringBuilder builder = new StringBuilder();
+            int mediaSection = -1;
+
+            foreach (string line in lines)
+            {
+                builder.Append(line).Append(LineEnding);
+
+                if (line.StartsWith("m="))
+                {
+                    mediaSection++;
+                    if (!mediaHasControl[mediaSection])
+                    {
+                        builder.Append($"a=control:trackID={mediaSection}").Append(LineEnding);
+                    }
+                }
+            }
+
+            return builder.ToString();
         }
 
         private bool _disposedValue;

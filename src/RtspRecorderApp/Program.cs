@@ -22,36 +22,46 @@ using (Stream output = new BufferedStream(new FileStream("recording_out.mp4", Fi
         {
             ITrack outputTrack;
 
+            // The SDP may carry no fmtp at all, in which case the client reports the codec with no
+            // configuration data. Recording cannot start without the parameter sets.
             switch(e.StreamType)
             {
                 case "H264":
                     {
-                        var config = e.StreamConfigurationData as H264StreamConfigurationData;
+                        if (!(e.StreamConfigurationData is H264StreamConfigurationData config))
+                        {
+                            Console.WriteLine("Ignoring the H264 stream, the SDP carried no parameter sets.");
+                            return;
+                        }
+
                         outputTrack = new H264Track();
-                        outputTrack.ProcessSample(config.SPS, out _, out _);
-                        outputTrack.ProcessSample(config.PPS, out _, out _);
+                        WriteParameterSets(outputTrack, config.SPS, config.PPS);
                     }
                     break;
 
                 case "H265":
                     {
-                        var config = e.StreamConfigurationData as H265StreamConfigurationData;
+                        if (!(e.StreamConfigurationData is H265StreamConfigurationData config))
+                        {
+                            Console.WriteLine("Ignoring the H265 stream, the SDP carried no parameter sets.");
+                            return;
+                        }
+
                         outputTrack = new H265Track();
-                        outputTrack.ProcessSample(config.VPS, out _, out _);
-                        outputTrack.ProcessSample(config.SPS, out _, out _);
-                        outputTrack.ProcessSample(config.PPS, out _, out _);
+                        WriteParameterSets(outputTrack, config.VPS, config.SPS, config.PPS);
                     }
                     break;
 
                 case "H266":
                     {
-                        var config = e.StreamConfigurationData as H266StreamConfigurationData;
+                        if (!(e.StreamConfigurationData is H266StreamConfigurationData config))
+                        {
+                            Console.WriteLine("Ignoring the H266 stream, the SDP carried no parameter sets.");
+                            return;
+                        }
+
                         outputTrack = new H266Track();
-                        outputTrack.ProcessSample(config.DCI, out _, out _);
-                        outputTrack.ProcessSample(config.VPS, out _, out _);
-                        outputTrack.ProcessSample(config.SPS, out _, out _);
-                        outputTrack.ProcessSample(config.PPS, out _, out _);
-                        outputTrack.ProcessSample(config.SEI, out _, out _);
+                        WriteParameterSets(outputTrack, config.DCI, config.VPS, config.SPS, config.PPS, config.SEI);
                     }
                     break;
 
@@ -62,7 +72,8 @@ using (Stream output = new BufferedStream(new FileStream("recording_out.mp4", Fi
                     break;
 
                 default:
-                    throw new NotSupportedException();
+                    Console.WriteLine($"Ignoring the {e.StreamType} video stream, it cannot be recorded to MP4.");
+                    return;
             }
 
             outputBuilder.AddTrack(outputTrack);
@@ -86,7 +97,12 @@ using (Stream output = new BufferedStream(new FileStream("recording_out.mp4", Fi
             {
                 case "AAC":
                     {
-                        AACStreamConfigurationData config = e.StreamConfigurationData as AACStreamConfigurationData;
+                        if (!(e.StreamConfigurationData is AACStreamConfigurationData config))
+                        {
+                            Console.WriteLine("Ignoring the AAC stream, the SDP carried no audio configuration.");
+                            return;
+                        }
+
                         uint samplingFrequency = (uint)config.SamplingFrequency;
                         if (samplingFrequency == 0)
                         {
@@ -97,7 +113,8 @@ using (Stream output = new BufferedStream(new FileStream("recording_out.mp4", Fi
                     break;
 
                 default:
-                    throw new NotSupportedException();
+                    Console.WriteLine($"Ignoring the {e.StreamType} audio stream, it cannot be recorded to MP4.");
+                    return;
             }
 
             outputBuilder.AddTrack(outputTrack);
@@ -131,4 +148,16 @@ using (Stream output = new BufferedStream(new FileStream("recording_out.mp4", Fi
     }
 
     outputBuilder.FinalizeMedia();
+}
+
+// Parameter sets are optional in the SDP, so only the ones the camera actually sent are written.
+static void WriteParameterSets(ITrack track, params byte[][] parameterSets)
+{
+    foreach (byte[] parameterSet in parameterSets)
+    {
+        if (parameterSet != null && parameterSet.Length > 0)
+        {
+            track.ProcessSample(parameterSet, out _, out _);
+        }
+    }
 }

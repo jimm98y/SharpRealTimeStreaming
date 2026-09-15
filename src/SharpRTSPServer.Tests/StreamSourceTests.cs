@@ -60,6 +60,58 @@ namespace SharpRTSPServer.Tests
         }
 
         [TestMethod]
+        public void OverrideSDP_IgnoresASessionLevelControlAttribute()
+        {
+            var source = new RTSPStreamSource("stream1", null, null);
+
+            // a session level a=control says nothing about the individual tracks; taking it as proof
+            // that the SDP was already munged left every media section without a trackID
+            string sdp =
+                "v=0\n" +
+                "o=- 0 0 IN IP4 127.0.0.1\n" +
+                "s=test\n" +
+                "a=control:*\n" +
+                "m=video 0 RTP/AVP 96\n" +
+                "a=rtpmap:96 H264/90000\n";
+
+            source.OverrideSDP(sdp);
+
+            StringAssert.Contains(source.Sdp, "a=control:trackID=0");
+        }
+
+        [TestMethod]
+        public void OverrideSDP_FillsInOnlyTheMediaSectionsThatAreMissingOne()
+        {
+            var source = new RTSPStreamSource("stream1", null, null);
+
+            string sdp =
+                "v=0\n" +
+                "m=video 0 RTP/AVP 96\n" +
+                "a=control:trackID=7\n" +
+                "m=audio 0 RTP/AVP 97\n";
+
+            source.OverrideSDP(sdp);
+
+            var lines = source.Sdp.Split('\n').Select(l => l.Trim()).Where(l => l.Length > 0).ToList();
+
+            // the video section keeps the control attribute it came with
+            StringAssert.Contains(source.Sdp, "a=control:trackID=7");
+            Assert.DoesNotContain("a=control:trackID=0", source.Sdp);
+
+            // and the audio section gains one, numbered by its position
+            int audio = lines.IndexOf("m=audio 0 RTP/AVP 97");
+            Assert.AreEqual("a=control:trackID=1", lines[audio + 1]);
+        }
+
+        [TestMethod]
+        public void OverrideSDP_RejectsNull()
+        {
+            var source = new RTSPStreamSource("stream1", null, null);
+
+            Assert.ThrowsExactly<ArgumentNullException>(() => source.OverrideSDP(null));
+        }
+
+        [TestMethod]
         public void OverrideSDP_CanBeAskedNotToTouchTheSdp()
         {
             var source = new RTSPStreamSource("stream1", null, null);

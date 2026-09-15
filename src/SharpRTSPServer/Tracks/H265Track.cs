@@ -53,7 +53,15 @@ namespace SharpRTSPServer
         /// <summary>
         /// Is the track ready?
         /// </summary>
-        public override bool IsReady { get { return VPS != null && SPS != null && PPS != null; } }
+        /// <summary>
+        /// Is the track ready?
+        /// </summary>
+        /// <remarks>
+        /// The VPS is optional. RFC 7798 makes all three sprop parameters optional, and some cameras
+        /// (HikVision among them) only ever send SPS and PPS - the client already accepts such a
+        /// stream, so the server must be able to serve one too.
+        /// </remarks>
+        public override bool IsReady { get { return SPS != null && PPS != null; } }
 
         private int _payloadType = -1;
 
@@ -115,14 +123,17 @@ namespace SharpRTSPServer
 
         public override StringBuilder BuildSDP(StringBuilder sdp)
         {
-            string vps_str = Convert.ToBase64String(VPS);
-            string sps_str = Convert.ToBase64String(SPS);
-            string pps_str = Convert.ToBase64String(PPS);
+            // Each parameter set is optional, so only advertise the ones we actually have.
+            string vps = VPS != null && VPS.Length > 0 ? "; sprop-vps=" + Convert.ToBase64String(VPS) : "";
+            string sps = SPS != null && SPS.Length > 0 ? "; sprop-sps=" + Convert.ToBase64String(SPS) : "";
+            string pps = PPS != null && PPS.Length > 0 ? "; sprop-pps=" + Convert.ToBase64String(PPS) : "";
 
             sdp.Append($"m=video 0 RTP/{RtpProfile} {PayloadType}\n");
             sdp.Append($"a=control:trackID={ID}\n");
             sdp.Append($"a=rtpmap:{PayloadType} {Codec}/{VideoClock}\n");
-            sdp.Append($"a=fmtp:{PayloadType} sprop-vps={vps_str}; sprop-sps={sps_str}; sprop-pps={pps_str}\n");
+
+            string parameterSets = (vps + sps + pps).TrimStart(';');
+            sdp.Append($"a=fmtp:{PayloadType}{parameterSets}\n");
 
             return sdp;
         }

@@ -86,6 +86,19 @@ using (var server = new RTSPServer(port, userName, password))
 
 void Reader_OnReadPacketEvent(object context, IPacket packet)
 {
+    try
+    {
+        ParsePacket(packet);
+    }
+    catch (InvalidDataException ex)
+    {
+        // one malformed packet in the capture should not stop the replay
+        Debug.WriteLine($"Skipping packet: {ex.Message}");
+    }
+}
+
+void ParsePacket(IPacket packet)
+{
     if (packet is EnhancedPacketBlock enhanced)
     {
         var ipHeader = ParseIPHeader(packet);
@@ -175,8 +188,27 @@ void ParseData(byte[] data, object header, uint seconds, uint microseconds)
     }
 }
 
+/// <summary>
+/// Smallest number of bytes a header needs before its fields can be read. Capture files come from
+/// elsewhere, so every parser checks the buffer before indexing into it.
+/// </summary>
+const int UDP_HEADER_LENGTH = 8;
+const int TCP_HEADER_LENGTH = 20;
+const int IP_HEADER_LENGTH = 20;
+
+static void EnsureCapacity(IPacket packet, int offset, int required, string what)
+{
+    if (packet.Data == null || packet.Data.Length < offset + required)
+    {
+        throw new InvalidDataException(
+            $"Truncated {what}: need {required} bytes at offset {offset}, the packet holds {packet.Data?.Length ?? 0}.");
+    }
+}
+
 static UDPHeader ParseUDPHeader(IPacket packet, int headerLength)
 {
+    EnsureCapacity(packet, headerLength, UDP_HEADER_LENGTH, "UDP header");
+
     ushort sourcePort = (ushort)(packet.Data[headerLength] << 8 | packet.Data[headerLength + 1]);
     ushort destinationPort = (ushort)(packet.Data[headerLength + 2] << 8 | packet.Data[headerLength + 2 + 1]);
     ushort length = (ushort)(packet.Data[headerLength + 4] << 8 | packet.Data[headerLength + 4 + 1]);
@@ -190,6 +222,8 @@ static UDPHeader ParseUDPHeader(IPacket packet, int headerLength)
 
 static TCPHeader ParseTCPHeader(IPacket packet, int headerLength)
 {
+    EnsureCapacity(packet, headerLength, TCP_HEADER_LENGTH, "TCP header");
+
     ushort sourcePort = (ushort)(packet.Data[headerLength] << 8 | packet.Data[headerLength + 1]);
     ushort destinationPort = (ushort)(packet.Data[headerLength + 2] << 8 | packet.Data[headerLength + 2 + 1]);
     uint sequenceNumber = (uint)(packet.Data[headerLength + 4] << 24 | packet.Data[headerLength + 5] << 16 | packet.Data[headerLength + 6] << 8 | packet.Data[headerLength + 7]);
@@ -217,6 +251,9 @@ static TCPHeader ParseTCPHeader(IPacket packet, int headerLength)
 static IPHeader ParseIPHeader(IPacket packet)
 {
     // TODO VLAN
+    // 4 bytes of link layer family, then the IP header itself
+    EnsureCapacity(packet, 0, 4 + IP_HEADER_LENGTH, "IP header");
+
     int family = BitConverter.ToInt32(packet.Data, 0);
     int version = packet.Data[4] >> 4;
     int headerLength = (packet.Data[4] & 0x0F) * 4;
@@ -231,6 +268,8 @@ static IPHeader ParseIPHeader(IPacket packet)
     ushort headerCheckSum = (ushort)(packet.Data[14] << 8 | packet.Data[15]);
 
     int ipaddrLen = version == 4 ? 4 : 16;
+    EnsureCapacity(packet, 16, ipaddrLen * 2, $"IPv{version} addresses");
+
     IPAddress sourceIP = new IPAddress(packet.Data.Skip(16).Take(ipaddrLen).ToArray());
     IPAddress destintationIP = new IPAddress(packet.Data.Skip(16 + ipaddrLen).Take(ipaddrLen).ToArray());
 
