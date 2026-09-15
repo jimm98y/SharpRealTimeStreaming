@@ -52,7 +52,9 @@ const string STREAM_ID = "stream1";
 
 using (var server = new RTSPServer(port, userName, password))
 {
-    await rtspProtocolParser.Sempahore.WaitAsync();
+    server.AuthenticationScheme = ReadAuthenticationScheme(config["AllowBasicAuthentication"]);
+
+    await rtspProtocolParser.Semaphore.WaitAsync();
 
     rtspVideoTrack = new ProxyTrack(TrackType.Video);
     rtspAudioTrack = new ProxyTrack(TrackType.Audio);
@@ -249,9 +251,17 @@ static IPHeader ParseIPHeader(IPacket packet)
     return ipHeader;
 }
 
+// Basic sends the password in a reversible form, so it stays off unless the config asks for it.
+static RtspAuthenticationScheme ReadAuthenticationScheme(string allowBasicAuthentication)
+{
+    return bool.TryParse(allowBasicAuthentication, out bool allowBasic) && allowBasic
+        ? RtspAuthenticationScheme.Basic
+        : RtspAuthenticationScheme.Digest;
+}
+
 public class RtspProtocolParser
 {
-    public SemaphoreSlim Sempahore = new SemaphoreSlim(0);
+    public SemaphoreSlim Semaphore = new SemaphoreSlim(0);
     public string SDP { get; set; }
 
     public List<List<int>> Ports { get; set; } = new List<List<int>>();
@@ -278,7 +288,7 @@ public class RtspProtocolParser
         else if (rtsp.StartsWith("v="))
         {
             SDP = rtsp;
-            Sempahore.Release();
+            Semaphore.Release();
         }
         else if (rtsp.StartsWith("RTSP"))
         {

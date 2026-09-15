@@ -186,6 +186,13 @@ namespace SharpRTSPServer
                 int packetMTU = PacketMTU; // 65535; 
                 packetMTU += -8 - 20 - 16; // -8 for UDP header, -20 for IP header, -16 normal RTP header len. ** LESS RTP EXTENSIONS !!!
 
+                if (packetMTU <= 0)
+                {
+                    // otherwise the fragmentation loop below would never make progress
+                    throw new InvalidOperationException(
+                        $"{nameof(PacketMTU)} of {PacketMTU} is too small to carry any payload, it must leave room for the IP, UDP and RTP headers.");
+                }
+
                 if (rawNal.Length > packetMTU)
                 {
                     fragmenting = true;

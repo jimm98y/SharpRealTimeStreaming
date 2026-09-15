@@ -13,6 +13,8 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Net;
+using System.Runtime.InteropServices;
 
 namespace SrtpServerSample
 {
@@ -62,6 +64,15 @@ namespace SrtpServerSample
             certificateGenerator.SetSubjectDN(subjectDN);
             certificateGenerator.SetPublicKey(issuerKeyPair.Public);
 
+            // A certificate without these is rejected by anything that checks properly: TLS clients
+            // match the host against the Subject Alternative Name, not the Common Name.
+            certificateGenerator.AddExtension(X509Extensions.BasicConstraints, true, new BasicConstraints(false));
+            certificateGenerator.AddExtension(X509Extensions.KeyUsage, true,
+                new KeyUsage(KeyUsage.DigitalSignature | KeyUsage.KeyAgreement));
+            certificateGenerator.AddExtension(X509Extensions.ExtendedKeyUsage, false,
+                new ExtendedKeyUsage(KeyPurposeID.id_kp_serverAuth));
+            certificateGenerator.AddExtension(X509Extensions.SubjectAlternativeName, false, BuildSubjectAlternativeName(name));
+
             byte[] serial = new byte[serialNumberLength];
             random.NextBytes(serial);
             serial[0] = 1;
@@ -76,12 +87,43 @@ namespace SrtpServerSample
             store.SetCertificateEntry(friendlyName, certificateEntry);
             store.SetKeyEntry(friendlyName, new Org.BouncyCastle.Pkcs.AsymmetricKeyEntry(subjectKeyPair.Private), new[] { certificateEntry });
 
-            string password = Guid.NewGuid().ToString();
+            // The store never leaves this method, but the password still guards the private key while
+            // it is in memory, so it comes from the CSPRNG rather than from a GUID.
+            byte[] passwordBytes = new byte[32];
+            random.NextBytes(passwordBytes);
+            char[] password = Convert.ToBase64String(passwordBytes).ToCharArray();
+
             using (var pkcs12Stream = new MemoryStream())
             {
-                store.Save(pkcs12Stream, password.ToCharArray(), random);
-                return System.Security.Cryptography.X509Certificates.X509CertificateLoader.LoadPkcs12Collection(pkcs12Stream.ToArray(), password).Single();
+                store.Save(pkcs12Stream, password, random);
+
+                return System.Security.Cryptography.X509Certificates.X509CertificateLoader.LoadPkcs12Collection(
+                    pkcs12Stream.ToArray(),
+                    new string(password),
+                    KeyStorageFlags).Single();
             }
+        }
+
+        /// <summary>
+        /// Keeps the private key in memory where the platform allows it. Without this Windows writes
+        /// the key into the user's key store, where it stays behind after the process exits.
+        /// </summary>
+        private static System.Security.Cryptography.X509Certificates.X509KeyStorageFlags KeyStorageFlags =>
+            RuntimeInformation.IsOSPlatform(OSPlatform.OSX)
+                ? System.Security.Cryptography.X509Certificates.X509KeyStorageFlags.DefaultKeySet // not supported on macOS
+                : System.Security.Cryptography.X509Certificates.X509KeyStorageFlags.EphemeralKeySet;
+
+        /// <summary>
+        /// Puts the host name into the Subject Alternative Name, as an IP address when it is one and
+        /// as a DNS name otherwise.
+        /// </summary>
+        private static GeneralNames BuildSubjectAlternativeName(string name)
+        {
+            var generalName = IPAddress.TryParse(name, out _)
+                ? new GeneralName(GeneralName.IPAddress, name)
+                : new GeneralName(GeneralName.DnsName, name);
+
+            return new GeneralNames(generalName);
         }
     }
 }

@@ -68,6 +68,16 @@ internal class RTSPServerWorker : BackgroundService
 
     private readonly object _syncRoot = new object();
 
+    /// <summary>
+    /// Basic sends the password in a reversible form, so it stays off unless the config asks for it.
+    /// </summary>
+    private static RtspAuthenticationScheme ReadAuthenticationScheme(string allowBasicAuthentication)
+    {
+        return bool.TryParse(allowBasicAuthentication, out bool allowBasic) && allowBasic
+            ? RtspAuthenticationScheme.Basic
+            : RtspAuthenticationScheme.Digest;
+    }
+
     public RTSPServerWorker(IConfiguration configuration, ILoggerFactory loggerFactory)
     {
         ArgumentNullException.ThrowIfNull(configuration);
@@ -91,6 +101,7 @@ internal class RTSPServerWorker : BackgroundService
             return Task.CompletedTask;
 
         _server = new RTSPServer(port, userName, password, _loggerFactory);
+        _server.AuthenticationScheme = ReadAuthenticationScheme(_configuration["RTSPServerApp:AllowBasicAuthentication"]);
         List<MediaFileReader> mediaFileReaders = new List<MediaFileReader>();
 
 

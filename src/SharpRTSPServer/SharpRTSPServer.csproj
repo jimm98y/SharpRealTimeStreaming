@@ -10,4 +10,17 @@
     <PackageReference Include="SharpSRTP" Version="0.5.7" />
   </ItemGroup>
 	
+	<ItemGroup>
+		<AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
+			<_Parameter1>SharpRTSPServer.Tests</_Parameter1>
+		</AssemblyAttribute>
+	</ItemGroup>
+
+
+	<PropertyGroup>
+		<GenerateDocumentationFile>true</GenerateDocumentationFile>
+		<!-- the public API is documented, but not every member yet - do not fail the build over it -->
+		<NoWarn>$(NoWarn);CS1591</NoWarn>
+	</PropertyGroup>
+
 </Project>

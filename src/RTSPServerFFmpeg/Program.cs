@@ -64,6 +64,8 @@ const string STREAM_ID = "stream1";
 
 using (var server = new RTSPServer(port, userName, password))
 {
+    server.AuthenticationScheme = ReadAuthenticationScheme(config["AllowBasicAuthentication"]);
+
     using (CancellationTokenSource cts = new CancellationTokenSource())
     {
         ProxyTrack rtspVideoTrack = null;
@@ -114,6 +116,14 @@ using (var server = new RTSPServer(port, userName, password))
             process.Kill();
         }
     }
+}
+
+// Basic sends the password in a reversible form, so it stays off unless the config asks for it.
+static RtspAuthenticationScheme ReadAuthenticationScheme(string allowBasicAuthentication)
+{
+    return bool.TryParse(allowBasicAuthentication, out bool allowBasic) && allowBasic
+        ? RtspAuthenticationScheme.Basic
+        : RtspAuthenticationScheme.Digest;
 }
 
 Task RunUdpClient(ProxyTrack track, Uri uri, CancellationToken cancellationToken)
