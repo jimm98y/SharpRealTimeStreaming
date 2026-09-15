@@ -45,8 +45,12 @@ namespace SharpRTSPServer
         {
             var sink = Sink;
 
+            // No sink means the track is not attached to a server right now: it has not been added
+            // yet, or its stream source was removed while a producer thread was still feeding. Both
+            // are ordinary points in the lifecycle and neither is the producer's fault, so the
+            // sample is dropped the same way one is when the sink cannot take it.
             if (sink == null)
-                throw new InvalidOperationException("Sink is null!!!");
+                return;
 
             if (!sink.CanAcceptNewSamples(StreamID))
                 return;

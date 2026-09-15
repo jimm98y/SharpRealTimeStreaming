@@ -79,12 +79,34 @@ namespace SharpRTSPServer.Tests
         }
 
         [TestMethod]
-        public void FeedingSamplesWithoutASinkIsRejected()
+        public void FeedingSamplesWithoutASinkIsDropped()
         {
+            // A track with no sink is one that has not been added to a server yet, or whose stream
+            // source has just been removed. A producer thread feeding across either of those points
+            // should not have an exception thrown back at it.
             var track = new H264Track(new byte[] { 0x67 }, new byte[] { 0x68 });
 
-            Assert.ThrowsExactly<InvalidOperationException>(
-                () => track.FeedInRawSamples(0, new System.Collections.Generic.List<ReadOnlyMemory<byte>>()));
+            track.FeedInRawSamples(0, new System.Collections.Generic.List<ReadOnlyMemory<byte>>());
+        }
+
+        [TestMethod]
+        public void FeedingSamplesAfterTheStreamSourceIsRemovedIsDropped()
+        {
+            using var server = new RTSPServer(TestPorts.FindFree(), "admin", "password");
+            var track = new H264Track(new byte[] { 0x67, 0x42, 0x00, 0x1E }, new byte[] { 0x68, 0xCE, 0x3C, 0x80 });
+            var streamSource = new RTSPStreamSource("stream1", track, null);
+
+            server.AddStreamSource(streamSource);
+            Assert.IsNotNull(track.Sink);
+
+            server.RemoveStreamSource(streamSource);
+            Assert.IsNull(track.Sink);
+
+            // whatever the producer had in flight when the source went away
+            track.FeedInRawSamples(0, new System.Collections.Generic.List<ReadOnlyMemory<byte>>
+            {
+                new ReadOnlyMemory<byte>(new byte[] { 0x65, 0x01, 0x02 })
+            });
         }
     }
 }
