@@ -156,8 +156,20 @@ namespace SharpRTSPServer
             return (rtpPackets, memoryOwners);
         }
 
+        /// <summary>
+        /// Largest AAC frame that fits the AU-size field, which is sizeLength = 13 bits wide.
+        /// </summary>
+        internal const int MAX_FRAME_LENGTH = (1 << 13) - 1;
+
         private static Memory<byte> AppendAUHeader(ReadOnlyMemory<byte> frame)
         {
+            if (frame.Length > MAX_FRAME_LENGTH)
+            {
+                // silently truncating the AU-size here would produce a corrupt, undecodable stream
+                throw new ArgumentOutOfRangeException(nameof(frame), frame.Length,
+                    $"An AAC frame must not be longer than {MAX_FRAME_LENGTH} bytes to fit the 13 bit AU-size field.");
+            }
+
             short frameLen = (short)(frame.Length << 3);
             Memory<byte> header = new byte[4+frame.Length];
             header.Span[0] = 0x00;

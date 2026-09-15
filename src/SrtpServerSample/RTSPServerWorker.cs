@@ -70,6 +70,16 @@ namespace SrtpServerSample
 
         private readonly object _syncRoot = new object();
 
+        /// <summary>
+        /// Basic sends the password in a reversible form, so it stays off unless the config asks for it.
+        /// </summary>
+        private static RtspAuthenticationScheme ReadAuthenticationScheme(string allowBasicAuthentication)
+        {
+            return bool.TryParse(allowBasicAuthentication, out bool allowBasic) && allowBasic
+                ? RtspAuthenticationScheme.Basic
+                : RtspAuthenticationScheme.Digest;
+        }
+
         public RTSPServerWorker(IConfiguration configuration, ILoggerFactory loggerFactory)
         {
             ArgumentNullException.ThrowIfNull(configuration);
@@ -93,7 +103,12 @@ namespace SrtpServerSample
                 return Task.CompletedTask;
 
             // generate self-signed TLS certificate
-            X509Certificate2 serverCertificate = CertificateUtils.GenerateECDSAServerCertificate("localhost", DateTime.UtcNow.AddDays(-1), DateTime.UtcNow.AddDays(30));
+            // Issue the certificate for the host clients actually connect to, so its Subject Alternative
+            // Name matches and the only thing left for a client to complain about is that it is self-signed.
+            X509Certificate2 serverCertificate = CertificateUtils.GenerateECDSAServerCertificate(
+                string.IsNullOrEmpty(hostName) ? "localhost" : hostName,
+                DateTime.UtcNow.AddDays(-1),
+                DateTime.UtcNow.AddDays(30));
             _server = new RTSPServer(
                 port, 
                 userName,
@@ -102,6 +117,8 @@ namespace SrtpServerSample
                 serverCertificate, // use RTSPS (RTSP over TLS)
                 SrtpCryptoSuites.AES_CM_128_HMAC_SHA1_80, // use SAVP to protect the RTP/RTCP (SRTP using AES_CM_128_HMAC_SHA1_80)
                 _loggerFactory);
+            _server.AuthenticationScheme = ReadAuthenticationScheme(_configuration["RTSPServerApp:AllowBasicAuthentication"]);
+
             List<MediaFileReader> mediaFileReaders = new List<MediaFileReader>();
 
             foreach (var mediaFile in mediaFiles)

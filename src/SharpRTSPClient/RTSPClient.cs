@@ -96,8 +96,10 @@ namespace SharpRTSPClient
         private IPayloadProcessor _audioPayloadProcessor = null;
         private bool _disposedValue;
 
-        // setup messages still to send
+        // setup messages still to send. Filled and drained on the RTSP receive thread, but cleared
+        // from whichever thread tears the session down, so every access is guarded.
         private readonly Queue<RtspRequestSetup> _setupMessages = new Queue<RtspRequestSetup>();
+        private readonly object _setupMessagesLock = new object();
 
         /// <summary>
         /// Called when the Setup command are completed, so we can start the right Play message (with or without playback informations)
@@ -116,6 +118,9 @@ namespace SharpRTSPClient
         
         public SrtpSessionContext VideoContext { get; private set; }
         public SrtpSessionContext AudioContext { get; private set; }
+
+        private readonly RtcpChannelState _videoRtcpState = new RtcpChannelState();
+        private readonly RtcpChannelState _audioRtcpState = new RtcpChannelState();
 
         static RTSPClient()
         {
@@ -152,7 +157,7 @@ namespace SharpRTSPClient
         /// <param name="rtpTransport">Type of the RTP transport <see cref="RTPTransport"/>.</param>
         /// <param name="username">User name.</param>
         /// <param name="password">Password.</param>
-        /// <param name="mediaRequest">Media request type <see cref="MediaRequest>."/></param>
+        /// <param name="mediaRequest">Media request type <see cref="MediaRequest"/>.</param>
         /// <param name="playbackSession">Playback session.</param>
         /// <param name="userCertificateSelectionCallback">Callback for user certificate selection.</param>
         /// <param name="autoReconnect">Automatically try to reconnect after losing the connection.</param>
@@ -179,7 +184,7 @@ namespace SharpRTSPClient
         /// <param name="rtpTransport">Type of the RTP transport <see cref="RTPTransport"/>.</param>
         /// <param name="username">User name.</param>
         /// <param name="password">Password.</param>
-        /// <param name="mediaRequest">Media request type <see cref="MediaRequest>."/></param>
+        /// <param name="mediaRequest">Media request type <see cref="MediaRequest"/>.</param>
         /// <param name="playbackSession">Playback session.</param>
         /// <param name="userCertificateSelectionCallback">Callback for user certificate selection.</param>
         /// <param name="autoReconnect">Automatically try to reconnect after losing the connection.</param>
@@ -197,21 +202,9 @@ namespace SharpRTSPClient
                 throw new ArgumentNullException(nameof(uri));
 
             // Use URI to extract username and password and to make a new URL without the username and password
-            var hostname = uri.Host;
-            var port = uri.Port;
-            NetworkCredential credentials = null;
+            var (strippedUri, credentials) = ExtractCredentials(uri, username, password);
 
-            if (uri.UserInfo.Length > 0)
-            {
-                credentials = new NetworkCredential(uri.UserInfo.Split(':')[0], uri.UserInfo.Split(':')[1]);
-                uri = new Uri(uri.GetComponents(UriComponents.AbsoluteUri & ~UriComponents.UserInfo, UriFormat.UriEscaped));
-            }
-            else
-            {
-                credentials = new NetworkCredential(username, password);
-            }
-
-            Connect(uri, rtpTransport, credentials, mediaRequest, playbackSession, userCertificateSelectionCallback, autoReconnect);
+            Connect(strippedUri, rtpTransport, credentials, mediaRequest, playbackSession, userCertificateSelectionCallback, autoReconnect);
         }
 
         /// <summary>
@@ -220,7 +213,7 @@ namespace SharpRTSPClient
         /// <param name="uri">The URI of the RTSP server.</param>
         /// <param name="rtpTransport">Type of the RTP transport <see cref="RTPTransport"/>.</param>
         /// <param name="credentials">Network credentials.</param>
-        /// <param name="mediaRequest">Media request type <see cref="MediaRequest>."/></param>
+        /// <param name="mediaRequest">Media request type <see cref="MediaRequest"/>.</param>
         /// <param name="playbackSession">Playback session.</param>
         /// <param name="userCertificateSelectionCallback">Callback for user certificate selection.</param>
         /// <param name="autoReconnect">Automatically try to reconnect after losing the connection.</param>
@@ -250,6 +243,12 @@ namespace SharpRTSPClient
             this._playbackSession = playbackSession;
             this._userCertificateSelectionCallback = userCertificateSelectionCallback;
             this._autoReconnect = autoReconnect;
+
+            // start from a clean handshake, whatever happened to any previous attempt
+            lock (_setupMessagesLock)
+            {
+                _setupMessages.Clear();
+            }
 
             // Connect to a RTSP Server. The RTSP session is a TCP connection
             _rtspSocketStatus = RtspStatus.Connecting;
@@ -322,6 +321,34 @@ namespace SharpRTSPClient
             };
 
             _rtspClient.SendMessage(optionsMessage);
+        }
+
+        /// <summary>
+        /// Takes the credentials out of the URI's user info, if it has any, and returns the URI stripped
+        /// of them. Falls back to the supplied user name and password when the URI carries none.
+        /// </summary>
+        /// <param name="uri">The URI to read from.</param>
+        /// <param name="username">User name to use when the URI carries no user info.</param>
+        /// <param name="password">Password to use when the URI carries no user info.</param>
+        /// <returns>The URI without the user info, and the credentials to authenticate with.</returns>
+        internal static (Uri Uri, NetworkCredential Credentials) ExtractCredentials(Uri uri, string username, string password)
+        {
+            if (uri.UserInfo.Length == 0)
+            {
+                return (uri, new NetworkCredential(username, password));
+            }
+
+            // The user info is percent encoded in the URI, and the password may itself contain a ':',
+            // so it has to be split on the first separator only and then unescaped.
+            int separator = uri.UserInfo.IndexOf(':');
+            string uriUserName = separator < 0 ? uri.UserInfo : uri.UserInfo.Substring(0, separator);
+            string uriPassword = separator < 0 ? string.Empty : uri.UserInfo.Substring(separator + 1);
+
+            Uri uriWithoutCredentials = new Uri(uri.GetComponents(UriComponents.AbsoluteUri & ~UriComponents.UserInfo, UriFormat.UriEscaped));
+
+            return (uriWithoutCredentials, new NetworkCredential(
+                Uri.UnescapeDataString(uriUserName),
+                Uri.UnescapeDataString(uriPassword)));
         }
 
         /// <summary>
@@ -411,7 +438,7 @@ namespace SharpRTSPClient
         /// Generate a Play request from required time
         /// </summary>
         /// <param name="seekTime">The playback time to start from</param>
-        /// <param name="speed">Speed information (1.0 means normal speed, -1.0 backward speed), other values >1.0 and <-1.0 allow a different speed</param>
+        /// <param name="speed">Speed information (1.0 means normal speed, -1.0 backward speed), other values &gt;1.0 and &lt;-1.0 allow a different speed</param>
         public void Play(DateTime seekTime, double speed = 1.0)
         {
             if (_rtspSocket == null || _uri == null) { throw new InvalidOperationException("Not connected"); }
@@ -434,7 +461,7 @@ namespace SharpRTSPClient
         /// </summary>
         /// <param name="seekTimeFrom">Starting time for playback</param>
         /// <param name="seekTimeTo">Ending time for playback</param>
-        /// <param name="speed">Speed information (1.0 means normal speed, -1.0 backward speed), other values >1.0 and <-1.0 allow a different speed</param>
+        /// <param name="speed">Speed information (1.0 means normal speed, -1.0 backward speed), other values &gt;1.0 and &lt;-1.0 allow a different speed</param>
         /// <exception cref="InvalidOperationException"></exception>
         public void Play(DateTime seekTimeFrom, DateTime seekTimeTo, double speed = 1.0)
         {
@@ -479,6 +506,17 @@ namespace SharpRTSPClient
         private void TeardownClient()
         {
             _rtspSocketStatus = RtspStatus.WaitingToConnect;
+
+            // a reconnect gets a new stream, so the SSRC we learned no longer applies
+            _videoRtcpState.Reset();
+            _audioRtcpState.Reset();
+
+            // Drop any SETUP messages left over from an interrupted handshake. A reconnect builds a
+            // fresh set from the new DESCRIBE, and sending a stale one first would use the old URI.
+            lock (_setupMessagesLock)
+            {
+                _setupMessages.Clear();
+            }
 
             // Stop the keepalive timer
             var keepaliveTimer = _keepaliveTimer;
@@ -528,9 +566,7 @@ namespace SharpRTSPClient
         {
             if (VideoContext != null)
             {
-                byte[] rtcpBuffer = new byte[VideoContext.EncodeRtcpContext.CalculateRequiredSrtcpPayloadLength(rtcp.Length)];
-                VideoContext.EncodeRtcpContext.ProtectRtcp(rtcpBuffer, rtcp.Length, out int len);
-                rtcp = rtcpBuffer.Take(len).ToArray();
+                rtcp = ProtectRtcp(VideoContext, rtcp);
             }
 
             _videoRtpTransport.WriteToControlPort(rtcp);
@@ -544,12 +580,31 @@ namespace SharpRTSPClient
         {
             if (AudioContext != null)
             {
-                byte[] rtcpBuffer = new byte[AudioContext.EncodeRtcpContext.CalculateRequiredSrtcpPayloadLength(rtcp.Length)];
-                AudioContext.EncodeRtcpContext.ProtectRtcp(rtcpBuffer, rtcp.Length, out int len);
-                rtcp = rtcpBuffer.Take(len).ToArray();
+                rtcp = ProtectRtcp(AudioContext, rtcp);
             }
 
             _audioRtpTransport.WriteToControlPort(rtcp);
+        }
+
+        /// <summary>
+        /// Wraps an RTCP packet as SRTCP.
+        /// </summary>
+        internal static byte[] ProtectRtcp(SrtpSessionContext context, byte[] rtcp)
+        {
+            byte[] rtcpBuffer = new byte[context.EncodeRtcpContext.CalculateRequiredSrtcpPayloadLength(rtcp.Length)];
+
+            // the packet has to be copied into the (larger) output buffer first - ProtectRtcp works in place
+            Buffer.BlockCopy(rtcp, 0, rtcpBuffer, 0, rtcp.Length);
+
+            int ret = context.EncodeRtcpContext.ProtectRtcp(rtcpBuffer, rtcp.Length, out int len);
+            if (ret != 0)
+            {
+                throw new InvalidOperationException($"Failed to protect the RTCP packet, SRTP returned {ret}.");
+            }
+
+            byte[] protectedRtcp = new byte[len];
+            Buffer.BlockCopy(rtcpBuffer, 0, protectedRtcp, 0, len);
+            return protectedRtcp;
         }
 
         public byte[] BuildRtcpReceiverReport(uint ssrc)
@@ -604,6 +659,9 @@ namespace SharpRTSPClient
                     _logger.LogDebug("Ignoring this Video RTP payload");
                     return;
                 }
+
+                // remember who is actually sending us media, so we can ignore RTCP BYE from anyone else
+                _videoRtcpState.LearnRemoteSsrc(rtpPacket.Ssrc);
 
                 ReceivedRawVideoRTP?.Invoke(this,
                     new RawRtpDataEventArgs(
@@ -680,8 +738,11 @@ namespace SharpRTSPClient
                 if (rtpPacket.PayloadType != _audioPayload)
                 {
                     _logger.LogDebug("Ignoring this Audio RTP payload");
-                    return; 
+                    return;
                 }
+
+                // remember who is actually sending us media, so we can ignore RTCP BYE from anyone else
+                _audioRtcpState.LearnRemoteSsrc(rtpPacket.Ssrc);
 
                 ReceivedRawAudioRTP?.Invoke(this,
                    new RawRtpDataEventArgs(
@@ -751,7 +812,7 @@ namespace SharpRTSPClient
                 if (!ProcessRTCP)
                     return;
 
-                var reports = ParseRTCPAndGenerateReponse(rtcpData, VideoSSRC);
+                var reports = ParseRTCPAndGenerateResponse(rtcpData, VideoSSRC, _videoRtcpState);
                 foreach (var report in reports)
                 {
                     ((IRtpTransport)sender).WriteToControlPort(report);
@@ -788,7 +849,7 @@ namespace SharpRTSPClient
                 if (!ProcessRTCP)
                     return;
 
-                var reports = ParseRTCPAndGenerateReponse(rtcpData, AudioSSRC);
+                var reports = ParseRTCPAndGenerateResponse(rtcpData, AudioSSRC, _audioRtcpState);
                 foreach (var report in reports)
                 {
                     ((IRtpTransport)sender).WriteToControlPort(report);
@@ -796,7 +857,17 @@ namespace SharpRTSPClient
             }
         }
 
-        private List<byte[]> ParseRTCPAndGenerateReponse(Memory<byte> data, uint ssrc)
+        /// <summary>
+        /// Size of the fixed RTCP header (V/P/count, packet type, length) plus the sender SSRC.
+        /// </summary>
+        private const int RTCP_HEADER_SIZE = 8;
+
+        /// <summary>
+        /// Size of a Sender Report up to and including the RTP timestamp, which is all we read.
+        /// </summary>
+        private const int RTCP_SENDER_REPORT_SIZE = 20;
+
+        internal List<byte[]> ParseRTCPAndGenerateResponse(Memory<byte> data, uint ssrc, RtcpChannelState channel)
         {
             List<byte[]> reports = new List<byte[]>();
 
@@ -807,17 +878,30 @@ namespace SharpRTSPClient
             // - SSRC
             // - payload
 
+            // Everything below is parsed straight off the wire, so every read has to be bounds checked -
+            // on UDP transport these datagrams can come from anyone who can reach the port.
+
             // There can be multiple RTCP packets transmitted together. Loop ever each one
             int packetIndex = 0;
             var span = data.Span;
 
-            while (packetIndex < data.Length)
+            while (packetIndex + RTCP_HEADER_SIZE <= data.Length)
             {
                 //int rtcpVersion = (span[packetIndex + 0] >> 6);
                 //int rtcpPadding = (span[packetIndex + 0] >> 5) & 0x01;
                 //int rtcpReceptionReportCount = (span[packetIndex + 0] & 0x1F);
                 byte rtcpPacketType = span[packetIndex + 1]; // Values from 200 to 207
                 int rtcpLength = (int)(span[packetIndex + 2] << 8) + (int)(span[packetIndex + 3]); // number of 32 bit words
+                int rtcpPacketLength = (rtcpLength + 1) * 4;
+
+                // a packet in a compound RTCP packet must not claim to run past the end of the datagram
+                if (rtcpPacketLength < RTCP_HEADER_SIZE || packetIndex + rtcpPacketLength > data.Length)
+                {
+                    _logger.LogWarning("Discarding malformed RTCP packet of declared length {rtcpPacketLength} at offset {packetIndex} of {length}",
+                        rtcpPacketLength, packetIndex, data.Length);
+                    break;
+                }
+
                 uint rtcpSsrc = (uint)(span[packetIndex + 4] << 24) + (uint)(span[packetIndex + 5] << 16)
                     + (uint)(span[packetIndex + 6] << 8) + span[packetIndex + 7];
 
@@ -835,66 +919,80 @@ namespace SharpRTSPClient
                     // We have received a Sender Report
                     // Use it to convert the RTP timestamp into the UTC time
 
-                    UInt32 ntpMswSeconds = (uint)(span[packetIndex + 8] << 24) + (uint)(span[packetIndex + 9] << 16)
-                    + (uint)(span[packetIndex + 10] << 8) + span[packetIndex + 11];
-
-                    //UInt32 ntpLswFractions = (uint)(span[packetIndex + 12] << 24) + (uint)(span[packetIndex + 13] << 16)
-                    //+ (uint)(span[packetIndex + 14] << 8) + span[packetIndex + 15];
-
-                    UInt32 rtpTimestamp = (uint)(span[packetIndex + 16] << 24) + (uint)(span[packetIndex + 17] << 16)
-                    + (uint)(span[packetIndex + 18] << 8) + span[packetIndex + 19];
-
-                    //double ntp = ntpMswSeconds + (ntpLswFractions / UInt32.MaxValue);
-
-                    // NTP Most Signigicant Word is relative to 0h, 1 Jan 1900
-                    // This will wrap around in 2036
-                    var time = new DateTime(1900, 1, 1, 0, 0, 0, DateTimeKind.Utc);
-
-                    time = time.AddSeconds(ntpMswSeconds); // adds 'double' (whole&fraction)
-
-                    _logger.LogDebug("RTCP time (UTC) for RTP timestamp {timestamp} is {time}", rtpTimestamp, time);
-
-                    // Send a Receiver Report
-                    try
+                    if (rtcpPacketLength < RTCP_SENDER_REPORT_SIZE)
                     {
-                        byte[] rtcpReceiverReport = new byte[8];
-                        int version = 2;
-                        int paddingBit = 0;
-                        int reportCount = 0; // an empty report
-                        int packetType = 201; // Receiver Report
-                        int length = (rtcpReceiverReport.Length / 4) - 1; // num 32 bit words minus 1
-                        rtcpReceiverReport[0] = (byte)((version << 6) + (paddingBit << 5) + reportCount);
-                        rtcpReceiverReport[1] = (byte)(packetType);
-                        rtcpReceiverReport[2] = (byte)((length >> 8) & 0xFF);
-                        rtcpReceiverReport[3] = (byte)((length >> 0) & 0XFF);
-                        rtcpReceiverReport[4] = (byte)((ssrc >> 24) & 0xFF);
-                        rtcpReceiverReport[5] = (byte)((ssrc >> 16) & 0xFF);
-                        rtcpReceiverReport[6] = (byte)((ssrc >> 8) & 0xFF);
-                        rtcpReceiverReport[7] = (byte)((ssrc >> 0) & 0xFF);
-
-                        reports.Add(rtcpReceiverReport);
+                        _logger.LogWarning("Discarding truncated RTCP Sender Report of length {rtcpPacketLength}", rtcpPacketLength);
                     }
-                    catch (Exception ex)
+                    else
                     {
-                        _logger.LogDebug($"Error writing RTCP packet: {ex.Message}.");
+                        UInt32 ntpMswSeconds = (uint)(span[packetIndex + 8] << 24) + (uint)(span[packetIndex + 9] << 16)
+                        + (uint)(span[packetIndex + 10] << 8) + span[packetIndex + 11];
+
+                        //UInt32 ntpLswFractions = (uint)(span[packetIndex + 12] << 24) + (uint)(span[packetIndex + 13] << 16)
+                        //+ (uint)(span[packetIndex + 14] << 8) + span[packetIndex + 15];
+
+                        UInt32 rtpTimestamp = (uint)(span[packetIndex + 16] << 24) + (uint)(span[packetIndex + 17] << 16)
+                        + (uint)(span[packetIndex + 18] << 8) + span[packetIndex + 19];
+
+                        //double ntp = ntpMswSeconds + (ntpLswFractions / UInt32.MaxValue);
+
+                        // NTP Most Significant Word is relative to 0h, 1 Jan 1900
+                        // This will wrap around in 2036
+                        var time = new DateTime(1900, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+
+                        time = time.AddSeconds(ntpMswSeconds); // adds 'double' (whole&fraction)
+
+                        _logger.LogDebug("RTCP time (UTC) for RTP timestamp {timestamp} is {time}", rtpTimestamp, time);
+
+                        // Send a Receiver Report
+                        reports.Add(BuildRtcpReceiverReport(ssrc));
                     }
                 }
                 else if (rtcpPacketType == 203)
                 {
-                    // We have received a BYE message
-                    _logger.LogDebug("RTCP BYE message received");
+                    // We have received a BYE message.
+                    // Only honour it from the source we are actually receiving media from, otherwise a single
+                    // spoofed UDP datagram from anywhere would be enough to tear the session down.
+                    uint? remoteSsrc = channel.RemoteSsrc;
 
-                    Stopped?.Invoke(this, new StoppedEventArgs(StoppedReason.RtcpBye));
-                    TeardownClient();
+                    if (remoteSsrc.HasValue && remoteSsrc.Value != rtcpSsrc)
+                    {
+                        _logger.LogWarning("Ignoring RTCP BYE for unknown SSRC {rtcpSsrc}, streaming from SSRC {remoteSsrc}", rtcpSsrc, remoteSsrc.Value);
+                    }
+                    else
+                    {
+                        _logger.LogDebug("RTCP BYE message received");
+
+                        Stopped?.Invoke(this, new StoppedEventArgs(StoppedReason.RtcpBye));
+                        TeardownClient();
+                        break;
+                    }
                 }
 
-                packetIndex += (rtcpLength + 1) * 4;
+                packetIndex += rtcpPacketLength;
             }
 
             return reports;
         }
 
         private void RtspMessageReceived(object sender, RtspChunkEventArgs e)
+        {
+            // This runs on the listener's receive thread. Anything that escapes here is an unhandled
+            // exception on a background thread, which takes the whole process down, so the dialog is
+            // wrapped and turned into a Stopped event the caller can react to.
+            try
+            {
+                HandleRtspResponse(e);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error handling the RTSP response, stopping");
+                TeardownClient();
+                Stopped?.Invoke(this, new StoppedEventArgs(StoppedReason.ProtocolError));
+            }
+        }
+
+        private void HandleRtspResponse(RtspChunkEventArgs e)
         {
             if (!(e.Message is RtspResponse message))
                 return;
@@ -925,6 +1023,8 @@ namespace SharpRTSPClient
                 }
 
                 // Check if the Reply has an Authenticate header.
+                // Only a 401 carrying a challenge is worth resending - retrying on any other error would put
+                // the client into an endless request loop against a server that keeps rejecting us.
                 if (message.ReturnCode == 401 && message.Headers.TryGetValue(RtspHeaderNames.WWWAuthenticate, out string value))
                 {
                     // Process the WWW-Authenticate header
@@ -934,16 +1034,18 @@ namespace SharpRTSPClient
                     string wwwAuthenticate = value ?? string.Empty;
                     _authentication = Authentication.Create(_credentials, wwwAuthenticate);
                     _logger.LogDebug("WWW Authorize parsed for {authentication}", _authentication);
+
+                    if (message.OriginalRequest?.Clone() is RtspRequest resendMessage)
+                    {
+                        resendMessage.AddAuthorization(_authentication, _uri, _rtspSocket?.NextCommandIndex() ?? 0);
+                        _rtspClient?.SendMessage(resendMessage);
+                        return;
+                    }
                 }
 
-                RtspRequest resendMessage = message.OriginalRequest?.Clone() as RtspRequest;
-
-                if (resendMessage != null)
-                {
-                    resendMessage.AddAuthorization(_authentication, _uri, _rtspSocket.NextCommandIndex());
-                    _rtspClient?.SendMessage(resendMessage);
-                }
-
+                _logger.LogError("Stopping, the server replied {returnCode} {returnMessage}", message.ReturnCode, message.ReturnMessage);
+                StopClient();
+                Stopped?.Invoke(this, new StoppedEventArgs(StoppedReason.ServerError));
                 return;
             }
 
@@ -1072,10 +1174,18 @@ namespace SharpRTSPClient
                 }
 
                 // Check if we have another SETUP command to send, then remote it from the list
-                if (_setupMessages.Count > 0)
+                RtspRequestSetup nextSetup = null;
+                lock (_setupMessagesLock)
+                {
+                    if (_setupMessages.Count > 0)
+                    {
+                        nextSetup = _setupMessages.Dequeue();
+                    }
+                }
+
+                if (nextSetup != null)
                 {
                     // send the next SETUP message, after adding in the 'session'
-                    RtspRequestSetup nextSetup = _setupMessages.Dequeue();
                     nextSetup.Session = _session;
                     _rtspClient?.SendMessage(nextSetup);
                 }
@@ -1121,7 +1231,17 @@ namespace SharpRTSPClient
             var customControlUri = sdpData.Attributs.FirstOrDefault(x => x.Key == "control");
             if (customControlUri != null && !string.Equals(customControlUri.Value, "*"))
             {
-                _uri = new Uri(_uri, customControlUri.Value);
+                var sessionControlUri = new Uri(_uri, customControlUri.Value);
+
+                // the SDP is server supplied, so it must not be able to aim us at a different host
+                if (IsSameOrigin(_uri, sessionControlUri))
+                {
+                    _uri = sessionControlUri;
+                }
+                else
+                {
+                    _logger.LogWarning("Ignoring the session control URI {controlUri} from the SDP, it points away from {uri}", sessionControlUri, _uri);
+                }
             }
 
             // Process each 'Media' Attribute in the SDP (each sub-stream)
@@ -1302,7 +1422,10 @@ namespace SharpRTSPClient
                             if (_playbackSession) { setupMessage.AddRequireOnvifRequest(); }
 
                             // Add SETUP message to list of mesages to send
-                            _setupMessages.Enqueue(setupMessage);
+                            lock (_setupMessagesLock)
+                            {
+                                _setupMessages.Enqueue(setupMessage);
+                            }
 
                             VideoContext = PrepareSrtpContext(media);
 
@@ -1375,11 +1498,17 @@ namespace SharpRTSPClient
                         if (_audioPayloadProcessor is AACPayload aacPayloadProcessor)
                         {
                             _audioCodec = "AAC";
+                            // The payload processor reports the index but leaves the frequency itself
+                            // at zero, so derive it here rather than hand callers a meaningless value.
+                            int samplingFrequency = aacPayloadProcessor.SamplingFrequency > 0
+                                ? aacPayloadProcessor.SamplingFrequency
+                                : AACStreamConfigurationData.GetSamplingFrequency(aacPayloadProcessor.FrequencyIndex);
+
                             streamConfigurationData = new AACStreamConfigurationData()
                             {
                                 ObjectType = aacPayloadProcessor.ObjectType,
                                 FrequencyIndex = aacPayloadProcessor.FrequencyIndex,
-                                SamplingFrequency = aacPayloadProcessor.SamplingFrequency,
+                                SamplingFrequency = samplingFrequency,
                                 ChannelConfiguration = aacPayloadProcessor.ChannelConfiguration
                             };
                         }
@@ -1405,7 +1534,10 @@ namespace SharpRTSPClient
                                 setupMessage.AddRateControlOnvifRequest(false);
                             }
                             // Add SETUP message to list of mesages to send
-                            _setupMessages.Enqueue(setupMessage);
+                            lock (_setupMessagesLock)
+                            {
+                                _setupMessages.Enqueue(setupMessage);
+                            }
 
                             AudioContext = PrepareSrtpContext(media);
 
@@ -1416,20 +1548,31 @@ namespace SharpRTSPClient
                 }
             }
 
-            if (_setupMessages.Count == 0)
+            RtspRequestSetup firstSetup = null;
+            lock (_setupMessagesLock)
             {
-                // No SETUP messages were generated
-                // So we cannot continue
-                throw new ApplicationException("Unable to setup media stream");
+                if (_setupMessages.Count > 0)
+                {
+                    firstSetup = _setupMessages.Dequeue();
+                }
+            }
+
+            if (firstSetup == null)
+            {
+                // The SDP described nothing we can play, so there is no session to set up.
+                _logger.LogError("Unable to set up a media stream, the SDP has no supported media");
+                TeardownClient();
+                Stopped?.Invoke(this, new StoppedEventArgs(StoppedReason.UnsupportedMedia));
+                return;
             }
 
             // Send the FIRST SETUP message and remove it from the list of Setup Messages
-            _rtspClient?.SendMessage(_setupMessages.Dequeue());
+            _rtspClient?.SendMessage(firstSetup);
         }
 
         public virtual SrtpSessionContext PrepareSrtpContext(Media media)
         {
-            if (media.RtpType != null && media.RtpType.EndsWith("/SAVP") || media.RtpType.EndsWith("/SAVPF"))
+            if (media.RtpType != null && (media.RtpType.EndsWith("/SAVP") || media.RtpType.EndsWith("/SAVPF")))
             {
                 var crypto = media.Attributs.FirstOrDefault(x => x.Key == "crypto");
                 if (crypto != null)
@@ -1445,7 +1588,18 @@ namespace SharpRTSPClient
                         if (cryptoParts[2].StartsWith("inline:"))
                         {
                             string[] inlineParts = cryptoParts[2].Substring(7).Split('|');
-                            masterKeySalt = Convert.FromBase64String(inlineParts[0]);
+
+                            // the SDP comes from the server, so it cannot be assumed to be well formed
+                            try
+                            {
+                                masterKeySalt = Convert.FromBase64String(inlineParts[0]);
+                            }
+                            catch (FormatException ex)
+                            {
+                                _logger.LogError(ex, "Invalid base64 master key/salt in the SDP crypto attribute");
+                                return null;
+                            }
+
                             if (inlineParts.Length > 1)
                             {
                                 if (inlineParts.Length > 2)
@@ -1469,18 +1623,45 @@ namespace SharpRTSPClient
             return null;
         }
 
-        private static byte[] ParseMKI(string sdpMki)
+        /// <summary>
+        /// Largest MKI we are prepared to accept from an SDP, in bytes. RFC 4568 puts the limit at 128.
+        /// </summary>
+        private const int MAX_MKI_LENGTH = 128;
+
+        /// <summary>
+        /// Parses the "&lt;mki&gt;:&lt;length&gt;" part of an SDP crypto attribute.
+        /// The value comes straight from the server, so every field is validated before it is used.
+        /// </summary>
+        internal byte[] ParseMKI(string sdpMki)
         {
             string[] mkiParts = sdpMki.Split(':');
-            if (mkiParts.Length == 2)
+            if (mkiParts.Length != 2)
             {
-                byte[] mkiValue = new BigInteger(int.Parse(mkiParts[0])).ToByteArray();
-                byte[] MKI = new byte[int.Parse(mkiParts[1])];
-                Buffer.BlockCopy(mkiValue, 0, MKI, 0, mkiValue.Length);
-                return MKI;
+                return null;
             }
 
-            return null;
+            if (!int.TryParse(mkiParts[0], out int mki) || mki < 0)
+            {
+                _logger.LogWarning("Ignoring SDP crypto MKI with an invalid value {mki}", mkiParts[0]);
+                return null;
+            }
+
+            if (!int.TryParse(mkiParts[1], out int mkiLength) || mkiLength <= 0 || mkiLength > MAX_MKI_LENGTH)
+            {
+                _logger.LogWarning("Ignoring SDP crypto MKI with an invalid length {mkiLength}", mkiParts[1]);
+                return null;
+            }
+
+            byte[] mkiValue = new BigInteger(mki).ToByteArray();
+            if (mkiValue.Length > mkiLength)
+            {
+                _logger.LogWarning("Ignoring SDP crypto MKI {mki} which does not fit into the declared length {mkiLength}", mki, mkiLength);
+                return null;
+            }
+
+            byte[] MKI = new byte[mkiLength];
+            Buffer.BlockCopy(mkiValue, 0, MKI, 0, mkiValue.Length);
+            return MKI;
         }
 
         private Uri GetControlUri(Media media)
@@ -1509,7 +1690,34 @@ namespace SharpRTSPClient
                     controlUri = new Uri(baseUriWithTrailingSlash, sdpControl);
                 }
             }
+
+            if (controlUri != null && !IsSameOrigin(_uri, controlUri))
+            {
+                _logger.LogWarning("Ignoring the control URI {controlUri} from the SDP, it points away from {uri}", controlUri, _uri);
+                return null;
+            }
+
             return controlUri;
+        }
+
+        /// <summary>
+        /// Checks that a URI taken from the SDP still points at the server we connected to.
+        /// </summary>
+        /// <remarks>
+        /// The SDP is supplied by the server, and the URIs in it are used to build authenticated
+        /// requests. An absolute URI naming a different host would send the digest response - computed
+        /// over that URI - somewhere we never meant to talk to.
+        /// </remarks>
+        internal static bool IsSameOrigin(Uri expected, Uri actual)
+        {
+            if (expected == null || actual == null)
+            {
+                return false;
+            }
+
+            return string.Equals(expected.Scheme, actual.Scheme, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(expected.Host, actual.Host, StringComparison.OrdinalIgnoreCase)
+                && expected.Port == actual.Port;
         }
 
         private RtspTransport CalculateTransport(IRtpTransport transport)
@@ -1523,14 +1731,14 @@ namespace SharpRTSPClient
                     {
                         LowerTransport = RtspTransport.LowerTransportType.TCP,
                         // Eg Channel 0 for RTP video data. Channel 1 for RTCP status reports
-                        Interleaved = (transport as RtpTcpTransport)?.Channels ?? throw new ApplicationException("TCP transport asked and no tcp channel allocated"),
+                        Interleaved = (transport as RtpTcpTransport)?.Channels ?? throw new InvalidOperationException("TCP transport asked and no tcp channel allocated"),
                     };
                 case RTPTransport.UDP:
                     return new RtspTransport()
                     {
                         LowerTransport = RtspTransport.LowerTransportType.UDP,
                         IsMulticast = false,
-                        ClientPort = (transport as UDPSocket)?.Ports ?? throw new ApplicationException("UDP transport asked and no udp port allocated"),
+                        ClientPort = (transport as UDPSocket)?.Ports ?? throw new InvalidOperationException("UDP transport asked and no udp port allocated"),
                     };
                 // Server sends the RTP packets to a Pair of UDP ports (one for data, one for rtcp control messages)
                 // using Multicast Address and Ports that are in the reply to the SETUP message
@@ -1555,26 +1763,45 @@ namespace SharpRTSPClient
 
             // This code uses GET_PARAMETER (unless OPTIONS report it is not supported, and then it sends OPTIONS as a keepalive)
 
-            RtspRequest keepAliveMessage;
-            if (_serverSupportsGetParameter)
+            try
             {
-                keepAliveMessage = new RtspRequestGetParameter
-                {
-                    RtspUri = _uri,
-                    Session = _session
-                };
-            }
-            else
-            {
-                keepAliveMessage = new RtspRequestOptions
-                { 
-                    RtspUri = _uri,
-                    Session = _session
-                };
-            }
+                // The timer can fire while the session is being torn down, so take one copy of everything
+                // this needs and give up quietly if the teardown got there first.
+                var rtspSocket = _rtspSocket;
+                var rtspClient = _rtspClient;
+                var uri = _uri;
 
-            keepAliveMessage.AddAuthorization(_authentication, _uri, _rtspSocket.NextCommandIndex());
-            _rtspClient?.SendMessage(keepAliveMessage);
+                if (rtspSocket == null || rtspClient == null || uri == null)
+                {
+                    return;
+                }
+
+                RtspRequest keepAliveMessage;
+                if (_serverSupportsGetParameter)
+                {
+                    keepAliveMessage = new RtspRequestGetParameter
+                    {
+                        RtspUri = uri,
+                        Session = _session
+                    };
+                }
+                else
+                {
+                    keepAliveMessage = new RtspRequestOptions
+                    {
+                        RtspUri = uri,
+                        Session = _session
+                    };
+                }
+
+                keepAliveMessage.AddAuthorization(_authentication, uri, rtspSocket.NextCommandIndex());
+                rtspClient.SendMessage(keepAliveMessage);
+            }
+            catch (Exception ex)
+            {
+                // this runs on a timer thread, an escaping exception would take the process down
+                _logger.LogWarning(ex, "Failed to send the RTSP keepalive");
+            }
         }
 
         #region IDisposable
@@ -1630,6 +1857,21 @@ namespace SharpRTSPClient
         Unauthorized,
         RtcpBye,
         NotFound,
+
+        /// <summary>
+        /// The server rejected a request with an error we cannot recover from.
+        /// </summary>
+        ServerError,
+
+        /// <summary>
+        /// The server's SDP did not describe any media this client can play.
+        /// </summary>
+        UnsupportedMedia,
+
+        /// <summary>
+        /// The RTSP dialog failed unexpectedly. The exception is written to the log.
+        /// </summary>
+        ProtocolError,
     }
 
     public class StoppedEventArgs : EventArgs
@@ -1776,9 +2018,34 @@ namespace SharpRTSPClient
         {
             return new CustomLoggerScope<TState>(state);
         }
+        /// <summary>
+        /// Reports whether anything would actually be written at this level.
+        /// </summary>
+        /// <remarks>
+        /// This gates the per-packet logging on the RTP receive path. Answering "true" unconditionally
+        /// made every call site build its message and box its arguments before the sink threw the
+        /// result away.
+        /// </remarks>
         public bool IsEnabled(LogLevel logLevel)
         {
-            return true;
+            switch (logLevel)
+            {
+                case LogLevel.Trace:
+                    return SharpRTSPClient.Log.TraceEnabled;
+                case LogLevel.Debug:
+                    return SharpRTSPClient.Log.DebugEnabled;
+                case LogLevel.Information:
+                    return SharpRTSPClient.Log.InfoEnabled;
+                case LogLevel.Warning:
+                    return SharpRTSPClient.Log.WarnEnabled;
+                case LogLevel.Error:
+                case LogLevel.Critical:
+                    return SharpRTSPClient.Log.ErrorEnabled;
+                case LogLevel.None:
+                    return false;
+                default:
+                    return true;
+            }
         }
         public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception exception, Func<TState, Exception, string> formatter)
         {

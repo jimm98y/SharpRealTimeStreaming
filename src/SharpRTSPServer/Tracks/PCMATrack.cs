@@ -3,7 +3,7 @@ using System.Buffers;
 using System.Collections.Generic;
 using System.Text;
 
-namespace SharpRTSPServer.Tracks
+namespace SharpRTSPServer
 {
     /// <summary>
     /// G711 PCMA (A-LAW) track.

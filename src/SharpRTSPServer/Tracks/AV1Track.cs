@@ -85,6 +85,12 @@ namespace SharpRTSPServer
             return sdp;
         }
 
+        /// <summary>OBU_TILE_LIST - not supported over RTP, dropped when transmitting.</summary>
+        private const int OBU_TILE_LIST = 2;
+
+        /// <summary>OBU_TEMPORAL_DELIMITER - dropped when transmitting, the RTP timestamp carries it.</summary>
+        private const int OBU_TEMPORAL_DELIMITER = 4;
+
         /// <summary>
         /// Creates RTP packets.
         /// </summary>
@@ -96,21 +102,34 @@ namespace SharpRTSPServer
             List<Memory<byte>> rtpPackets = new List<Memory<byte>>();
             List<IMemoryOwner<byte>> memoryOwners = new List<IMemoryOwner<byte>>();
 
+            // The marker goes on the last OBU we actually send, which is not necessarily the last
+            // sample - temporal delimiters and tile lists are dropped below.
+            int lastEmittedSample = LastSampleToEmit(samples);
+
             for (int x = 0; x < samples.Count; x++)
             {
+                if (samples[x].Length == 0)
+                {
+                    continue;
+                }
+
                 var owner = MemoryPool<byte>.Shared.Rent(samples[x].Length);
                 memoryOwners.Add(owner);
                 var rawObu = owner.Memory.Slice(0, samples[x].Length);
                 samples[x].CopyTo(rawObu);
 
-                bool lastObu = false;
-                if (x == samples.Count - 1)
-                {
-                    lastObu = true; // last OBU in our sample
-                }
+                bool lastObu = x == lastEmittedSample;
 
                 int packetMTU = PacketMTU; // 65535; 
                 packetMTU += -8 - 20 - 16; // -8 for UDP header, -20 for IP header, -16 normal RTP header len. ** LESS RTP EXTENSIONS !!!
+
+                if (packetMTU <= 0)
+                {
+                    // a negative payload size would grow dataRemaining on every pass, so the loop
+                    // below would never end
+                    throw new InvalidOperationException(
+                        $"{nameof(PacketMTU)} of {PacketMTU} is too small to carry any payload, it must leave room for the IP, UDP and RTP headers.");
+                }
 
                 int obuPointer = 0;
                 int obuHeader = rawObu.Span[0];
@@ -119,7 +138,7 @@ namespace SharpRTSPServer
 
                 // The temporal delimiter OBU, if present, SHOULD be removed when transmitting.
                 // Tile list OBUs are not supported and SHOULD be removed when transmitted.
-                if (obuType == 4 || obuType == 2)
+                if (obuType == OBU_TEMPORAL_DELIMITER || obuType == OBU_TILE_LIST)
                 {
                     // skip obu
                     continue;
@@ -136,6 +155,11 @@ namespace SharpRTSPServer
                 // the obu_has_size_field flag in the OBU header.To minimize overhead, the obu_has_size_field flag SHOULD be set to zero in all OBUs.
                 if ((obuHeader & 0x02) == 0x02)
                 {
+                    if (rawObu.Length <= obuHeaderLen)
+                    {
+                        throw new ArgumentException($"OBU of {rawObu.Length} bytes declares a size field but is too short to hold one.", nameof(samples));
+                    }
+
                     int len = ReadLeb128(rawObu.Span, obuHeaderLen, out _);
 
                     rawObu.Slice(obuHeaderLen + len).CopyTo(rawObu.Slice(obuHeaderLen));
@@ -210,12 +234,38 @@ namespace SharpRTSPServer
             return (rtpPackets, memoryOwners);
         }
 
+        /// <summary>
+        /// Index of the last sample that will actually be sent, or -1 when none will be.
+        /// </summary>
+        /// <remarks>
+        /// Temporal delimiter and tile list OBUs are dropped, so using the last sample outright
+        /// would leave the frame with no marker bit when one of those comes last.
+        /// </remarks>
+        private static int LastSampleToEmit(List<ReadOnlyMemory<byte>> samples)
+        {
+            for (int x = samples.Count - 1; x >= 0; x--)
+            {
+                if (samples[x].Length == 0)
+                {
+                    continue;
+                }
+
+                int obuType = (samples[x].Span[0] & 0x78) >> 3;
+                if (obuType != OBU_TEMPORAL_DELIMITER && obuType != OBU_TILE_LIST)
+                {
+                    return x;
+                }
+            }
+
+            return -1;
+        }
+
         public int ReadLeb128(Span<byte> source, int index, out int value)
         {
             int arrayIndex = index;
             int v = 0;
             int Leb128Bytes = 0;
-            for (int i = 0; i < 8; i++)
+            for (int i = 0; i < 8 && arrayIndex < source.Length; i++)
             {
                 int leb128_byte = source[arrayIndex++];
                 v = v | ((leb128_byte & 0x7f) << (i * 7));

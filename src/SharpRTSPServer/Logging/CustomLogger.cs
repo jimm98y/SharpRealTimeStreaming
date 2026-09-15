@@ -22,9 +22,34 @@ namespace SharpRTSPServer.Logging
             return new CustomLoggerScope<TState>(state);
         }
 
+        /// <summary>
+        /// Reports whether anything would actually be written at this level.
+        /// </summary>
+        /// <remarks>
+        /// This gates the per-packet logging on the RTP send path. Answering "true" unconditionally
+        /// made every call site build its message and box its arguments before the sink threw the
+        /// result away.
+        /// </remarks>
         public bool IsEnabled(LogLevel logLevel)
         {
-            return true;
+            switch (logLevel)
+            {
+                case LogLevel.Trace:
+                    return Logging.Log.TraceEnabled;
+                case LogLevel.Debug:
+                    return Logging.Log.DebugEnabled;
+                case LogLevel.Information:
+                    return Logging.Log.InfoEnabled;
+                case LogLevel.Warning:
+                    return Logging.Log.WarnEnabled;
+                case LogLevel.Error:
+                case LogLevel.Critical:
+                    return Logging.Log.ErrorEnabled;
+                case LogLevel.None:
+                    return false;
+                default:
+                    return true;
+            }
         }
 
         public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception exception, Func<TState, Exception, string> formatter)

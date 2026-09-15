@@ -54,6 +54,12 @@ namespace SharpRTSPServer
 
                 var jpegImage = samples[i].Span;
 
+                if (jpegImage.Length < 4)
+                {
+                    // too short to even hold the SOI and EOI markers we are about to read
+                    throw new InvalidOperationException($"A JPEG image must be at least 4 bytes long, got {jpegImage.Length}.");
+                }
+
                 var header = BinaryPrimitives.ReadUInt16BigEndian(jpegImage);
                 if (header != SoiMarker)
                 {
@@ -94,8 +100,6 @@ namespace SharpRTSPServer
 
                     int payloadSize = Math.Min(packetMTU, reader.Length);
 
-                    endOfFrame = payloadSize == reader.Length;
-
                     // 12 is header size. then jpeg header, then payload
                     var destSize = 12 + 8 + payloadSize;
                     var owner = MemoryPool<byte>.Shared.Rent(destSize);
@@ -120,7 +124,9 @@ namespace SharpRTSPServer
                         rtpPadding: false,
                         rtpExtension: false,
                         rtpCsrcCount: 0,
-                        rtpMarker: endOfFrame,
+                        // the quantization tables share this packet with the image data, so how much
+                        // of the frame actually fits is only known once they have been written
+                        rtpMarker: false,
                         rtpPayloadType: PayloadType);
 
                     // sequence number and SSRC are set just before send
@@ -191,6 +197,15 @@ namespace SharpRTSPServer
                     reader.Slice(0, rtpPacketSpan.Length).CopyTo(rtpPacketSpan);
                     reader = reader.Slice(rtpPacketSpan.Length);
                     dataPointer += rtpPacketSpan.Length;
+
+                    // Mark the last packet of the frame. Deciding this up front from the MTU alone
+                    // set the marker on a packet that the quantization tables had pushed data out of,
+                    // telling the receiver the frame was complete while a fragment was still to come.
+                    endOfFrame = reader.IsEmpty;
+                    if (endOfFrame)
+                    {
+                        rtpPacket.Span[1] |= 0x80;
+                    }
 
                     rtpPackets.Add(rtpPacket);
                 }

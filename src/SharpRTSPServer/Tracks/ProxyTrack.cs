@@ -40,15 +40,30 @@ namespace SharpRTSPServer
             _isReady = true;
         }
 
+        /// <summary>
+        /// Passes already packetized RTP through unchanged. Every sample is forwarded - the caller may
+        /// hand in more than one, and dropping the rest would silently lose media.
+        /// </summary>
         public override (List<Memory<byte>>, List<IMemoryOwner<byte>>) CreateRtpPackets(List<ReadOnlyMemory<byte>> samples, uint rtpTimestamp)
         {
+            if (samples == null)
+                throw new ArgumentNullException(nameof(samples));
+
             List<Memory<byte>> rtpPackets = new List<Memory<byte>>();
             List<IMemoryOwner<byte>> memoryOwners = new List<IMemoryOwner<byte>>();
-            var owner = MemoryPool<byte>.Shared.Rent(samples[0].Length);
-            memoryOwners.Add(owner);
-            var rtpPacket = owner.Memory.Slice(0, samples[0].Length);
-            samples[0].Span.CopyTo(rtpPacket.Span);
-            rtpPackets.Add(rtpPacket);
+
+            foreach (var sample in samples)
+            {
+                if (sample.Length == 0)
+                    continue;
+
+                var owner = MemoryPool<byte>.Shared.Rent(sample.Length);
+                memoryOwners.Add(owner);
+                var rtpPacket = owner.Memory.Slice(0, sample.Length);
+                sample.Span.CopyTo(rtpPacket.Span);
+                rtpPackets.Add(rtpPacket);
+            }
+
             return (rtpPackets, memoryOwners);
         }
 

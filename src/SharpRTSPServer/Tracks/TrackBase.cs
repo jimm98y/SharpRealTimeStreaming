@@ -7,8 +7,6 @@ namespace SharpRTSPServer
 {
     public abstract class TrackBase : ITrack
     {
-        private static readonly Random _rand = new Random();
-
         /// <summary>
         /// RTP profile.
         /// </summary>
@@ -17,7 +15,11 @@ namespace SharpRTSPServer
         /// <summary>
         /// SSRC for this track. Each track streamed by this server shall have a unique SSRC.
         /// </summary>
-        public uint SSRC { get; set; } = (uint)_rand.Next(0, int.MaxValue);
+        /// <remarks>
+        /// Drawn at random from the full 32 bit range, so two tracks colliding - which would break
+        /// demultiplexing on the receiver - is not something that happens in practice.
+        /// </remarks>
+        public uint SSRC { get; set; } = RandomGenerator.NextUInt32();
 
         public IRtpSender Sink { get; set; } = null;
 

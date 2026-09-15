@@ -48,6 +48,32 @@ To disconnect the RTSP stream, call `Stop` or just dispose the client:
 client.Stop();
 ```
 
+### Encrypted streams
+
+For RTSPS, use an `rtsps://` URL. A certificate validation callback can be supplied if the server presents a certificate your machine does not trust:
+```cs
+client.Connect("rtsps://localhost:8322/stream1", RTPTransport.TCP, "admin", "password",
+    userCertificateSelectionCallback: (sender, cert, chain, errors) => errors == SslPolicyErrors.None);
+```
+
+SRTP is negotiated automatically: when the SDP offers a `SAVP`/`SAVPF` profile with a `crypto` attribute, the client derives the keys and decrypts RTP and RTCP for you. The derived contexts are exposed as `VideoContext` and `AudioContext`.
+
+### Knowing why a stream ended
+
+The `Stopped` event reports a `StoppedReason` so you can decide whether reconnecting makes sense:
+
+| Reason | Meaning |
+| --- | --- |
+| `ConnectionFailed` | The TCP/TLS connection could not be established. |
+| `Unauthorized` | The credentials were rejected. |
+| `NotFound` | The server does not have the requested stream. |
+| `RtcpBye` | The server sent an RTCP BYE for the stream we were receiving. |
+| `ServerError` | The server rejected a request with an error we cannot recover from. |
+| `UnsupportedMedia` | The SDP described no media this client can play. |
+| `ProtocolError` | The RTSP dialog failed unexpectedly. Details are in the log. |
+
+Retrying is only worthwhile for `ConnectionFailed`, `RtcpBye` and sometimes `ServerError`; the rest will fail again the same way.
+
 ## SharpRTSPServer
 Simple RTSP server that supports MJPEG, H264, H265, H266, AV1 for video and AAC, Opus, PCMU and PCMA for audio. 
 
@@ -95,6 +121,59 @@ The same applies to audio:
 ```cs
 aacTrack.FeedInRawSamples(rtpAudioBaseTime + audioPTS, new List<byte[]> { aacFrame });
 ```
+
+### Available tracks
+
+| Video | Audio |
+| --- | --- |
+| `H264Track`, `H265Track`, `H266Track`, `AV1Track`, `MJpegTrack` | `AACTrack`, `OpusTrack`, `PCMATrack`, `PCMUTrack` |
+
+`ProxyTrack` forwards RTP that has already been packetized elsewhere, which is what the FFmpeg and PCAPNG samples use. Pair it with `RTSPStreamSource.OverrideSDP` to supply the SDP yourself.
+
+### RTSPS, SRTP and HTTP tunnelling
+
+The full constructor takes a TLS certificate, an HTTP tunnelling flag and an SRTP crypto suite:
+```cs
+using (var server = new RTSPServer(8322, "admin", "password",
+    useHttpTunnel: false,
+    tlsCertificate: certificate,
+    srtpCryptoSuite: SrtpCryptoSuites.AES_CM_128_HMAC_SHA1_80,
+    loggerFactory: null))
+{
+    ...
+}
+```
+
+Passing a certificate makes the server listen for `rtsps://`; combining it with `useHttpTunnel` gives RTSP over HTTPS. To stream SRTP, also set the track's profile:
+```cs
+h264Track.RtpProfile = RtpProfiles.SAVP;
+```
+The server then generates per-connection keys and advertises them in the SDP `a=crypto` attribute.
+
+### Limits and access control
+
+`MaxConnections` caps how many clients the server will hold at once (100 by default, `0` disables the limit). Connections that go quiet for longer than the 60 second RTSP timeout are dropped and their sockets released.
+
+The server challenges clients with **Digest** access authentication by default. Basic is available for clients and hardware decoders that cannot do Digest, but it is off unless you ask for it:
+
+```cs
+server.AuthenticationScheme = RtspAuthenticationScheme.Basic;
+```
+
+Basic sends the user name and password base64 encoded, which anyone who can read the traffic can reverse, so only enable it together with a TLS certificate. The server logs a warning if you turn it on without one. Set the scheme before calling `StartListen`.
+
+The sample servers expose this in `appsettings.json`, off by default:
+```json
+{
+  "UserName": "admin",
+  "Password": "password",
+  "AllowBasicAuthentication": false
+}
+```
+
+The client side needs no configuration: it answers whichever of the two schemes a server challenges it with.
+
+Authentication is also the only access control: any client that authenticates can reach every stream the server offers. If you need per-stream authorization, hook the `ReceivedRtspMessage` event and enforce it there. Passing a null or empty user name disables authentication entirely, which is only appropriate on a trusted network.
 
 ## Samples
 

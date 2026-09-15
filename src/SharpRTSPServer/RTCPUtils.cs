@@ -22,7 +22,7 @@ namespace SharpRTSPServer
             // Bytes 8, 9, 10, 11 and 12,13,14,15 are the Wall Clock
             // Bytes 16,17,18,19 are the RTP payload timestamp
 
-            // NTP Most Signigicant Word is relative to 0h, 1 Jan 1900
+            // NTP Most Significant Word is relative to 0h, 1 Jan 1900
             // This will wrap around in 2036
             DateTime ntp_start_time = new DateTime(1900, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
