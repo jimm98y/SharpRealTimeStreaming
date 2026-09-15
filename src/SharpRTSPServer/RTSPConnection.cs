@@ -13,6 +13,30 @@ namespace SharpRTSPServer
         /// </summary>
         public RtspListener Listener { get; set; }
 
+        /// <summary>
+        /// The transport the listener sits on. Kept so the server can notice that a client has gone
+        /// away without tearing its session down, and release its RTP ports straight away.
+        /// </summary>
+        public IRtspTransport Transport { get; set; }
+
+        /// <summary>
+        /// True once the underlying connection has been closed by either end.
+        /// </summary>
+        public bool IsDisconnected
+        {
+            get
+            {
+                try
+                {
+                    return Transport != null && !Transport.Connected;
+                }
+                catch (ObjectDisposedException)
+                {
+                    return true;
+                }
+            }
+        }
+
         // Time since last RTSP message received - used to spot dead UDP clients
         public DateTime TimeSinceLastRtspKeepAlive { get; private set; } = DateTime.UtcNow;
 

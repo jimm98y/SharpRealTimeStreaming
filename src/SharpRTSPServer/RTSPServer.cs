@@ -337,7 +337,8 @@ namespace SharpRTSPServer
                         {
                             RTSPConnection newConnection = new RTSPConnection()
                             {
-                                Listener = newListener
+                                Listener = newListener,
+                                Transport = rtspSocket
                             };
                             _connectionList.Add(newConnection);
                         }
@@ -703,7 +704,19 @@ namespace SharpRTSPServer
 
                 // RTP over UDP mode
                 // Create a pair of UDP sockets - One is for the Data (eg Video/Audio), one is for the RTCP
-                var udpPair = new UDPSocket(50000, 51000); // give a range of 500 pairs (1000 addresses) to try incase some address are in use
+                UDPSocket udpPair;
+                try
+                {
+                    udpPair = new UDPSocket(50000, 51000); // give a range of 500 pairs (1000 addresses) to try incase some address are in use
+                }
+                catch (SocketException ex)
+                {
+                    // Every pair in the range is taken. Tell the client rather than letting this
+                    // surface as an unhandled error, and let it fall back to a TCP transport.
+                    _logger.LogError(ex, "Ran out of UDP ports for SETUP from {remoteEndPoint}", listener.RemoteEndPoint);
+                    SendUnsupportedTransport(listener, setupMessage);
+                    return;
+                }
                 udpPair.SetDataDestination(listener.RemoteEndPoint.Address.ToString().Split(':')[0], transport.ClientPort.First);
                 udpPair.SetControlDestination(listener.RemoteEndPoint.Address.ToString().Split(':')[0], transport.ClientPort.Second);
                 udpPair.ControlReceived += (localSender, localE) =>
@@ -748,7 +761,7 @@ namespace SharpRTSPServer
                     if (connection == null)
                     {
                         // the connection was dropped (eg. timed out) between arrival and handling of this SETUP
-                        (rtpTransport as UDPSocket)?.Dispose();
+                        ReleaseTransport(rtpTransport);
                         RtspResponse goneResponse = setupMessage.CreateResponse();
                         goneResponse.ReturnCode = 454; // Session Not Found
                         listener.SendMessage(goneResponse);
@@ -764,7 +777,7 @@ namespace SharpRTSPServer
                     // a repeated SETUP for the same track would otherwise leak the sockets of the previous one
                     if (stream.RtpChannel != null && !ReferenceEquals(stream.RtpChannel, rtpTransport))
                     {
-                        (stream.RtpChannel as UDPSocket)?.Dispose();
+                        ReleaseTransport(stream.RtpChannel);
                     }
 
                     stream.RtpChannel = rtpTransport;
@@ -1097,16 +1110,54 @@ namespace SharpRTSPServer
             lock (_connectionList)
             {
                 connection.Play = false; // stop sending data
-                connection.Video.RtpChannel?.Dispose();
-                connection.Video.RtpChannel = null;
-                connection.Audio.RtpChannel?.Dispose();
-                connection.Audio.RtpChannel = null;
+
+                foreach (var stream in connection.Streams)
+                {
+                    ReleaseTransport(stream.RtpChannel);
+                    stream.RtpChannel = null;
+                }
+
                 connection.Listener.Dispose();
                 _connectionList.Remove(connection);
                 foreach (var streamSource in StreamSources)
                 {
                     streamSource.ConnectionList.Remove(connection);
                 }
+            }
+        }
+
+        /// <summary>
+        /// Shuts a transport down and releases it.
+        /// </summary>
+        /// <remarks>
+        /// Stop has to come first. Disposing a UDP pair on its own leaves its sockets bound until a
+        /// finalizer eventually runs, so the ports stay taken - and there are only 500 pairs to hand
+        /// out, after which SETUP fails with "Only one usage of each socket address ... is normally
+        /// permitted". The client releases its own transports the same way.
+        /// </remarks>
+        private void ReleaseTransport(IRtpTransport transport)
+        {
+            if (transport == null)
+            {
+                return;
+            }
+
+            try
+            {
+                transport.Stop();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Error stopping an RTP transport");
+            }
+
+            try
+            {
+                transport.Dispose();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Error disposing an RTP transport");
             }
         }
 
@@ -1227,10 +1278,23 @@ namespace SharpRTSPServer
             DateTime timeOut = DateTime.UtcNow.AddSeconds(-RTSP_TIMEOUT);
 
             // Convert to Array to allow us to delete from the connection list while iterating
-            foreach (RTSPConnection connection in _connectionList.Where(c => timeOut > c.TimeSinceLastRtspKeepAlive).ToArray())
+            foreach (RTSPConnection connection in _connectionList.ToArray())
             {
-                _logger.LogDebug("Removing session {sessionId} due to TIMEOUT", connection.SessionId);
-                RemoveSession(connection);
+                // A client that goes away without a TEARDOWN would otherwise keep its UDP port pair
+                // for the whole RTSP timeout. There are only 500 pairs, so a client that reconnects
+                // in a loop exhausts them long before any of them are handed back.
+                if (connection.IsDisconnected)
+                {
+                    _logger.LogDebug("Removing session {sessionId}, the connection was closed", connection.SessionId);
+                    RemoveSession(connection);
+                    continue;
+                }
+
+                if (timeOut > connection.TimeSinceLastRtspKeepAlive)
+                {
+                    _logger.LogDebug("Removing session {sessionId} due to TIMEOUT", connection.SessionId);
+                    RemoveSession(connection);
+                }
             }
         }
 
