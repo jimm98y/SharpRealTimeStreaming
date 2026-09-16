@@ -1107,7 +1107,7 @@ namespace SharpRTSPServer
                             connection.Streams
                                 .Select((stream, trackId) => new { stream, trackId })
                                 .Where(x => x.stream.RtpChannel != null)
-                                .Select(x => $"url={TrackControlUri(message.RtspUri, x.trackId)};seq={x.stream.SequenceNumber}"));
+                                .Select(x => $"url={TrackControlUri(message.RtspUri, streamSource.GetTrackControl((TrackType)x.trackId))};seq={x.stream.SequenceNumber}"));
 
                         // Send the reply
                         RtspResponse playResponse = message.CreateResponse();
@@ -1210,12 +1210,12 @@ namespace SharpRTSPServer
 
             uint trackSSRC;
             TrackType trackType;
-            if (streamSource.VideoTrack != null && setupMessage.RtspUri.AbsolutePath.EndsWith($"trackID={streamSource.VideoTrack.ID}"))
+            if (streamSource.VideoTrack != null && AddressesTrack(setupMessage.RtspUri, streamSource.GetTrackControl(TrackType.Video)))
             {
                 trackSSRC = streamSource.VideoTrack.SSRC;
                 trackType = TrackType.Video;
             }
-            else if (streamSource.AudioTrack != null && setupMessage.RtspUri.AbsolutePath.EndsWith($"trackID={streamSource.AudioTrack.ID}"))
+            else if (streamSource.AudioTrack != null && AddressesTrack(setupMessage.RtspUri, streamSource.GetTrackControl(TrackType.Audio)))
             {
                 trackSSRC = streamSource.AudioTrack.SSRC;
                 trackType = TrackType.Audio;
@@ -1502,10 +1502,8 @@ namespace SharpRTSPServer
         /// </remarks>
         private string AddMissingCryptoAttributes(string sdp, RTSPStreamSource streamSource, RTSPConnection connection)
         {
-            ITrack[] tracksBySection = { streamSource.VideoTrack, streamSource.AudioTrack };
-            RTPStream[] streamsBySection = { connection.Video, connection.Audio };
-
-            if (!tracksBySection.Any(track => track != null && track.RtpProfile == RtpProfiles.SAVP))
+            if ((streamSource.VideoTrack == null || streamSource.VideoTrack.RtpProfile != RtpProfiles.SAVP)
+                && (streamSource.AudioTrack == null || streamSource.AudioTrack.RtpProfile != RtpProfiles.SAVP))
             {
                 // nothing to add, so hand back exactly what we were given rather than reformatting it
                 return sdp;
@@ -1521,18 +1519,10 @@ namespace SharpRTSPServer
                 }
             }
 
-            var mediaHasCrypto = new List<bool>();
-            foreach (string line in lines)
-            {
-                if (line.StartsWith("m="))
-                {
-                    mediaHasCrypto.Add(false);
-                }
-                else if (line.StartsWith("a=crypto:") && mediaHasCrypto.Count > 0)
-                {
-                    mediaHasCrypto[mediaHasCrypto.Count - 1] = true;
-                }
-            }
+            // Sections are matched to tracks by their media type, not their position. An SDP that
+            // lists audio before video used to get each track's keys written into the other one's
+            // section, so the client decrypted with the wrong key and simply saw nothing.
+            List<RTSPStreamSource.MediaSection> sections = RTSPStreamSource.ParseMediaSections(sdp);
 
             StringBuilder builder = new StringBuilder();
             int mediaSection = -1;
@@ -1548,15 +1538,22 @@ namespace SharpRTSPServer
 
                 mediaSection++;
 
-                if (mediaSection >= tracksBySection.Length || mediaHasCrypto[mediaSection])
+                if (mediaSection >= sections.Count || sections[mediaSection].HasCrypto)
                 {
                     continue;
                 }
 
-                ITrack track = tracksBySection[mediaSection];
+                TrackType? trackType = RTSPStreamSource.TrackTypeOf(sections[mediaSection]);
+                if (trackType == null)
+                {
+                    continue;
+                }
+
+                ITrack track = trackType == TrackType.Video ? streamSource.VideoTrack : streamSource.AudioTrack;
                 if (track != null && track.RtpProfile == RtpProfiles.SAVP)
                 {
-                    builder.Append(BuildCryptoAttribute(streamsBySection[mediaSection])).Append(SDP_LINE_ENDING);
+                    RTPStream stream = connection.Streams[(int)trackType];
+                    builder.Append(BuildCryptoAttribute(stream)).Append(SDP_LINE_ENDING);
                 }
             }
 
@@ -1564,11 +1561,45 @@ namespace SharpRTSPServer
         }
 
         /// <summary>
-        /// The control URL of one track, as the SDP advertises it and SETUP addresses it.
+        /// The control URL of one track, built from the control attribute the SDP advertises.
         /// </summary>
-        private static string TrackControlUri(Uri sessionUri, int trackId)
+        private static string TrackControlUri(Uri sessionUri, string control)
         {
-            return sessionUri.ToString().TrimEnd('/') + "/trackID=" + trackId.ToString(CultureInfo.InvariantCulture);
+            if (string.IsNullOrEmpty(control))
+            {
+                return sessionUri.ToString();
+            }
+
+            // a control attribute is allowed to be a whole URL, in which case it stands alone
+            if (Uri.TryCreate(control, UriKind.Absolute, out Uri absolute))
+            {
+                return absolute.ToString();
+            }
+
+            return sessionUri.ToString().TrimEnd('/') + "/" + control.TrimStart('/');
+        }
+
+        /// <summary>
+        /// Whether a SETUP URI addresses the track with the given control attribute.
+        /// </summary>
+        private static bool AddressesTrack(Uri setupUri, string control)
+        {
+            if (setupUri == null || string.IsNullOrEmpty(control))
+            {
+                return false;
+            }
+
+            if (Uri.TryCreate(control, UriKind.Absolute, out Uri absolute))
+            {
+                return string.Equals(setupUri.ToString().TrimEnd('/'), absolute.ToString().TrimEnd('/'),
+                    StringComparison.OrdinalIgnoreCase);
+            }
+
+            string path = setupUri.AbsolutePath.TrimEnd('/');
+            string wanted = control.Trim('/');
+
+            return path.EndsWith("/" + wanted, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(path, wanted, StringComparison.OrdinalIgnoreCase);
         }
 
         private RTSPStreamSource GetStreamSource(Uri rtspUri)

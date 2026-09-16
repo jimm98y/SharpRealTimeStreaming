@@ -61,6 +61,113 @@ namespace SharpRTSPServer
         /// Only media level attributes count. A session level "a=control:" says nothing about the
         /// individual tracks, and treating it as if it did left every media section without one.
         /// </remarks>
+        /// <summary>
+        /// One media section of an SDP, as far as the server needs to understand it.
+        /// </summary>
+        internal sealed class MediaSection
+        {
+            /// <summary>The media type: "video", "audio", and whatever else an SDP may carry.</summary>
+            public string Kind { get; set; }
+
+            /// <summary>The "a=control" value a client addresses this track by, if it has one.</summary>
+            public string Control { get; set; }
+
+            /// <summary>Whether the section already carries an "a=crypto" attribute.</summary>
+            public bool HasCrypto { get; set; }
+        }
+
+        /// <summary>
+        /// Splits an SDP into its media sections.
+        /// </summary>
+        /// <remarks>
+        /// Only media level attributes count. A session level "a=control:" says nothing about the
+        /// individual tracks, and treating it as if it did left every media section without one.
+        /// </remarks>
+        internal static List<MediaSection> ParseMediaSections(string sdp)
+        {
+            var sections = new List<MediaSection>();
+
+            if (string.IsNullOrEmpty(sdp))
+            {
+                return sections;
+            }
+
+            using (var textReader = new StringReader(sdp))
+            {
+                string line;
+                while ((line = textReader.ReadLine()) != null)
+                {
+                    if (line.StartsWith("m="))
+                    {
+                        // "m=<media> <port> <proto> <fmt>"
+                        string kind = line.Substring(2).Split(' ')[0];
+                        sections.Add(new MediaSection { Kind = kind });
+                    }
+                    else if (sections.Count > 0)
+                    {
+                        MediaSection current = sections[sections.Count - 1];
+
+                        if (line.StartsWith("a=control:"))
+                        {
+                            current.Control = line.Substring("a=control:".Length).Trim();
+                        }
+                        else if (line.StartsWith("a=crypto:"))
+                        {
+                            current.HasCrypto = true;
+                        }
+                    }
+                }
+            }
+
+            return sections;
+        }
+
+        /// <summary>
+        /// The value a client uses to address one of this source's tracks, as the SDP advertises it.
+        /// </summary>
+        /// <remarks>
+        /// An overridden SDP brings its own control attributes, and they are not always
+        /// "trackID=N" - cameras use "track1", "video", or a whole URL. Assuming the generated
+        /// form meant SETUP could not find the track at all, and the RTP-Info of a PLAY named a URL
+        /// the client had never used. The section is matched by its media type rather than its
+        /// position, so an SDP that lists audio first is read the right way round.
+        /// </remarks>
+        public string GetTrackControl(TrackType trackType)
+        {
+            ITrack track = trackType == TrackType.Video ? VideoTrack : AudioTrack;
+            if (track == null)
+            {
+                return null;
+            }
+
+            string kind = trackType == TrackType.Video ? "video" : "audio";
+
+            foreach (MediaSection section in ParseMediaSections(Sdp))
+            {
+                if (string.Equals(section.Kind, kind, StringComparison.OrdinalIgnoreCase)
+                    && !string.IsNullOrEmpty(section.Control))
+                {
+                    return section.Control;
+                }
+            }
+
+            return $"trackID={track.ID}";
+        }
+
+        /// <summary>
+        /// Which of this source's tracks a section belongs to, or null for one that is neither.
+        /// </summary>
+        internal static TrackType? TrackTypeOf(MediaSection section)
+        {
+            if (string.Equals(section.Kind, "video", StringComparison.OrdinalIgnoreCase))
+                return TrackType.Video;
+
+            if (string.Equals(section.Kind, "audio", StringComparison.OrdinalIgnoreCase))
+                return TrackType.Audio;
+
+            return null;
+        }
+
         private static string AddMissingTrackControlAttributes(string sdp)
         {
             var lines = new List<string>();
