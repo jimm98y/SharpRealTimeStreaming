@@ -69,6 +69,17 @@ namespace SharpRTSPServer
         private const int NONCE_GRACE_COUNT = 1;
 
         /// <summary>
+        /// How many connections may be part way through their handshake at once. Past this the accept
+        /// loop waits, so a flood of half open connections cannot use up memory without bound.
+        /// </summary>
+        private const int MAX_PENDING_HANDSHAKES = 64;
+
+        /// <summary>
+        /// Default value of <see cref="HandshakeTimeout"/>.
+        /// </summary>
+        public static readonly TimeSpan DEFAULT_HANDSHAKE_TIMEOUT = TimeSpan.FromSeconds(10);
+
+        /// <summary>
         /// Default value of <see cref="NonceLifetime"/>.
         /// </summary>
         public static readonly TimeSpan DEFAULT_NONCE_LIFETIME = TimeSpan.FromMinutes(5);
@@ -99,6 +110,10 @@ namespace SharpRTSPServer
 
         private readonly List<RTSPConnection> _connectionList = new List<RTSPConnection>(); // list of RTSP Listeners
         private readonly IRtspListenSocket _serverListener;
+        private readonly TcpListener _tcpListener;
+        private readonly RemoteCertificateValidationCallback _userCertificateValidationCallback;
+        private readonly bool _handshakeOffTheAcceptLoop;
+        private readonly SemaphoreSlim _pendingHandshakes = new SemaphoreSlim(MAX_PENDING_HANDSHAKES, MAX_PENDING_HANDSHAKES);
         private readonly ILoggerFactory _loggerFactory;
         private readonly ILogger _logger;
 
@@ -228,6 +243,18 @@ namespace SharpRTSPServer
         public TimeSpan NonceLifetime { get; set; } = DEFAULT_NONCE_LIFETIME;
 
         /// <summary>
+        /// How long a newly accepted connection has to finish its handshake before it is dropped.
+        /// <see cref="DEFAULT_HANDSHAKE_TIMEOUT"/> by default.
+        /// </summary>
+        /// <remarks>
+        /// A connection that has been accepted but has not said anything yet costs a socket and, for
+        /// TLS, a slot among the handshakes in flight. Without a limit one that never speaks holds
+        /// what it took for as long as it likes. Does not apply to the HTTP tunnel, whose handshake
+        /// the library reads inside the accept.
+        /// </remarks>
+        public TimeSpan HandshakeTimeout { get; set; } = DEFAULT_HANDSHAKE_TIMEOUT;
+
+        /// <summary>
         /// The streams this server offers. Guarded by the connection list lock.
         /// </summary>
         private readonly List<RTSPStreamSource> StreamSources = new List<RTSPStreamSource>();
@@ -338,6 +365,8 @@ namespace SharpRTSPServer
             RegisterRtspUriScheme();
 
             var tcpListener = new TcpListener(IPAddress.Any, portNumber);
+            _tcpListener = tcpListener;
+            _userCertificateValidationCallback = userCertificateValidationCallback;
             _serverListener = useHttpTunnel switch
             {
                 true when tlsCertificate is null => new RtspOverHttpListenSocket(tcpListener, loggerFactory),
@@ -345,6 +374,13 @@ namespace SharpRTSPServer
                 false when tlsCertificate is null => new RtspListenSocket(tcpListener, loggerFactory: loggerFactory),
                 false => new RtspTlsListenSocket(tcpListener, tlsCertificate, userCertificateValidationCallback, loggerFactory),
             };
+
+            // The listen socket accepts and completes the TLS handshake in the same call, so one
+            // client that connects and then says nothing holds the accept loop and no other client
+            // gets in. Where we can build the transport ourselves - everything but the HTTP tunnel,
+            // whose handshake is the library's to read - the accept is taken here instead and the
+            // handshake done away from the loop, under a timeout.
+            _handshakeOffTheAcceptLoop = !useHttpTunnel;
 
         }
 
@@ -501,6 +537,28 @@ namespace SharpRTSPServer
 
                 try
                 {
+                    if (_handshakeOffTheAcceptLoop)
+                    {
+                        // Accept only. Building the transport - which is where TLS negotiates - and
+                        // admitting the connection happen on their own task, so a client that never
+                        // speaks delays nobody but itself.
+                        await _pendingHandshakes.WaitAsync(cancellationToken).ConfigureAwait(false);
+
+                        TcpClient tcpClient;
+                        try
+                        {
+                            tcpClient = await AcceptTcpClientAsync(cancellationToken).ConfigureAwait(false);
+                        }
+                        catch
+                        {
+                            _pendingHandshakes.Release();
+                            throw;
+                        }
+
+                        _ = Task.Run(() => HandshakeAndAdmitAsync(tcpClient), CancellationToken.None);
+                        continue;
+                    }
+
                     // Wait for an incoming TCP Connection
                     rtspSocket = await _serverListener.AcceptAsync(cancellationToken);
                 }
@@ -538,6 +596,105 @@ namespace SharpRTSPServer
                     _logger.LogWarning(ex, "Could not admit the connection from {remoteEndPoint}", TryGetRemoteEndPoint(rtspSocket));
                     TryDispose(rtspSocket);
                 }
+            }
+        }
+
+        private async Task<TcpClient> AcceptTcpClientAsync(CancellationToken cancellationToken)
+        {
+#if NET6_0_OR_GREATER
+            return await _tcpListener.AcceptTcpClientAsync(cancellationToken).ConfigureAwait(false);
+#else
+            using (cancellationToken.Register(() => _tcpListener.Stop()))
+            {
+                return await _tcpListener.AcceptTcpClientAsync().ConfigureAwait(false);
+            }
+#endif
+        }
+
+        /// <summary>
+        /// Finishes a connection off the accept loop: negotiates whatever the transport needs, then
+        /// admits it. Anything that takes longer than <see cref="HandshakeTimeout"/> is dropped.
+        /// </summary>
+        private async Task HandshakeAndAdmitAsync(TcpClient tcpClient)
+        {
+            try
+            {
+                // Both halves are timed, not just the first: TLS is negotiated lazily on the first
+                // read of the transport's stream, which is inside the listener being started, so a
+                // timeout around the transport alone would have covered the part that never blocks.
+                // On a dedicated thread rather than a pooled one. The handshake blocks, and the pool
+                // adds threads only slowly, so a handful of connections sitting in one were enough to
+                // make an honest client wait seconds for a thread to run its own handshake on.
+                Task bringUp = Task.Factory.StartNew(
+                    () => AdmitConnection(BuildTransport(tcpClient)),
+                    CancellationToken.None,
+                    TaskCreationOptions.LongRunning,
+                    TaskScheduler.Default);
+                Task finished = await Task.WhenAny(bringUp, Task.Delay(HandshakeTimeout)).ConfigureAwait(false);
+
+                if (!ReferenceEquals(finished, bringUp))
+                {
+                    // Closing the socket is what unblocks it, since it is sitting on a read that will
+                    // never be answered.
+                    _logger.LogWarning("Dropping the connection from {remoteEndPoint}, it did not finish its handshake in time",
+                        TryGetRemoteEndPoint(tcpClient));
+                    TryClose(tcpClient);
+
+                    // let it unwind on its own rather than holding this task, and its slot, on it
+                    _ = bringUp.ContinueWith(t => { _ = t.Exception; }, TaskScheduler.Default);
+                    return;
+                }
+
+                await bringUp.ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                // One connection that cannot be brought up must not take the server with it, which is
+                // the whole point of doing this away from the accept loop.
+                _logger.LogWarning(ex, "Could not bring up the connection from {remoteEndPoint}", TryGetRemoteEndPoint(tcpClient));
+                TryClose(tcpClient);
+            }
+            finally
+            {
+                _pendingHandshakes.Release();
+            }
+        }
+
+        /// <summary>
+        /// Wraps an accepted socket in the transport this server speaks, negotiating TLS if it has a
+        /// certificate. This is what the listen socket would otherwise do inside the accept.
+        /// </summary>
+        private IRtspTransport BuildTransport(TcpClient tcpClient)
+        {
+            if (TlsCertificate == null)
+            {
+                return new RtspTcpTransport(tcpClient);
+            }
+
+            return new RtspTcpTlsTransport(tcpClient, TlsCertificate, _userCertificateValidationCallback);
+        }
+
+        private static string TryGetRemoteEndPoint(TcpClient tcpClient)
+        {
+            try
+            {
+                return tcpClient?.Client?.RemoteEndPoint?.ToString() ?? "unknown";
+            }
+            catch (Exception)
+            {
+                return "unknown";
+            }
+        }
+
+        private void TryClose(TcpClient tcpClient)
+        {
+            try
+            {
+                tcpClient?.Close();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Error closing a socket");
             }
         }
 

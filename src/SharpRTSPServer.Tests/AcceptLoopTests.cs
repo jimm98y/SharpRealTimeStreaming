@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 using System.Security.Cryptography;
@@ -74,6 +76,44 @@ namespace SharpRTSPServer.Tests
 
             using var client = new RtspTestClient(port, "admin", "password", useTls: true);
             Assert.AreEqual(200, client.Send("OPTIONS", "rtsps://127.0.0.1:" + port + "/stream1").StatusCode);
+        }
+
+        [TestMethod]
+        public void ConnectionsThatNeverSpeakDoNotStopOtherClientsGettingIn()
+        {
+            int port = TestPorts.FindFree();
+            using var server = new RTSPServer(port, "admin", "password", false, ServerCertificate(), null);
+            server.AddStreamSource(new RTSPStreamSource("stream1", new H264Track(Sps, Pps), null));
+            server.StartListen();
+
+            // The TLS handshake used to happen inside the accept, so a client that connected and then
+            // said nothing held the loop and nobody else got in at all - one socket, no credentials.
+            var silent = new List<TcpClient>();
+            try
+            {
+                for (int i = 0; i < 10; i++)
+                {
+                    silent.Add(new TcpClient("127.0.0.1", port));
+                }
+
+                Thread.Sleep(250);
+
+                var stopwatch = Stopwatch.StartNew();
+                using var client = new RtspTestClient(port, "admin", "password", useTls: true);
+                int status = client.Send("OPTIONS", "rtsps://127.0.0.1:" + port + "/stream1").StatusCode;
+                stopwatch.Stop();
+
+                Assert.AreEqual(200, status);
+                Assert.IsLessThan(5000, stopwatch.ElapsedMilliseconds,
+                    "a client should not be kept waiting by connections that never speak");
+            }
+            finally
+            {
+                foreach (var s in silent)
+                {
+                    s.Dispose();
+                }
+            }
         }
 
         [TestMethod]
