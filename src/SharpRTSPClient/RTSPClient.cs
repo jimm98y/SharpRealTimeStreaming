@@ -154,6 +154,7 @@ namespace SharpRTSPClient
         private Uri _uri = null;                  // RTSP URI (username & password will be stripped out)
         private string _session = "";             // RTSP Session
         private Authentication _authentication;
+        private string _lastNonce;
         private NetworkCredential _credentials = new NetworkCredential();
         private MediaRequest _mediaRequest = MediaRequest.VIDEO_AND_AUDIO;
         private RemoteCertificateValidationCallback _userCertificateSelectionCallback = null;
@@ -1082,6 +1083,26 @@ namespace SharpRTSPClient
             return reports;
         }
 
+        /// <summary>
+        /// Whether a challenge says the password was right and only the nonce had expired.
+        /// </summary>
+        private static bool IsStale(string challenge)
+        {
+            var stale = System.Text.RegularExpressions.Regex.Match(
+                challenge ?? string.Empty, "stale\\s*=\\s*\"?(true)\"?",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            return stale.Success;
+        }
+
+        /// <summary>
+        /// The nonce a challenge carries, used to tell a fresh challenge from the same one repeated.
+        /// </summary>
+        private static string NonceOf(string challenge)
+        {
+            var nonce = System.Text.RegularExpressions.Regex.Match(challenge ?? string.Empty, "nonce=\"([^\"]+)\"");
+            return nonce.Success ? nonce.Groups[1].Value : null;
+        }
+
         private void RtspMessageReceived(object sender, RtspChunkEventArgs e)
         {
             // This runs on the listener's receive thread. Anything that escapes here is an unhandled
@@ -1123,6 +1144,28 @@ namespace SharpRTSPClient
 
                 if (message.ReturnCode == 401 && message.OriginalRequest?.Headers.ContainsKey(RtspHeaderNames.Authorization) == true)
                 {
+                    // A nonce does not last forever. A server that rotates its own says so with
+                    // stale, meaning the password was right and only the nonce was old, and the
+                    // answer is to redo the digest against the new one. Treating that as a wrong
+                    // password ended sessions that were perfectly entitled to carry on - a keepalive
+                    // an hour into a stream would stop the client for good.
+                    if (message.Headers.TryGetValue(RtspHeaderNames.WWWAuthenticate, out string staleChallenge)
+                        && IsStale(staleChallenge)
+                        && NonceOf(staleChallenge) != _lastNonce)
+                    {
+                        _logger.LogDebug("The nonce went stale, authenticating again");
+
+                        _lastNonce = NonceOf(staleChallenge);
+                        _authentication = Authentication.Create(_credentials, staleChallenge);
+
+                        if (message.OriginalRequest?.Clone() is RtspRequest staleRetry)
+                        {
+                            staleRetry.AddAuthorization(_authentication, _uri, _rtspSocket?.NextCommandIndex() ?? 0);
+                            _rtspClient?.SendMessage(staleRetry);
+                            return;
+                        }
+                    }
+
                     _logger.LogError("Fail to authenticate stopping here");
                     StopClient();
                     Stopped?.Invoke(this, new StoppedEventArgs(StoppedReason.Unauthorized));
@@ -1139,6 +1182,7 @@ namespace SharpRTSPClient
                     // EG:   Digest realm="AXIS_WS_ACCC8E3A0A8F", nonce="000057c3Y810622bff50b36005eb5efeae118626a161bf", stale=FALSE
                     // EG:   Digest realm="IP Camera(21388)", nonce="534407f373af1bdff561b7b4da295354", stale="FALSE"
                     string wwwAuthenticate = value ?? string.Empty;
+                    _lastNonce = NonceOf(wwwAuthenticate);
                     _authentication = Authentication.Create(_credentials, wwwAuthenticate);
                     _logger.LogDebug("WWW Authorize parsed for {authentication}", _authentication);
 

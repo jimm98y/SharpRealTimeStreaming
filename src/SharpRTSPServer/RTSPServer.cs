@@ -19,6 +19,7 @@ using System.Numerics;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -56,6 +57,11 @@ namespace SharpRTSPServer
         private const int PORTS_PER_RTP_PAIR = 2;
 
         private const int NONCE_BYTES = 16;          // 128 bits of entropy for the digest nonce
+
+        /// <summary>
+        /// The realm clients authenticate against.
+        /// </summary>
+        private const string AUTHENTICATION_REALM = "SharpRTSPServer";
         private const int SESSION_ID_BYTES = 12;     // 96 bits of entropy for the RTSP session ID
 
         /// <summary>
@@ -82,7 +88,11 @@ namespace SharpRTSPServer
         /// <summary>
         /// Default value of <see cref="NonceLifetime"/>.
         /// </summary>
-        public static readonly TimeSpan DEFAULT_NONCE_LIFETIME = TimeSpan.FromMinutes(5);
+        /// <remarks>
+        /// Zero, meaning the nonce is not rotated. See <see cref="NonceLifetime"/> for why the
+        /// hardening is not the default.
+        /// </remarks>
+        public static readonly TimeSpan DEFAULT_NONCE_LIFETIME = TimeSpan.Zero;
 
         /// <summary>
         /// Default value of <see cref="MaxConnections"/>.
@@ -235,9 +245,16 @@ namespace SharpRTSPServer
         /// request already in flight is not failed.
         /// </para>
         /// <para>
-        /// A client challenged with the new nonce answers it the same way it answered the first one,
-        /// so rotation costs one extra round trip and no user interaction. Nothing rotates while the
-        /// server is not listening, and Basic has no nonce to rotate.
+        /// Off by default, and deliberately so. A client that answers under a rotated out nonce is
+        /// told the nonce is stale and challenged again, which is what RFC 2617 asks for and costs a
+        /// round trip and no user interaction - but only for a client that acts on it. One that
+        /// treats any 401 as a wrong password gives up instead, and a long running session that
+        /// would otherwise have run for days ends. Whether the clients on the other end do the right
+        /// thing is not something the server can know, so turning this on is the deployment's call.
+        /// </para>
+        /// <para>
+        /// Set it to <see cref="TimeSpan.Zero"/> for no rotation. Nothing rotates while the server is
+        /// not listening, and Basic has no nonce to rotate.
         /// </para>
         /// </remarks>
         public TimeSpan NonceLifetime { get; set; } = DEFAULT_NONCE_LIFETIME;
@@ -390,8 +407,6 @@ namespace SharpRTSPServer
         /// </summary>
         private Authentication CreateAuthentication(RtspAuthenticationScheme scheme)
         {
-            const string realm = "SharpRTSPServer";
-
             if (string.IsNullOrEmpty(_credentials?.UserName) || string.IsNullOrEmpty(_credentials.Password))
             {
                 return null;
@@ -407,10 +422,50 @@ namespace SharpRTSPServer
                         "configure a TLS certificate so the connection is encrypted.");
                 }
 
-                return new AuthenticationBasic(_credentials, realm);
+                return new AuthenticationBasic(_credentials, AUTHENTICATION_REALM);
             }
 
-            return new AuthenticationDigest(_credentials, realm, RandomGenerator.NextHexToken(NONCE_BYTES), string.Empty);
+            return new AuthenticationDigest(_credentials, AUTHENTICATION_REALM, RandomGenerator.NextHexToken(NONCE_BYTES), string.Empty);
+        }
+
+        /// <summary>
+        /// Whether a request answered its challenge correctly, but under a nonce this server has
+        /// since rotated away.
+        /// </summary>
+        /// <remarks>
+        /// Checked by rebuilding the challenge as the client saw it and asking whether the answer
+        /// fits. Only someone who knows the password can produce an answer that does, so this does
+        /// not let a replayed header in - it is refused either way. It only decides whether the
+        /// client is told to try again, or told it got the password wrong.
+        /// </remarks>
+        private bool HasStaleNonce(RtspRequest message)
+        {
+            if (_authenticationScheme != RtspAuthenticationScheme.Digest)
+            {
+                return false;
+            }
+
+            if (!message.Headers.TryGetValue("Authorization", out string authorization) || string.IsNullOrEmpty(authorization))
+            {
+                return false;
+            }
+
+            var nonce = Regex.Match(authorization, "nonce=\"([^\"]+)\"");
+            if (!nonce.Success)
+            {
+                return false;
+            }
+
+            try
+            {
+                var asTheClientSawIt = new AuthenticationDigest(_credentials, AUTHENTICATION_REALM, nonce.Groups[1].Value, string.Empty);
+                return asTheClientSawIt.IsValid(message);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Could not check whether the nonce was merely stale");
+                return false;
+            }
         }
 
         /// <summary>
@@ -915,11 +970,26 @@ namespace SharpRTSPServer
                     // If it does not have the correct Authorization then close the RTSP connection
                     if (!authentications.Any(candidate => candidate.IsValid(message)))
                     {
-                        // Send a 401 Authentication Failed reply, then close the RTSP Socket
+                        // Answering correctly under a nonce we no longer hold is not a failed login,
+                        // it is a session that has outlived the nonce it started with. RFC 2617 calls
+                        // that stale: the client redoes the digest against the new nonce and carries
+                        // on, and only a client that cannot do that is any worse off than before.
+                        bool staleNonce = HasStaleNonce(message);
+
                         RtspResponse authorizationResponse = message.CreateResponse();
-                        authorizationResponse.AddHeader("WWW-Authenticate: " + authentication.GetServerResponse());
+                        authorizationResponse.AddHeader("WWW-Authenticate: " + authentication.GetServerResponse()
+                            + (staleNonce ? ", stale=\"true\"" : string.Empty));
                         authorizationResponse.ReturnCode = 401;
                         listener.SendMessage(authorizationResponse);
+
+                        if (staleNonce)
+                        {
+                            // The connection stays: tearing it down would end a session the client is
+                            // entitled to continue, and it is what the client sees as the server
+                            // hanging up on it mid stream.
+                            _logger.LogDebug("Challenging {remoteEndPoint} again, its nonce has expired", listener.RemoteEndPoint);
+                            return;
+                        }
 
                         // Go through RemoveSession rather than just dropping it from the list. A
                         // connection that had already started playing is also in the stream source's

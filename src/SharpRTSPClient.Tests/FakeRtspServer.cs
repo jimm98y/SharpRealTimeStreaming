@@ -45,6 +45,23 @@ namespace SharpRTSPClient.Tests
 
         public string BaseUri => $"rtsp://127.0.0.1:{Port}/stream1";
 
+        /// <summary>Challenge every request that arrives without an Authorization header.</summary>
+        public bool RequireAuthentication { get; set; }
+
+        /// <summary>The nonce currently being handed out. Change it to make the client's one stale.</summary>
+        public string Nonce { get; set; } = "0000000000000001";
+
+        /// <summary>Method after which the nonce is replaced, to expire it mid dialog.</summary>
+        public string RotateNonceAfter { get; set; }
+
+        /// <summary>Refuse every answer, and never call it stale - what a wrong password looks like.</summary>
+        public bool AlwaysRefuse { get; set; }
+
+        /// <summary>How many times a request was refused because its nonce had gone stale.</summary>
+        public int StaleChallenges => _staleChallenges;
+
+        private int _staleChallenges;
+
         private void Serve()
         {
             try
@@ -95,6 +112,32 @@ namespace SharpRTSPClient.Tests
                 _requests.Add(method);
             }
 
+            if (RequireAuthentication)
+            {
+                string authorization = Match(request, @"Authorization:\s*(.+)");
+
+                if (authorization == null)
+                {
+                    SendUnauthorized(stream, cseq, stale: false);
+                    return;
+                }
+
+                if (AlwaysRefuse)
+                {
+                    SendUnauthorized(stream, cseq, stale: false);
+                    return;
+                }
+
+                string presented = Match(authorization, "nonce=\"([^\"]+)\"");
+                if (presented != Nonce)
+                {
+                    // the password was right, the nonce simply outlived the session
+                    Interlocked.Increment(ref _staleChallenges);
+                    SendUnauthorized(stream, cseq, stale: true);
+                    return;
+                }
+            }
+
             switch (method)
             {
                 case "OPTIONS":
@@ -119,6 +162,27 @@ namespace SharpRTSPClient.Tests
                     Send(stream, cseq, session != null ? $"Session: {session}" : null);
                     break;
             }
+
+            if (RotateNonceAfter != null && RotateNonceAfter == method)
+            {
+                Nonce = Guid.NewGuid().ToString("N");
+            }
+        }
+
+        private void SendUnauthorized(NetworkStream stream, string cseq, bool stale)
+        {
+            string challenge = $"WWW-Authenticate: Digest realm=\"FakeRealm\", nonce=\"{Nonce}\""
+                + (stale ? ", stale=\"true\"" : string.Empty);
+
+            var response = new StringBuilder();
+            response.Append("RTSP/1.0 401 Unauthorized\r\n");
+            response.Append("CSeq: ").Append(cseq).Append("\r\n");
+            response.Append(challenge).Append("\r\n");
+            response.Append("\r\n");
+
+            byte[] head = Encoding.ASCII.GetBytes(response.ToString());
+            stream.Write(head, 0, head.Length);
+            stream.Flush();
         }
 
         private static void Send(NetworkStream stream, string cseq, params string[] headers)
