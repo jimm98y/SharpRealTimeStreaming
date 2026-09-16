@@ -47,9 +47,9 @@ namespace SharpRTSPServer
         /// <returns><see cref="StringBuilder"/>.</returns>
         public override StringBuilder BuildSDP(StringBuilder sdp)
         {
-            sdp.Append($"m=audio 0 RTP/{RtpProfile} {PayloadType}\n");
-            sdp.Append($"a=control:trackID={ID}\n");
-            sdp.Append($"a=rtpmap:{PayloadType} {Codec}/{SamplingRate}\n");
+            sdp.Append($"m=audio 0 RTP/{RtpProfile} {PayloadType}\r\n");
+            sdp.Append($"a=control:trackID={ID}\r\n");
+            sdp.Append($"a=rtpmap:{PayloadType} {Codec}/{SamplingRate}\r\n");
 
             return sdp;
         }

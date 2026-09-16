@@ -128,12 +128,12 @@ namespace SharpRTSPServer
             string sps = SPS != null && SPS.Length > 0 ? "; sprop-sps=" + Convert.ToBase64String(SPS) : "";
             string pps = PPS != null && PPS.Length > 0 ? "; sprop-pps=" + Convert.ToBase64String(PPS) : "";
 
-            sdp.Append($"m=video 0 RTP/{RtpProfile} {PayloadType}\n");
-            sdp.Append($"a=control:trackID={ID}\n");
-            sdp.Append($"a=rtpmap:{PayloadType} {Codec}/{VideoClock}\n");
+            sdp.Append($"m=video 0 RTP/{RtpProfile} {PayloadType}\r\n");
+            sdp.Append($"a=control:trackID={ID}\r\n");
+            sdp.Append($"a=rtpmap:{PayloadType} {Codec}/{VideoClock}\r\n");
 
             string parameterSets = (vps + sps + pps).TrimStart(';');
-            sdp.Append($"a=fmtp:{PayloadType}{parameterSets}\n");
+            sdp.Append($"a=fmtp:{PayloadType}{parameterSets}\r\n");
 
             return sdp;
         }

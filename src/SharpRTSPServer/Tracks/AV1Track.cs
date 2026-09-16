@@ -78,9 +78,9 @@ namespace SharpRTSPServer
 
         public override StringBuilder BuildSDP(StringBuilder sdp)
         {
-            sdp.Append($"m=video 0 RTP/{RtpProfile} {PayloadType}\n"); // TODO: AVPF is AVP + Feedback https://aomediacodec.github.io/av1-rtp-spec/v1.0.0.html
-            sdp.Append($"a=control:trackID={ID}\n");
-            sdp.Append($"a=rtpmap:{PayloadType} {Codec}/{VideoClock}\n");
+            sdp.Append($"m=video 0 RTP/{RtpProfile} {PayloadType}\r\n"); // TODO: AVPF is AVP + Feedback https://aomediacodec.github.io/av1-rtp-spec/v1.0.0.html
+            sdp.Append($"a=control:trackID={ID}\r\n");
+            sdp.Append($"a=rtpmap:{PayloadType} {Codec}/{VideoClock}\r\n");
 
             return sdp;
         }

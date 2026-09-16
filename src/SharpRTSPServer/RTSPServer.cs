@@ -9,6 +9,7 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Diagnostics.Contracts;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Net;
@@ -771,6 +772,25 @@ namespace SharpRTSPServer
                 }
             }
 
+            // Update the RTSP Keepalive Timeout. This belongs to the connection rather than to any one
+            // stream, and has to happen before the URI is looked at: a client that uses OPTIONS on the
+            // base URL as its keepalive would otherwise never refresh its session.
+            // Match on the listener itself - matching on the remote address alone would pick the wrong
+            // connection whenever two clients share a source address (localhost, NAT, ...).
+            lock (_connectionList)
+            {
+                _connectionList.Find(c => c.Listener == listener)?.UpdateKeepAlive();
+            }
+
+            // OPTIONS says what the server supports. It is not about any one stream, and clients and
+            // health checks send it to the base URL, which used to be answered 404.
+            if (message is RtspRequestOptions)
+            {
+                listener.SendMessage(message.CreateResponse());
+                ReceivedRtspMessage?.Invoke(sender, new RtspMessageEventArgs(message));
+                return;
+            }
+
             var streamSource = GetStreamSource(message.RtspUri);
             if (streamSource == null)
             {
@@ -781,30 +801,18 @@ namespace SharpRTSPServer
                 return;
             }
 
-            // Update the RTSP Keepalive Timeout.
-            // Match on the listener itself - matching on the remote address alone would pick the wrong
-            // connection whenever two clients share a source address (localhost, NAT, ...).
             lock (_connectionList)
             {
                 var oneConnection = _connectionList.Find(c => c.Listener == listener);
-                if (oneConnection != null)
+                if (oneConnection != null && !streamSource.ConnectionList.Contains(oneConnection))
                 {
-                    oneConnection.UpdateKeepAlive();
-
-                    if (!streamSource.ConnectionList.Contains(oneConnection))
-                    {
-                        streamSource.ConnectionList.Add(oneConnection);
-                    }
+                    streamSource.ConnectionList.Add(oneConnection);
                 }
             }
 
             // Handle message without session
             switch (message)
             {
-                case RtspRequestOptions optionsMessage:
-                    listener.SendMessage(message.CreateResponse());
-                    ReceivedRtspMessage?.Invoke(sender, new RtspMessageEventArgs(message));
-                    return;
                 case RtspRequestDescribe describeMessage:
                     HandleDescribe(listener, message);
                     ReceivedRtspMessage?.Invoke(sender, new RtspMessageEventArgs(message));
@@ -841,22 +849,46 @@ namespace SharpRTSPServer
                     {
                         // Search for the Session in the Sessions List. Change the state to "PLAY"
                         const string range = "npt=0-"; // Playing the 'video' from 0 seconds until the end
-                        string rtpInfo = "url=" + message.RtspUri + ";seq=" + connection.Video.SequenceNumber; // TODO Add rtptime  +";rtptime="+session.rtpInitialTimestamp;
-                        rtpInfo += ",url=" + message.RtspUri + ";seq=" + connection.Audio.SequenceNumber; // TODO Add rtptime  +";rtptime="+session.rtpInitialTimestamp;
 
                         // 'RTP-Info: url=rtsp://192.168.1.195:8557/h264/track1;seq=33026;rtptime=3014957579,url=rtsp://192.168.1.195:8557/h264/track2;seq=42116;rtptime=3335975101'
+                        // One entry per stream that was actually set up, naming that track's control
+                        // URL. Both entries used to be sent whatever the source held, so a video only
+                        // stream announced an audio track that had never been set up and never would
+                        // send, under the session URL rather than either track's own.
+                        // TODO Add rtptime +";rtptime="+session.rtpInitialTimestamp;
+                        string rtpInfo = string.Join(",",
+                            connection.Streams
+                                .Select((stream, trackId) => new { stream, trackId })
+                                .Where(x => x.stream.RtpChannel != null)
+                                .Select(x => $"url={TrackControlUri(message.RtspUri, x.trackId)};seq={x.stream.SequenceNumber}"));
 
                         // Send the reply
                         RtspResponse playResponse = message.CreateResponse();
                         playResponse.AddHeader("Range: " + range);
-                        playResponse.AddHeader("RTP-Info: " + rtpInfo);
-                        listener.SendMessage(playResponse);
+                        if (!string.IsNullOrEmpty(rtpInfo))
+                        {
+                            playResponse.AddHeader("RTP-Info: " + rtpInfo);
+                        }
+                        // Answer and start playing under the lock the media path takes. Done outside
+                        // it, a sample produced between the response going out and the session being
+                        // marked as playing was dropped, so a client that fed the moment its PLAY was
+                        // answered lost whatever fell in that window; and marking it first without
+                        // the lock would let the media overtake the response on the wire.
+                        lock (_connectionList)
+                        {
+                            listener.SendMessage(playResponse);
 
-                        connection.Video.MustSendRtcpPacket = true;
-                        connection.Audio.MustSendRtcpPacket = true;
+                            foreach (var stream in connection.Streams)
+                            {
+                                if (stream.RtpChannel != null)
+                                {
+                                    stream.MustSendRtcpPacket = true;
+                                }
+                            }
 
-                        // Allow video and audio to go to this client
-                        connection.Play = true;
+                            // Allow video and audio to go to this client
+                            connection.Play = true;
+                        }
 
                         ReceivedRtspMessage?.Invoke(sender, new RtspMessageEventArgs(message, connection));
                     }
@@ -1284,6 +1316,14 @@ namespace SharpRTSPServer
             return builder.ToString();
         }
 
+        /// <summary>
+        /// The control URL of one track, as the SDP advertises it and SETUP addresses it.
+        /// </summary>
+        private static string TrackControlUri(Uri sessionUri, int trackId)
+        {
+            return sessionUri.ToString().TrimEnd('/') + "/trackID=" + trackId.ToString(CultureInfo.InvariantCulture);
+        }
+
         private RTSPStreamSource GetStreamSource(Uri rtspUri)
         {
             string streamID = rtspUri.AbsolutePath.TrimStart('/').Split('/').First();
@@ -1323,10 +1363,10 @@ namespace SharpRTSPServer
             // Generate the SDP
             // The sprop-parameter-sets provide the SPS and PPS for H264 video
             // The packetization-mode defines the H264 over RTP payloads used but is Optional
-            sdp.Append("v=0\n");
-            sdp.Append("o=user 123 0 IN IP4 0.0.0.0\n");
-            sdp.Append($"s={SessionName}\n");
-            sdp.Append("c=IN IP4 0.0.0.0\n");
+            sdp.Append("v=0\r\n");
+            sdp.Append("o=user 123 0 IN IP4 0.0.0.0\r\n");
+            sdp.Append($"s={SessionName}\r\n");
+            sdp.Append("c=IN IP4 0.0.0.0\r\n");
 
             // VIDEO
             if (streamSource.VideoTrack != null)

@@ -113,8 +113,12 @@ namespace SharpRTSPServer.Tests
         [TestMethod]
         public void AHeaderBuiltAgainstTheNonceJustRotatedOutIsStillAccepted()
         {
+            // Deliberately unhurried. The point is to land after exactly one rotation, and a short
+            // lifetime would make that a race against however long the handshake below takes.
+            var lifetime = TimeSpan.FromSeconds(2);
+
             int port = TestPorts.FindFree();
-            using var server = NewServer(port, TimeSpan.FromMilliseconds(400));
+            using var server = NewServer(port, lifetime);
 
             string uri = "rtsp://127.0.0.1:" + port + "/stream1";
 
@@ -122,7 +126,7 @@ namespace SharpRTSPServer.Tests
             string authorization = BuildDigest(Field(challenged.Challenge, "realm"), Field(challenged.Challenge, "nonce"), uri);
 
             // One rotation. A request already on its way when the nonce turns over must not be failed.
-            Thread.Sleep(600);
+            Thread.Sleep(lifetime + TimeSpan.FromMilliseconds(600));
 
             Assert.AreEqual(200, SendRaw(port, uri, authorization).StatusCode,
                 "the nonce just rotated out is still within its grace period");

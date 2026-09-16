@@ -147,10 +147,10 @@ namespace SharpRTSPServer
             string spsStr = Convert.ToBase64String(SPS);
             string ppsStr = Convert.ToBase64String(PPS);
 
-            sdp.Append($"m=video 0 RTP/{RtpProfile} {PayloadType}\n");
-            sdp.Append($"a=control:trackID={ID}\n");
-            sdp.Append($"a=rtpmap:{PayloadType} {Codec}/{VideoClock}\n");
-            sdp.Append($"a=fmtp:{PayloadType} profile-level-id={profileLevelIdStr}; sprop-parameter-sets={spsStr},{ppsStr}\n");
+            sdp.Append($"m=video 0 RTP/{RtpProfile} {PayloadType}\r\n");
+            sdp.Append($"a=control:trackID={ID}\r\n");
+            sdp.Append($"a=rtpmap:{PayloadType} {Codec}/{VideoClock}\r\n");
+            sdp.Append($"a=fmtp:{PayloadType} profile-level-id={profileLevelIdStr}; sprop-parameter-sets={spsStr},{ppsStr}\r\n");
 
             return sdp;
         }

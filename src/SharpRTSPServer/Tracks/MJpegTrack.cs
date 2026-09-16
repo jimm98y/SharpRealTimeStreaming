@@ -25,9 +25,11 @@ namespace SharpRTSPServer
         /// <inheritdoc/>
         public override StringBuilder BuildSDP(StringBuilder sdp)
         {
+            // AppendLine would use Environment.NewLine, which is a bare LF off Windows - so the same
+            // build produced a different SDP depending on where it ran
             sdp
-                .Append($"m=video 0 RTP/{RtpProfile} ").Append(PayloadType).AppendLine()
-                .Append("a=control:trackID=").Append(ID).AppendLine();
+                .Append($"m=video 0 RTP/{RtpProfile} ").Append(PayloadType).Append("\r\n")
+                .Append("a=control:trackID=").Append(ID).Append("\r\n");
 
             return sdp;
         }
