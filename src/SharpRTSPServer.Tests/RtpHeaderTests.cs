@@ -21,6 +21,8 @@ namespace SharpRTSPServer.Tests
 
         private static uint Ssrc(byte[] rtpPacket) => BinaryPrimitives.ReadUInt32BigEndian(rtpPacket.AsSpan(8));
 
+        private static ushort Seq(byte[] rtpPacket) => BinaryPrimitives.ReadUInt16BigEndian(rtpPacket.AsSpan(2));
+
         private static List<ReadOnlyMemory<byte>> One(byte[] sample)
         {
             return new List<ReadOnlyMemory<byte>> { new ReadOnlyMemory<byte>(sample) };
@@ -130,5 +132,78 @@ namespace SharpRTSPServer.Tests
                 "the second SETUP must not change what the first stream sends");
         }
 
+        [TestMethod]
+        public void AProxyTrackInPassthroughForwardsTheSourceSsrcAndSequenceNumbers()
+        {
+            int port = TestPorts.FindFree();
+            using var server = new RTSPServer(port, "admin", "password");
+
+            var videoTrack = new ProxyTrack(TrackType.Video) { PreserveSourceHeaders = true };
+            var audioTrack = new ProxyTrack(TrackType.Audio) { PreserveSourceHeaders = true };
+            var streamSource = new RTSPStreamSource("stream1", videoTrack, audioTrack);
+            streamSource.OverrideSDP(Sdp, true);
+            server.AddStreamSource(streamSource);
+            videoTrack.Start();
+            audioTrack.Start();
+            server.StartListen();
+
+            using var client = Play(port);
+
+            // sequence numbers with a gap in them, as a lossy source would produce
+            foreach (ushort seq in new ushort[] { 40000, 40001, 40005 })
+            {
+                videoTrack.FeedInRawSamples(9000, One(RtpPacket(seq, 0x3C790025)));
+
+                byte[] sent = NextOn(client, VideoChannel);
+                Assert.AreEqual(0x3C790025u, Ssrc(sent), "the source SSRC should survive");
+                Assert.AreEqual(seq, Seq(sent), "the source sequence number should survive, gap and all");
+            }
+        }
+
+        [TestMethod]
+        public void AProxyTrackWithoutPassthroughIsStillRestamped()
+        {
+            int port = TestPorts.FindFree();
+            using var server = new RTSPServer(port, "admin", "password");
+
+            var videoTrack = new ProxyTrack(TrackType.Video);
+            var audioTrack = new ProxyTrack(TrackType.Audio);
+            var streamSource = new RTSPStreamSource("stream1", videoTrack, audioTrack);
+            streamSource.OverrideSDP(Sdp, true);
+            server.AddStreamSource(streamSource);
+            videoTrack.Start();
+            audioTrack.Start();
+            server.StartListen();
+
+            using var client = Play(port);
+
+            videoTrack.FeedInRawSamples(9000, One(RtpPacket(40000, 0x3C790025)));
+
+            byte[] sent = NextOn(client, VideoChannel);
+            Assert.AreEqual(videoTrack.SSRC, Ssrc(sent), "the default is still the server's own SSRC");
+            Assert.AreNotEqual((ushort)40000, Seq(sent), "the default is still the server's own numbering");
+        }
+
+        private static byte[] RtpPacket(ushort seq, uint ssrc)
+        {
+            var packet = new byte[16];
+            packet[0] = 0x80;
+            packet[1] = 96;
+            BinaryPrimitives.WriteUInt16BigEndian(packet.AsSpan(2), seq);
+            BinaryPrimitives.WriteUInt32BigEndian(packet.AsSpan(8), ssrc);
+            return packet;
+        }
+
+        private const string Sdp =
+            "v=0\r\n" +
+            "o=- 0 0 IN IP4 0.0.0.0\r\n" +
+            "s=Test\r\n" +
+            "c=IN IP4 0.0.0.0\r\n" +
+            "m=video 0 RTP/AVP 96\r\n" +
+            "a=control:trackID=0\r\n" +
+            "a=rtpmap:96 H264/90000\r\n" +
+            "m=audio 0 RTP/AVP 97\r\n" +
+            "a=control:trackID=1\r\n" +
+            "a=rtpmap:97 mpeg4-generic/44100/1\r\n";
     }
 }

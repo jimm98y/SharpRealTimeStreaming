@@ -25,6 +25,16 @@ namespace SharpRTSPServer
             BinaryPrimitives.WriteUInt16BigEndian(rtpPacket.Slice(2), sequenceId);
         }
 
+        public static ushort ReadSequenceNumber(ReadOnlySpan<byte> rtpPacket)
+        {
+            return BinaryPrimitives.ReadUInt16BigEndian(rtpPacket.Slice(2));
+        }
+
+        public static uint ReadSSRC(ReadOnlySpan<byte> rtpPacket)
+        {
+            return BinaryPrimitives.ReadUInt32BigEndian(rtpPacket.Slice(8));
+        }
+
         public static void WriteSSRC(Span<byte> rtp_packet, uint ssrc)
         {
             BinaryPrimitives.WriteUInt32BigEndian(rtp_packet.Slice(8), ssrc);

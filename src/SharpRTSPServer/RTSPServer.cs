@@ -1055,6 +1055,21 @@ namespace SharpRTSPServer
 
         public void SendRawRTP(RTSPConnection connection, RTPStream stream, List<Memory<byte>> rtpPackets)
         {
+            SendRawRTP(connection, stream, rtpPackets, false);
+        }
+
+        /// <summary>
+        /// Sends RTP packets to one connection.
+        /// </summary>
+        /// <param name="connection">The connection to send on.</param>
+        /// <param name="stream">The stream of that connection the packets belong to.</param>
+        /// <param name="rtpPackets">The packets to send.</param>
+        /// <param name="preserveSourceHeaders">
+        /// Leave the SSRC and sequence numbers already in the packets alone, for a track forwarding
+        /// RTP produced elsewhere. Otherwise both are overwritten with this server's own.
+        /// </param>
+        public void SendRawRTP(RTSPConnection connection, RTPStream stream, List<Memory<byte>> rtpPackets, bool preserveSourceHeaders)
+        {
             if (!connection.Play)
                 return;
 
@@ -1066,12 +1081,21 @@ namespace SharpRTSPServer
             {
                 var rtpPacket = r;
 
-                // Add the specific data for each transmission
-                RTPPacketUtil.WriteSequenceNumber(rtpPacket.Span, stream.SequenceNumber);
-                stream.SequenceNumber++;
+                if (preserveSourceHeaders)
+                {
+                    // Forwarded untouched. The sequence number is still followed, so the RTP-Info of a
+                    // later PLAY and anything else reading it reports what actually went out.
+                    stream.SequenceNumber = (ushort)(RTPPacketUtil.ReadSequenceNumber(rtpPacket.Span) + 1);
+                }
+                else
+                {
+                    // Add the specific data for each transmission
+                    RTPPacketUtil.WriteSequenceNumber(rtpPacket.Span, stream.SequenceNumber);
+                    stream.SequenceNumber++;
 
-                // Add the specific SSRC for each transmission
-                RTPPacketUtil.WriteSSRC(rtpPacket.Span, stream.SSRC);
+                    // Add the specific SSRC for each transmission
+                    RTPPacketUtil.WriteSSRC(rtpPacket.Span, stream.SSRC);
+                }
 
                 if (stream.Context != null)
                 {
@@ -1186,7 +1210,8 @@ namespace SharpRTSPServer
         /// </summary>
         /// <remarks>
         /// Takes the connection list lock itself rather than relying on callers to hold it - some
-        /// (like <see cref="SendRawRTP"/>) are public and can be reached without it. The lock is
+        /// (like <see cref="SendRawRTP(RTSPConnection, RTPStream, List{Memory{byte}})"/>) are public
+        /// and can be reached without it. The lock is
         /// re-entrant, so the callers that do already hold it are unaffected.
         /// </remarks>
         private void RemoveSession(RTSPConnection connection)
@@ -1453,6 +1478,11 @@ namespace SharpRTSPServer
                     return;
                 }
 
+                // A track that forwards RTP from elsewhere can ask for it to go out exactly as it
+                // arrived, rather than being restamped as if this server had produced it.
+                ITrack track = streamType == (int)TrackType.Video ? streamSource.VideoTrack : streamSource.AudioTrack;
+                bool preserveSourceHeaders = track is ProxyTrack proxyTrack && proxyTrack.PreserveSourceHeaders;
+
                 // Go through each RTSP connection and output the RTP on the Session
                 foreach (RTSPConnection connection in streamSource.ConnectionList.ToArray()) // ToArray makes a temp copy of the list. This lets us delete items in the foreach eg when there is Write Error
                 {
@@ -1467,6 +1497,11 @@ namespace SharpRTSPServer
                     if (stream.RtpChannel == null)
                         continue;
 
+                    // The RTP keeps the source's SSRC, so the sender reports have to name it too -
+                    // a receiver ties the two together by SSRC and ignores a report that does not match.
+                    if (preserveSourceHeaders)
+                        stream.SSRC = track.SSRC;
+
                     _logger.LogDebug("Sending RTP session {sessionId} {TransportLogName} RTP timestamp={rtpTimestamp}. Sequence={sequenceNumber}",
                         connection.SessionId, TransportLogName(stream.RtpChannel), rtpTimestamp, stream.SequenceNumber);
 
@@ -1479,7 +1514,7 @@ namespace SharpRTSPServer
                         }
                     }
 
-                    SendRawRTP(connection, stream, rtpPackets);
+                    SendRawRTP(connection, stream, rtpPackets, preserveSourceHeaders);
                 }
             }
         }

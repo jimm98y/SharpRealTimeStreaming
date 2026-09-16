@@ -25,10 +25,59 @@ namespace SharpRTSPServer
 
         public Uri Uri { get; }
 
+        /// <summary>
+        /// Forward the RTP exactly as fed, keeping the SSRC and sequence numbers the source put in it
+        /// instead of letting the server write its own. Off by default.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// The server normally stamps every outgoing packet with the stream's SSRC and its own
+        /// sequence counter, which is right when it is the origin of the media. For a track that
+        /// forwards someone else's RTP it is not: renumbering closes the gaps a lossy source left, so
+        /// a receiver can no longer see what was lost, and reordered packets come out carrying
+        /// in-order sequence numbers. Turn this on to hand the packets over untouched.
+        /// </para>
+        /// <para>
+        /// The source's SSRC is picked up from the first packet forwarded and published as
+        /// <see cref="TrackBase.SSRC"/>, so the SETUP reply and the RTCP the server sends for this
+        /// track agree with the RTP. Set it before the first client sets up, otherwise that client is
+        /// told the placeholder SSRC this track was constructed with.
+        /// </para>
+        /// </remarks>
+        public bool PreserveSourceHeaders { get; set; } = false;
+
+        /// <summary>
+        /// True once <see cref="PreserveSourceHeaders"/> has taken the SSRC off a forwarded packet.
+        /// </summary>
+        public bool HasLearnedSourceSsrc { get; private set; }
+
         public ProxyTrack(TrackType type)
         {
             this.ID = (int)type;
         }
+
+        /// <summary>
+        /// Takes the SSRC out of an RTP packet the source handed us, so the server announces and
+        /// reports the same SSRC the packets carry.
+        /// </summary>
+        internal void LearnSourceSsrc(ReadOnlySpan<byte> rtpPacket)
+        {
+            if (!PreserveSourceHeaders || rtpPacket.Length < RTP_HEADER_LENGTH)
+                return;
+
+            uint ssrc = RTPPacketUtil.ReadSSRC(rtpPacket);
+
+            if (HasLearnedSourceSsrc && SSRC == ssrc)
+                return;
+
+            SSRC = ssrc;
+            HasLearnedSourceSsrc = true;
+        }
+
+        /// <summary>
+        /// Smallest RTP packet that still has a full header, and so an SSRC to read.
+        /// </summary>
+        private const int RTP_HEADER_LENGTH = 12;
 
         public override StringBuilder BuildSDP(StringBuilder sdp)
         {
@@ -56,6 +105,10 @@ namespace SharpRTSPServer
             {
                 if (sample.Length == 0)
                     continue;
+
+                // the SSRC has to be known before the packet goes out, so the RTCP the server sends
+                // alongside it names the same source
+                LearnSourceSsrc(sample.Span);
 
                 var owner = MemoryPool<byte>.Shared.Rent(sample.Length);
                 memoryOwners.Add(owner);

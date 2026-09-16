@@ -1,4 +1,4 @@
-using Haukcode.PcapngUtils;
+﻿using Haukcode.PcapngUtils;
 using Haukcode.PcapngUtils.Common;
 using Haukcode.PcapngUtils.PcapNG.BlockTypes;
 using Microsoft.Extensions.Configuration;
@@ -56,8 +56,11 @@ using (var server = new RTSPServer(port, userName, password))
 
     await rtspProtocolParser.Semaphore.WaitAsync();
 
-    rtspVideoTrack = new ProxyTrack(TrackType.Video);
-    rtspAudioTrack = new ProxyTrack(TrackType.Audio);
+    // Hand the captured RTP over exactly as it was recorded, rather than restamping it as if this
+    // server had produced the media: the SSRC and the sequence numbers stay as the capture has them,
+    // so whatever was lost or reordered in the capture is what the client sees.
+    rtspVideoTrack = new ProxyTrack(TrackType.Video) { PreserveSourceHeaders = true };
+    rtspAudioTrack = new ProxyTrack(TrackType.Audio) { PreserveSourceHeaders = true };
 
     var streamSource = new RTSPStreamSource(STREAM_ID, rtspVideoTrack, rtspAudioTrack);
     streamSource.OverrideSDP(rtspProtocolParser.SDP, true);
