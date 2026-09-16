@@ -58,6 +58,12 @@ namespace SharpRTSPServer
         public bool RequiresSrtp { get; set; }
 
         /// <summary>
+        /// Whether this stream has already complained about having no SRTP keys, so that a stream
+        /// dropping every frame says so once rather than at frame rate.
+        /// </summary>
+        internal bool ReportedMissingSrtpKeys { get; set; }
+
+        /// <summary>
         /// SSRC carried by the RTP this stream sends.
         /// </summary>
         /// <remarks>

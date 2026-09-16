@@ -81,9 +81,14 @@ namespace SharpRTSPServer
         private const int MAX_PENDING_HANDSHAKES = 64;
 
         /// <summary>
+        /// How long the accept loop waits after a failure before trying again.
+        /// </summary>
+        private static readonly TimeSpan ACCEPT_RETRY_DELAY = TimeSpan.FromMilliseconds(50);
+
+        /// <summary>
         /// Default value of <see cref="HandshakeTimeout"/>.
         /// </summary>
-        public static readonly TimeSpan DEFAULT_HANDSHAKE_TIMEOUT = TimeSpan.FromSeconds(10);
+        public static readonly TimeSpan DEFAULT_HANDSHAKE_TIMEOUT = TimeSpan.FromSeconds(5);
 
         /// <summary>
         /// Default value of <see cref="NonceLifetime"/>.
@@ -394,10 +399,14 @@ namespace SharpRTSPServer
 
             // The listen socket accepts and completes the TLS handshake in the same call, so one
             // client that connects and then says nothing holds the accept loop and no other client
-            // gets in. Where we can build the transport ourselves - everything but the HTTP tunnel,
-            // whose handshake is the library's to read - the accept is taken here instead and the
-            // handshake done away from the loop, under a timeout.
-            _handshakeOffTheAcceptLoop = !useHttpTunnel;
+            // gets in. Where we can build the transport ourselves - a TLS server that is not
+            // tunnelled, the tunnel handshake being the library's to read - the accept is taken here
+            // instead and the handshake done away from the loop, under a timeout.
+            //
+            // Only where there is a handshake to wait on. A plaintext server has none, so it keeps
+            // the straightforward path, where a connection is counted against MaxConnections the
+            // moment it is accepted rather than once it has negotiated.
+            _handshakeOffTheAcceptLoop = !useHttpTunnel && tlsCertificate != null;
 
         }
 
@@ -639,6 +648,10 @@ namespace SharpRTSPServer
                     // loop for good: the server stopped taking new connections while everything
                     // already connected carried on, so nothing looked wrong from the outside.
                     _logger.LogWarning(ex, "Could not accept a connection");
+
+                    // A failure that repeats - running out of file handles, say - would otherwise
+                    // spin this loop as fast as the machine allows.
+                    await Task.Delay(ACCEPT_RETRY_DELAY, cancellationToken).ConfigureAwait(false);
                     continue;
                 }
 
@@ -649,7 +662,7 @@ namespace SharpRTSPServer
                 catch (Exception ex)
                 {
                     _logger.LogWarning(ex, "Could not admit the connection from {remoteEndPoint}", TryGetRemoteEndPoint(rtspSocket));
-                    TryDispose(rtspSocket);
+                    TryCloseTransport(rtspSocket);
                 }
             }
         }
@@ -674,20 +687,20 @@ namespace SharpRTSPServer
         {
             try
             {
-                // Both halves are timed, not just the first: TLS is negotiated lazily on the first
-                // read of the transport's stream, which is inside the listener being started, so a
-                // timeout around the transport alone would have covered the part that never blocks.
-                // On a dedicated thread rather than a pooled one. The handshake blocks, and the pool
-                // adds threads only slowly, so a handful of connections sitting in one were enough to
-                // make an honest client wait seconds for a thread to run its own handshake on.
-                Task bringUp = Task.Factory.StartNew(
-                    () => AdmitConnection(BuildTransport(tcpClient)),
+                // Building the transport is where TLS negotiates, and it blocks until the client
+                // completes the handshake or never does. So that is the part with a deadline on it,
+                // on a dedicated thread rather than a pooled one - the pool adds threads only
+                // slowly, and a handful of connections sitting in a handshake was enough to make an
+                // honest client wait seconds for a thread to run its own on.
+                Task<IRtspTransport> handshake = Task.Factory.StartNew(
+                    () => BuildTransport(tcpClient),
                     CancellationToken.None,
                     TaskCreationOptions.LongRunning,
                     TaskScheduler.Default);
-                Task finished = await Task.WhenAny(bringUp, Task.Delay(HandshakeTimeout)).ConfigureAwait(false);
 
-                if (!ReferenceEquals(finished, bringUp))
+                Task finished = await Task.WhenAny(handshake, Task.Delay(HandshakeTimeout)).ConfigureAwait(false);
+
+                if (!ReferenceEquals(finished, handshake))
                 {
                     // Closing the socket is what unblocks it, since it is sitting on a read that will
                     // never be answered.
@@ -696,11 +709,14 @@ namespace SharpRTSPServer
                     TryClose(tcpClient);
 
                     // let it unwind on its own rather than holding this task, and its slot, on it
-                    _ = bringUp.ContinueWith(t => { _ = t.Exception; }, TaskScheduler.Default);
+                    _ = handshake.ContinueWith(t => { _ = t.Exception; }, TaskScheduler.Default);
                     return;
                 }
 
-                await bringUp.ConfigureAwait(false);
+                // Registering is the server's own bookkeeping, and it takes the connection list lock
+                // that the media path holds too. Timing it would drop a blameless client whenever the
+                // server itself was busy, so it happens after the clock has stopped.
+                AdmitConnection(await handshake.ConfigureAwait(false));
             }
             catch (Exception ex)
             {
@@ -758,6 +774,16 @@ namespace SharpRTSPServer
         /// </summary>
         private void AdmitConnection(IRtspTransport rtspSocket)
         {
+            RtspListener listener = RegisterConnection(rtspSocket);
+            listener?.Start();
+        }
+
+        /// <summary>
+        /// Puts a freshly accepted connection on the books, and hands back the listener to start, or
+        /// null if the server is already full and the connection has been let go.
+        /// </summary>
+        private RtspListener RegisterConnection(IRtspTransport rtspSocket)
+        {
             _logger.LogDebug("Connection from {remoteEndPoint}", rtspSocket.RemoteEndPoint);
 
             RtspListener newListener = new RtspListener(rtspSocket, _loggerFactory.CreateLogger<RtspListener>());
@@ -789,10 +815,25 @@ namespace SharpRTSPServer
                     rtspSocket.RemoteEndPoint, MaxConnections);
                 newListener.MessageReceived -= RTSPMessageReceived;
                 newListener.Dispose();
-                return;
+                return null;
             }
 
-            newListener.Start();
+            return newListener;
+        }
+
+        /// <summary>
+        /// Takes a connection back off the books, for one that was registered and then turned out not
+        /// to be worth keeping.
+        /// </summary>
+        private void DropConnection(RtspListener listener)
+        {
+            lock (_connectionList)
+            {
+                foreach (RTSPConnection connection in _connectionList.Where(c => c.Listener == listener).ToArray())
+                {
+                    RemoveSession(connection);
+                }
+            }
         }
 
         /// <summary>
@@ -810,7 +851,7 @@ namespace SharpRTSPServer
             }
         }
 
-        private void TryDispose(IRtspTransport transport)
+        private void TryCloseTransport(IRtspTransport transport)
         {
             try
             {
@@ -1954,7 +1995,13 @@ namespace SharpRTSPServer
                 return true;
             }
 
-            _logger.LogError("Dropping {what} for a stream that asked for SAVP but has no SRTP keys - refusing to send it unprotected", what);
+            // at frame rate this would be a log flood, so it is said once per stream
+            if (!stream.ReportedMissingSrtpKeys)
+            {
+                stream.ReportedMissingSrtpKeys = true;
+                _logger.LogError("Dropping {what} for a stream that asked for SAVP but has no SRTP keys - refusing to send it unprotected", what);
+            }
+
             return false;
         }
 
@@ -2048,6 +2095,8 @@ namespace SharpRTSPServer
                         disposableStreamSource.Dispose();
                     }
                 }
+
+                _pendingHandshakes.Dispose();
             }
         }
 
