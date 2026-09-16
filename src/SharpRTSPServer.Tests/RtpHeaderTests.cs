@@ -1,0 +1,134 @@
+using System;
+using System.Buffers.Binary;
+using System.Collections.Generic;
+using System.Globalization;
+using SharpRTSPServer;
+
+namespace SharpRTSPServer.Tests
+{
+    /// <summary>
+    /// What the server actually puts in the RTP headers it sends, read back off the wire through an
+    /// interleaved TCP transport.
+    /// </summary>
+    [TestClass]
+    public sealed class RtpHeaderTests
+    {
+        private static readonly byte[] Sps = { 0x67, 0x42, 0x00, 0x1E };
+        private static readonly byte[] Pps = { 0x68, 0xCE, 0x3C, 0x80 };
+
+        private const int VideoChannel = 0;
+        private const int AudioChannel = 2;
+
+        private static uint Ssrc(byte[] rtpPacket) => BinaryPrimitives.ReadUInt32BigEndian(rtpPacket.AsSpan(8));
+
+        private static List<ReadOnlyMemory<byte>> One(byte[] sample)
+        {
+            return new List<ReadOnlyMemory<byte>> { new ReadOnlyMemory<byte>(sample) };
+        }
+
+        /// <summary>
+        /// Drives a session to PLAY with both tracks interleaved on the RTSP connection.
+        /// </summary>
+        private static RtspTestClient Play(int port)
+        {
+            string baseUri = "rtsp://127.0.0.1:" + port + "/stream1";
+            var client = new RtspTestClient(port, "admin", "password");
+
+            client.Send("OPTIONS", baseUri);
+            client.Send("DESCRIBE", baseUri, "Accept: application/sdp");
+
+            var video = client.Send("SETUP", baseUri + "/trackID=0",
+                "Transport: RTP/AVP/TCP;unicast;interleaved=0-1");
+            Assert.AreEqual(200, video.StatusCode);
+
+            var audio = client.Send("SETUP", baseUri + "/trackID=1",
+                "Transport: RTP/AVP/TCP;unicast;interleaved=2-3",
+                "Session: " + video.Session);
+            Assert.AreEqual(200, audio.StatusCode);
+
+            Assert.AreEqual(200, client.Send("PLAY", baseUri, "Session: " + video.Session).StatusCode);
+            return client;
+        }
+
+        /// <summary>
+        /// Reads frames until one arrives on the wanted channel, skipping the RTCP that shares the
+        /// connection.
+        /// </summary>
+        private static byte[] NextOn(RtspTestClient client, int channel)
+        {
+            for (int i = 0; i < 20; i++)
+            {
+                var frame = client.ReadInterleaved();
+                if (frame.Channel == channel)
+                    return frame.Payload;
+            }
+
+            Assert.Fail("nothing arrived on channel " + channel);
+            return null;
+        }
+
+        [TestMethod]
+        public void VideoAndAudioAreSentUnderTheirOwnSsrc()
+        {
+            int port = TestPorts.FindFree();
+            using var server = new RTSPServer(port, "admin", "password");
+
+            var videoTrack = new H264Track(Sps, Pps);
+            var audioTrack = new AACTrack(new byte[] { 0x12, 0x10 }, 44100, 2);
+            server.AddStreamSource(new RTSPStreamSource("stream1", videoTrack, audioTrack));
+            server.StartListen();
+
+            using var client = Play(port);
+
+            videoTrack.FeedInRawSamples(9000, One(new byte[] { 0x65, 0x11, 0x22, 0x33 }));
+            uint videoSsrc = Ssrc(NextOn(client, VideoChannel));
+
+            audioTrack.FeedInRawSamples(1024, One(new byte[] { 0x21, 0x22, 0x23, 0x24 }));
+            uint audioSsrc = Ssrc(NextOn(client, AudioChannel));
+
+            // The SSRC used to live on the connection, so the second SETUP overwrote the first and
+            // both streams went out under one SSRC - contradicting the SETUP replies, which had
+            // already announced a different one for each track.
+            Assert.AreEqual(videoTrack.SSRC, videoSsrc, "video RTP should carry the video track's SSRC");
+            Assert.AreEqual(audioTrack.SSRC, audioSsrc, "audio RTP should carry the audio track's SSRC");
+            Assert.AreNotEqual(videoSsrc, audioSsrc, "two streams of one session must not share an SSRC");
+        }
+
+        [TestMethod]
+        public void TheSetupReplyAnnouncesTheSsrcTheRtpCarries()
+        {
+            int port = TestPorts.FindFree();
+            using var server = new RTSPServer(port, "admin", "password");
+
+            var videoTrack = new H264Track(Sps, Pps);
+            var audioTrack = new AACTrack(new byte[] { 0x12, 0x10 }, 44100, 2);
+            server.AddStreamSource(new RTSPStreamSource("stream1", videoTrack, audioTrack));
+            server.StartListen();
+
+            string baseUri = "rtsp://127.0.0.1:" + port + "/stream1";
+            using var client = new RtspTestClient(port, "admin", "password");
+            client.Send("OPTIONS", baseUri);
+            client.Send("DESCRIBE", baseUri, "Accept: application/sdp");
+
+            var video = client.Send("SETUP", baseUri + "/trackID=0",
+                "Transport: RTP/AVP/TCP;unicast;interleaved=0-1");
+            string announced = video.Match("ssrc=([0-9A-Fa-f]+)");
+
+            var audio = client.Send("SETUP", baseUri + "/trackID=1",
+                "Transport: RTP/AVP/TCP;unicast;interleaved=2-3",
+                "Session: " + video.Session);
+            Assert.AreEqual(200, audio.StatusCode);
+
+            Assert.AreEqual(200, client.Send("PLAY", baseUri, "Session: " + video.Session).StatusCode);
+
+            videoTrack.FeedInRawSamples(9000, One(new byte[] { 0x65, 0x11, 0x22, 0x33 }));
+
+            Assert.IsNotNull(announced, "the video SETUP reply should announce an SSRC");
+            Assert.AreEqual(
+                uint.Parse(announced, NumberStyles.HexNumber),
+                Ssrc(NextOn(client, VideoChannel)),
+                "the second SETUP must not change what the first stream sends");
+        }
+
+    }
+}

@@ -31,6 +31,16 @@ namespace SharpRTSPServer
         public bool MustSendRtcpPacket { get; set; } = false;
 
         /// <summary>
+        /// SSRC carried by the RTP this stream sends.
+        /// </summary>
+        /// <remarks>
+        /// One per stream, not one per connection: the video and audio of a session are separate RTP
+        /// streams and each announces its own SSRC in its SETUP reply, so sending both under a single
+        /// SSRC would contradict what the client was told.
+        /// </remarks>
+        public uint SSRC { get; set; }
+
+        /// <summary>
         /// Sequence number.
         /// </summary>
         public ushort SequenceNumber { get; set; } = 1;

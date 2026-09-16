@@ -172,6 +172,45 @@ namespace SharpRTSPServer.Tests
             };
         }
 
+        /// <summary>
+        /// Reads one RTP or RTCP frame that the server interleaved into the RTSP connection.
+        /// </summary>
+        /// <remarks>
+        /// The framing is '$', a one byte channel, a two byte length, then that many bytes. Reading
+        /// them lets a test see the packets exactly as they go on the wire, without a UDP transport.
+        /// </remarks>
+        public (int Channel, byte[] Payload) ReadInterleaved()
+        {
+            byte[] marker = new byte[1];
+            do
+            {
+                ReadExactly(marker, 1);
+            }
+            while (marker[0] != (byte)'$');
+
+            byte[] header = new byte[3];
+            ReadExactly(header, 3);
+
+            byte[] payload = new byte[header[1] << 8 | header[2]];
+            ReadExactly(payload, payload.Length);
+
+            return (header[0], payload);
+        }
+
+        private void ReadExactly(byte[] buffer, int count)
+        {
+            int offset = 0;
+            while (offset < count)
+            {
+                int read = _stream.Read(buffer, offset, count - offset);
+                if (read == 0)
+                {
+                    throw new IOException("The server closed the connection mid-frame.");
+                }
+                offset += read;
+            }
+        }
+
         public void Dispose()
         {
             _stream?.Dispose();

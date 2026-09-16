@@ -847,11 +847,16 @@ namespace SharpRTSPServer
                         return;
                     }
 
-                    // set SSRC of the connection to the track's SSRC
-                    connection.SSRC = trackSSRC;
-
                     // In the SDP the H264/H265 video track is TrackID 0 and the Audio Track is TrackID 1
                     RTPStream stream = connection.Streams[(int)trackType];
+
+                    // The SSRC belongs to the stream this SETUP is for. Putting it on the connection
+                    // meant the second SETUP overwrote the first, so both streams went out under one
+                    // SSRC while each SETUP reply had announced a different one.
+                    stream.SSRC = trackSSRC;
+#pragma warning disable CS0618 // kept in step for anyone still reading the obsolete connection-wide value
+                    connection.SSRC = trackSSRC;
+#pragma warning restore CS0618
 
                     // a repeated SETUP for the same track would otherwise leak the sockets of the previous one
                     if (stream.RtpChannel != null && !ReferenceEquals(stream.RtpChannel, rtpTransport))
@@ -1066,7 +1071,7 @@ namespace SharpRTSPServer
                 stream.SequenceNumber++;
 
                 // Add the specific SSRC for each transmission
-                RTPPacketUtil.WriteSSRC(rtpPacket.Span, connection.SSRC);
+                RTPPacketUtil.WriteSSRC(rtpPacket.Span, stream.SSRC);
 
                 if (stream.Context != null)
                 {
@@ -1125,7 +1130,7 @@ namespace SharpRTSPServer
                 const bool hasPadding = false;
                 const int reportCount = 0; // an empty report
                 int length = (rtcpSenderReport.Length / 4) - 1; // num 32 bit words minus 1
-                RTCPUtils.WriteRTCPHeader(rtcpSenderReport, RTCPUtils.RTCP_VERSION, hasPadding, reportCount, RTCPUtils.RTCP_PACKET_TYPE_SENDER_REPORT, length, connection.SSRC);
+                RTCPUtils.WriteRTCPHeader(rtcpSenderReport, RTCPUtils.RTCP_VERSION, hasPadding, reportCount, RTCPUtils.RTCP_PACKET_TYPE_SENDER_REPORT, length, stream.SSRC);
                 RTCPUtils.WriteSenderReport(rtcpSenderReport, DateTime.UtcNow, rtpTimestamp, stream.RtpPacketCount, stream.OctetCount);
 
                 return SendRawRTCP(connection, stream, rtcpSenderReport);
@@ -1143,7 +1148,7 @@ namespace SharpRTSPServer
                 const bool hasPadding = false;
                 const int sourceCount = 1; 
                 int length = (rtcpBye.Length / 4) - 1; // num 32 bit words minus 1
-                RTCPUtils.WriteRTCPHeader(rtcpBye, RTCPUtils.RTCP_VERSION, hasPadding, sourceCount, RTCPUtils.RTCP_PACKET_TYPE_BYE, length, connection.SSRC);
+                RTCPUtils.WriteRTCPHeader(rtcpBye, RTCPUtils.RTCP_VERSION, hasPadding, sourceCount, RTCPUtils.RTCP_PACKET_TYPE_BYE, length, stream.SSRC);
 
                 return SendRawRTCP(connection, stream, rtcpBye);
             }

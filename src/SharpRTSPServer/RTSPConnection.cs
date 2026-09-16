@@ -1,4 +1,4 @@
-using Rtsp;
+﻿using Rtsp;
 using System;
 
 namespace SharpRTSPServer
@@ -46,8 +46,14 @@ namespace SharpRTSPServer
         public bool Play { get; set; }
 
         /// <summary>
-        /// SSRC value used with this client connection.
+        /// SSRC of whichever track was set up last on this connection.
         /// </summary>
+        /// <remarks>
+        /// A connection carries one RTP stream per track and each has its own SSRC, so a single value
+        /// here can only ever describe one of them. Read <see cref="RTPStream.SSRC"/> off the stream
+        /// you mean instead. Still assigned so that existing readers see what they always saw.
+        /// </remarks>
+        [Obsolete("A connection has one SSRC per stream. Use RTPStream.SSRC on Video, Audio or Streams[i].")]
         public uint SSRC { get; set; }
 
         /// <summary>
