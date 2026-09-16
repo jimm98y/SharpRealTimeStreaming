@@ -1355,11 +1355,23 @@ namespace SharpRTSPServer
                 udpPair.SetControlDestination(listener.RemoteEndPoint.Address.ToString().Split(':')[0], transport.ClientPort.Second);
                 udpPair.ControlReceived += (localSender, localE) =>
                 {
-                    // RTCP data received
-                    _logger.LogDebug("RTCP data received {localSender} {localE.Data.Data.Length}", localSender, localE.Data.Data.Length);
-                    var connection = ConnectionByRtpTransport(localSender as IRtpTransport);
-                    connection?.UpdateKeepAlive();
-                    localE.Data.Dispose();
+                    // This runs on the library's receive thread, so anything that escapes is an
+                    // unhandled exception on a thread we do not own. The payload is handed back
+                    // whatever happens, rather than only when nothing went wrong.
+                    using (localE.Data)
+                    {
+                        try
+                        {
+                            // RTCP data received
+                            _logger.LogDebug("RTCP data received {localSender} {length}", localSender, localE.Data.Data.Length);
+                            var connection = ConnectionByRtpTransport(localSender as IRtpTransport);
+                            connection?.UpdateKeepAlive();
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "Error handling an RTCP packet");
+                        }
+                    }
                 };
                 udpPair.Start(); // start listening for data on the UDP ports
 

@@ -739,11 +739,13 @@ namespace SharpRTSPClient
 
         private void VideoRtpDataReceived(object sender, RtspDataEventArgs e)
         {
-            if (e.Data.Data.IsEmpty)
-                return;
-
+            // Inside the using, not before it: returning here handed the payload back to nobody,
+            // when every other path in this method takes ownership of it.
             using (var data = e.Data)
             {
+                if (data.Data.IsEmpty)
+                    return;
+
                 var rtpData = data.Data;
                 if (VideoContext != null)
                 {
@@ -819,11 +821,13 @@ namespace SharpRTSPClient
 
         private void AudioRtpDataReceived(object sender, RtspDataEventArgs e)
         {
-            if (e.Data.Data.IsEmpty)
-                return;
-
+            // Inside the using, not before it: returning here handed the payload back to nobody,
+            // when every other path in this method takes ownership of it.
             using (var data = e.Data)
             {
+                if (data.Data.IsEmpty)
+                    return;
+
                 var rtpData = data.Data;
                 if (AudioContext != null)
                 {
@@ -893,13 +897,13 @@ namespace SharpRTSPClient
 
         private void VideoRtcpControlDataReceived(object sender, RtspDataEventArgs e)
         {
-            if (e.Data.Data.IsEmpty)
-                return;
-
             _logger.LogDebug("Received video RTCP message");
 
             using (var data = e.Data)
             {
+                if (data.Data.IsEmpty)
+                    return;
+
                 var rtcpData = data.Data;
                 if (VideoContext != null)
                 {
@@ -930,13 +934,13 @@ namespace SharpRTSPClient
 
         private void AudioRtcpControlDataReceived(object sender, RtspDataEventArgs e)
         {
-            if (e.Data.Data.IsEmpty)
-                return;
-
             _logger.LogDebug("Received audio RTCP message");
 
             using (var data = e.Data)
             {
+                if (data.Data.IsEmpty)
+                    return;
+
                 var rtcpData = data.Data;
                 if (AudioContext != null)
                 {
