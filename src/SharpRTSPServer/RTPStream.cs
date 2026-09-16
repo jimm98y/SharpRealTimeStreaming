@@ -11,18 +11,34 @@ namespace SharpRTSPServer
     {
         public SrtpSessionContext Context { get; set; } = null;
 
+        private byte[] _masterKeySalt;
+
+        /// <summary>
+        /// Derives this stream's SRTP keys, or hands back the ones already derived.
+        /// </summary>
+        /// <remarks>
+        /// Once per stream, not once per call. Clients do ask for the SDP more than once, and a
+        /// second derivation would replace the context of a stream that is already playing - leaving
+        /// the receiver holding keys that no longer decrypt anything, with nothing to say so.
+        /// </remarks>
         public byte[] PrepareSrtpContext(string cryptoSuite, int mkiLen = 0)
         {
             if (string.IsNullOrEmpty(cryptoSuite))
                 throw new ArgumentNullException("SRTP Crypto suite not selected!");
+
+            if (Context != null && _masterKeySalt != null)
+            {
+                return (byte[])_masterKeySalt.Clone();
+            }
 
             // derive the master key + master salt to be sent in SDP crypto: attribute as per RFC 4568
             byte[] MKI = SrtpProtocol.GenerateMki(mkiLen);
 
             SrtpKeys keys = SrtpProtocol.CreateMasterKeys(cryptoSuite, MKI);
             Context = SrtpProtocol.CreateSrtpSessionContext(keys);
+            _masterKeySalt = keys.MasterKeySalt.ToArray();
 
-            return keys.MasterKeySalt.ToArray();
+            return (byte[])_masterKeySalt.Clone();
         }
 
         /// <summary>

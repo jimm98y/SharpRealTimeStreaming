@@ -90,8 +90,13 @@ namespace SharpRTSPServer.Tests
         [TestMethod]
         public void ACapturedAuthorizationHeaderStopsWorkingOnceTheNonceHasRotated()
         {
+            // A second, not a fraction of one. The first assertion below has to land inside the
+            // nonce's own window, and under a loaded test run the round trip to get the challenge is
+            // not as quick as it looks.
+            var lifetime = TimeSpan.FromSeconds(1);
+
             int port = TestPorts.FindFree();
-            using var server = NewServer(port, TimeSpan.FromMilliseconds(300));
+            using var server = NewServer(port, lifetime);
 
             string uri = "rtsp://127.0.0.1:" + port + "/stream1";
 
@@ -102,9 +107,9 @@ namespace SharpRTSPServer.Tests
             string authorization = BuildDigest(Field(challenged.Challenge, "realm"), Field(challenged.Challenge, "nonce"), uri);
             Assert.AreEqual(200, SendRaw(port, uri, authorization).StatusCode, "the header should work while its nonce is current");
 
-            // Two rotations, so the captured nonce has fallen out of the grace window. It used to be
+            // Several rotations, so the captured nonce is well out of the grace window. It used to be
             // valid for as long as the server ran.
-            Thread.Sleep(1200);
+            Thread.Sleep(lifetime + lifetime + lifetime + TimeSpan.FromMilliseconds(500));
 
             Assert.AreEqual(401, SendRaw(port, uri, authorization).StatusCode,
                 "a replayed header should be refused once its nonce has rotated out");
@@ -135,11 +140,13 @@ namespace SharpRTSPServer.Tests
         [TestMethod]
         public void AClientThatAnswersTheNewChallengeGetsBackIn()
         {
+            var lifetime = TimeSpan.FromSeconds(1);
+
             int port = TestPorts.FindFree();
-            using var server = NewServer(port, TimeSpan.FromMilliseconds(300));
+            using var server = NewServer(port, lifetime);
 
             string uri = "rtsp://127.0.0.1:" + port + "/stream1";
-            Thread.Sleep(1200);
+            Thread.Sleep(lifetime + lifetime + lifetime);
 
             // a client meeting the server for the first time after several rotations
             using var client = new RtspTestClient(port, UserName, Password);

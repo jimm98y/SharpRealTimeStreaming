@@ -844,6 +844,26 @@ namespace SharpRTSPServer
         }
 
         /// <summary>
+        /// Raises <see cref="ReceivedRtspMessage"/> without letting a handler fail the request.
+        /// </summary>
+        /// <remarks>
+        /// This is a point of extensibility, so the code on the other end of it is not ours. An
+        /// exception from there used to come back as a 500 for a request the server had already
+        /// handled correctly, and on some paths after the reply had gone out.
+        /// </remarks>
+        private void RaiseReceivedRtspMessage(object sender, RtspMessageEventArgs args)
+        {
+            try
+            {
+                ReceivedRtspMessage?.Invoke(sender, args);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "A ReceivedRtspMessage handler threw");
+            }
+        }
+
+        /// <summary>
         /// Best effort error reply. The connection may already be gone, which is not worth reporting.
         /// </summary>
         private void TrySendInternalServerError(RtspListener listener, RtspRequest request)
@@ -944,7 +964,7 @@ namespace SharpRTSPServer
             if (message is RtspRequestOptions)
             {
                 listener.SendMessage(message.CreateResponse());
-                ReceivedRtspMessage?.Invoke(sender, new RtspMessageEventArgs(message));
+                RaiseReceivedRtspMessage(sender, new RtspMessageEventArgs(message));
                 return;
             }
 
@@ -972,11 +992,11 @@ namespace SharpRTSPServer
             {
                 case RtspRequestDescribe describeMessage:
                     HandleDescribe(listener, message);
-                    ReceivedRtspMessage?.Invoke(sender, new RtspMessageEventArgs(message));
+                    RaiseReceivedRtspMessage(sender, new RtspMessageEventArgs(message));
                     return;
                 case RtspRequestSetup setupMessage:
                     HandleSetup(listener, setupMessage);
-                    ReceivedRtspMessage?.Invoke(sender, new RtspMessageEventArgs(message));
+                    RaiseReceivedRtspMessage(sender, new RtspMessageEventArgs(message));
                     return;
             }
 
@@ -1047,7 +1067,7 @@ namespace SharpRTSPServer
                             connection.Play = true;
                         }
 
-                        ReceivedRtspMessage?.Invoke(sender, new RtspMessageEventArgs(message, connection));
+                        RaiseReceivedRtspMessage(sender, new RtspMessageEventArgs(message, connection));
                     }
                     return;
                 case RtspRequestPause pauseMessage:
@@ -1055,7 +1075,7 @@ namespace SharpRTSPServer
                         connection.Play = false;
                         RtspResponse pauseResponse = message.CreateResponse();
                         listener.SendMessage(pauseResponse);
-                        ReceivedRtspMessage?.Invoke(sender, new RtspMessageEventArgs(message, connection));
+                        RaiseReceivedRtspMessage(sender, new RtspMessageEventArgs(message, connection));
                     }
                     return;
                 case RtspRequestGetParameter getParameterMessage:
@@ -1063,7 +1083,7 @@ namespace SharpRTSPServer
                         // Create the response to GET_PARAMETER
                         RtspResponse getParameterResponse = message.CreateResponse();
                         listener.SendMessage(getParameterResponse);
-                        ReceivedRtspMessage?.Invoke(sender, new RtspMessageEventArgs(message, connection));
+                        RaiseReceivedRtspMessage(sender, new RtspMessageEventArgs(message, connection));
                     }
                     return;
                 case RtspRequestTeardown teardownMessage:
@@ -1076,7 +1096,7 @@ namespace SharpRTSPServer
                         {
                             RemoveSession(connection);
                         }
-                        ReceivedRtspMessage?.Invoke(sender, new RtspMessageEventArgs(message, connection));
+                        RaiseReceivedRtspMessage(sender, new RtspMessageEventArgs(message, connection));
                     }
                     return;
             }

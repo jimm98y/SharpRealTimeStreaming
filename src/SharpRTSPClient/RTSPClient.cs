@@ -438,6 +438,28 @@ namespace SharpRTSPClient
         /// Attempt to reconnect when a connection to the server is lost.
         /// </summary>
         /// <exception cref="InvalidOperationException">Reconnect can only be called after calling Connect.</exception>
+        /// <summary>
+        /// Disposes a transport that has already been stopped.
+        /// </summary>
+        /// <remarks>
+        /// Stop is what frees the UDP ports, so this is not about leaking those - it is the rest of
+        /// what the transport holds, and the contract it declares by being IDisposable.
+        /// </remarks>
+        private void ReleaseTransport(IRtpTransport transport)
+        {
+            if (transport is IDisposable disposable)
+            {
+                try
+                {
+                    disposable.Dispose();
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Error disposing an RTP transport");
+                }
+            }
+        }
+
         public void TryReconnect()
         {
             if (_uri == null)
@@ -617,6 +639,7 @@ namespace SharpRTSPClient
                 videoRtpTransport.Stop();
                 videoRtpTransport.DataReceived -= VideoRtpDataReceived;
                 videoRtpTransport.ControlReceived -= VideoRtcpControlDataReceived;
+                ReleaseTransport(videoRtpTransport);
                 _videoRtpTransport = null;
             }
 
@@ -626,6 +649,7 @@ namespace SharpRTSPClient
                 audioRtpTransport.Stop();
                 audioRtpTransport.DataReceived -= AudioRtpDataReceived;
                 audioRtpTransport.ControlReceived -= AudioRtcpControlDataReceived;
+                ReleaseTransport(audioRtpTransport);
                 _audioRtpTransport = null;
             }
 
