@@ -1,0 +1,94 @@
+using System;
+using System.Net.Sockets;
+using System.Threading;
+using SharpRTSPServer;
+
+namespace SharpRTSPServer.Tests
+{
+    /// <summary>
+    /// Starting, stopping and disposing the server, including the ways a caller can do it wrong.
+    /// </summary>
+    [TestClass]
+    public sealed class ServerLifecycleExtraTests
+    {
+        private static readonly byte[] Sps = { 0x67, 0x42, 0x00, 0x1E };
+        private static readonly byte[] Pps = { 0x68, 0xCE, 0x3C, 0x80 };
+
+        private static RTSPServer NewServer(int port)
+        {
+            var server = new RTSPServer(port, "admin", "password");
+            server.AddStreamSource(new RTSPStreamSource("stream1", new H264Track(Sps, Pps), null));
+            return server;
+        }
+
+        [TestMethod]
+        public void DisposingTwiceIsHarmless()
+        {
+            var server = NewServer(TestPorts.FindFree());
+            server.StartListen();
+
+            server.Dispose();
+            server.Dispose(); // used to cancel a cancellation source it had already disposed
+        }
+
+        [TestMethod]
+        public void StopListenAfterDisposeIsHarmless()
+        {
+            var server = NewServer(TestPorts.FindFree());
+            server.StartListen();
+
+            server.Dispose();
+            server.StopListen();
+        }
+
+        [TestMethod]
+        public void StopListenTwiceIsHarmless()
+        {
+            using var server = NewServer(TestPorts.FindFree());
+            server.StartListen();
+
+            server.StopListen();
+            server.StopListen();
+        }
+
+        [TestMethod]
+        public void StartingTwiceIsRejected()
+        {
+            using var server = NewServer(TestPorts.FindFree());
+            server.StartListen();
+
+            // used to leave two accept loops running, with no way to reach the first one again
+            Assert.ThrowsExactly<InvalidOperationException>(() => server.StartListen());
+        }
+
+        [TestMethod]
+        public void StartingAfterDisposeIsRejected()
+        {
+            var server = NewServer(TestPorts.FindFree());
+            server.Dispose();
+
+            Assert.ThrowsExactly<ObjectDisposedException>(() => server.StartListen());
+        }
+
+        [TestMethod]
+        public void StopListenReleasesThePortSoTheServerCanBeRestarted()
+        {
+            int port = TestPorts.FindFree();
+            using (var server = NewServer(port))
+            {
+                server.StartListen();
+                using var client = new RtspTestClient(port, "admin", "password");
+                Assert.AreEqual(200, client.Send("OPTIONS", "rtsp://127.0.0.1:" + port + "/stream1").StatusCode);
+
+                // StopListen has to have actually waited for the accept loop, otherwise this races
+                server.StopListen();
+            }
+
+            using var restarted = NewServer(port);
+            restarted.StartListen();
+
+            using var afterRestart = new RtspTestClient(port, "admin", "password");
+            Assert.AreEqual(200, afterRestart.Send("OPTIONS", "rtsp://127.0.0.1:" + port + "/stream1").StatusCode);
+        }
+    }
+}

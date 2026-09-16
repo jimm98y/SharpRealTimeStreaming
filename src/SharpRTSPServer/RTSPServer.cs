@@ -63,6 +63,16 @@ namespace SharpRTSPServer
         private const int REAP_INTERVAL = 10_000;
 
         /// <summary>
+        /// How many rotated out nonces are still accepted, beyond the current one.
+        /// </summary>
+        private const int NONCE_GRACE_COUNT = 1;
+
+        /// <summary>
+        /// Default value of <see cref="NonceLifetime"/>.
+        /// </summary>
+        public static readonly TimeSpan DEFAULT_NONCE_LIFETIME = TimeSpan.FromMinutes(5);
+
+        /// <summary>
         /// Default value of <see cref="MaxConnections"/>.
         /// </summary>
         public const int DEFAULT_MAX_CONNECTIONS = 100;
@@ -97,14 +107,18 @@ namespace SharpRTSPServer
         private int _rtpPortCursor = -1;
 
         private CancellationTokenSource _stopping;
+        private bool _disposed;
         private Task _listenThread;
         private Timer _reaperTimer;
         private readonly NetworkCredential _credentials;
 
-        // Replaced when AuthenticationScheme changes. Read from the RTSP receive threads, which take
-        // one copy per message, so a change never leaves a request half checked against two schemes.
-        private volatile Authentication _authentication;
+        // Newest first. The first is what clients are challenged with; the rest are nonces that have
+        // just been rotated out and are still accepted, so that rotating does not fail a request that
+        // was already on its way. Replaced wholesale, and read from the RTSP receive threads, which
+        // take one copy per message - so a change never leaves a request half checked.
+        private volatile Authentication[] _authentications = new Authentication[0];
         private RtspAuthenticationScheme _authenticationScheme = RtspAuthenticationScheme.Digest;
+        private Timer _nonceTimer;
 
         /// <summary>
         /// Event raised when an RTSP message is received. Point of extensibility.
@@ -189,9 +203,28 @@ namespace SharpRTSPServer
                     return;
 
                 _authenticationScheme = value;
-                _authentication = CreateAuthentication(value);
+                ResetAuthentication();
             }
         }
+
+        /// <summary>
+        /// How long a Digest nonce is offered to clients before a fresh one replaces it.
+        /// <see cref="DEFAULT_NONCE_LIFETIME"/> by default.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// The nonce used to be made once and kept for the life of the server, which left a captured
+        /// Authorization header replayable for exactly as long as the server ran. Rotating bounds
+        /// that to roughly twice this, since the nonce just rotated out is still accepted so that a
+        /// request already in flight is not failed.
+        /// </para>
+        /// <para>
+        /// A client challenged with the new nonce answers it the same way it answered the first one,
+        /// so rotation costs one extra round trip and no user interaction. Nothing rotates while the
+        /// server is not listening, and Basic has no nonce to rotate.
+        /// </para>
+        /// </remarks>
+        public TimeSpan NonceLifetime { get; set; } = DEFAULT_NONCE_LIFETIME;
 
         /// <summary>
         /// The streams this server offers. Guarded by the connection list lock.
@@ -299,7 +332,7 @@ namespace SharpRTSPServer
                 ? new NetworkCredential(userName, password)
                 : new NetworkCredential();
 
-            _authentication = CreateAuthentication(_authenticationScheme);
+            ResetAuthentication();
 
             RegisterRtspUriScheme();
 
@@ -344,6 +377,54 @@ namespace SharpRTSPServer
         }
 
         /// <summary>
+        /// Starts again from a single fresh challenge, forgetting any nonce handed out so far.
+        /// </summary>
+        private void ResetAuthentication()
+        {
+            Authentication authentication = CreateAuthentication(_authenticationScheme);
+            _authentications = authentication == null ? new Authentication[0] : new[] { authentication };
+        }
+
+        /// <summary>
+        /// Puts a fresh nonce in front, keeping the one it replaces acceptable for a while.
+        /// </summary>
+        private void RotateNonce()
+        {
+            try
+            {
+                // Basic carries no nonce, so there would be nothing to rotate and every rotation
+                // would just be a challenge the client has to answer again for no gain.
+                if (_authenticationScheme != RtspAuthenticationScheme.Digest)
+                {
+                    return;
+                }
+
+                Authentication fresh = CreateAuthentication(RtspAuthenticationScheme.Digest);
+                if (fresh == null)
+                {
+                    // no credentials configured, so the server is open and there is nothing to rotate
+                    return;
+                }
+
+                Authentication[] previous = _authentications;
+                var rotated = new List<Authentication>(NONCE_GRACE_COUNT + 1) { fresh };
+
+                for (int i = 0; i < previous.Length && rotated.Count <= NONCE_GRACE_COUNT; i++)
+                {
+                    rotated.Add(previous[i]);
+                }
+
+                _authentications = rotated.ToArray();
+                _logger.LogDebug("Rotated the authentication nonce, {count} still accepted", rotated.Count);
+            }
+            catch (Exception ex)
+            {
+                // this runs on a pooled thread, an escaping exception would take the process down
+                _logger.LogError(ex, "Error rotating the authentication nonce");
+            }
+        }
+
+        /// <summary>
         /// Registers the rtsp/rtsps URI schemes. Registration is process wide and can only happen once,
         /// so a second server - or a race between two of them - must not be allowed to fail here.
         /// </summary>
@@ -364,16 +445,35 @@ namespace SharpRTSPServer
         /// </summary>
         public void StartListen()
         {
+            ThrowIfDisposed();
+
+            // Starting twice used to overwrite the cancellation source, the accept task and the timer
+            // without stopping any of them, leaving two accept loops running and no way to reach the
+            // first one again.
+            if (_listenThread != null)
+            {
+                throw new InvalidOperationException("The server is already listening. Call StopListen before starting it again.");
+            }
+
             _serverListener.Start();
             _stopping = new CancellationTokenSource();
-            _listenThread = Task.Factory.StartNew(async () => await AcceptConnection(_stopping.Token).ConfigureAwait(false),
+
+            // Unwrap, so the task handed back is the accept loop itself rather than the one that
+            // starts it - the outer task completes at the first await, and StopListen waiting on it
+            // would return while the loop was still running.
+            _listenThread = Task.Factory.StartNew(() => AcceptConnection(_stopping.Token),
                 _stopping.Token,
                 TaskCreationOptions.LongRunning,
-                TaskScheduler.Current);
+                TaskScheduler.Default).Unwrap();
 
             // Idle connections are also swept from the media path, but a server with no media flowing
             // would never get there and would hold on to their sockets and UDP ports indefinitely.
             _reaperTimer = new Timer(_ => ReapIdleConnectionsSafely(), null, REAP_INTERVAL, REAP_INTERVAL);
+
+            if (NonceLifetime > TimeSpan.Zero)
+            {
+                _nonceTimer = new Timer(_ => RotateNonce(), null, NonceLifetime, NonceLifetime);
+            }
         }
 
         private void ReapIdleConnectionsSafely()
@@ -509,6 +609,14 @@ namespace SharpRTSPServer
             }
         }
 
+        private void ThrowIfDisposed()
+        {
+            if (_disposed)
+            {
+                throw new ObjectDisposedException(nameof(RTSPServer));
+            }
+        }
+
         /// <summary>
         /// Stops the server listener.
         /// </summary>
@@ -517,9 +625,45 @@ namespace SharpRTSPServer
             _reaperTimer?.Dispose();
             _reaperTimer = null;
 
+            _nonceTimer?.Dispose();
+            _nonceTimer = null;
+
             _serverListener.Stop();
-            _stopping?.Cancel();
-            _listenThread?.Wait();
+
+            // Cancel before waiting, and take local copies: calling this twice, or racing Dispose,
+            // must not end up cancelling a source that has already been disposed.
+            CancellationTokenSource stopping = _stopping;
+            Task listenThread = _listenThread;
+            _stopping = null;
+            _listenThread = null;
+
+            if (stopping != null)
+            {
+                try
+                {
+                    stopping.Cancel();
+                }
+                catch (ObjectDisposedException)
+                {
+                    // already stopped
+                }
+            }
+
+            if (listenThread != null)
+            {
+                try
+                {
+                    listenThread.Wait();
+                }
+                catch (AggregateException ex)
+                {
+                    // the loop stops on cancellation, which arrives here as an exception rather than
+                    // as a fault worth reporting
+                    _logger.LogDebug(ex, "The accept loop ended with an exception");
+                }
+            }
+
+            stopping?.Dispose();
         }
 
         private void RTSPMessageReceived(object sender, RtspChunkEventArgs e)
@@ -580,15 +724,18 @@ namespace SharpRTSPServer
             // Check if the RTSP Message has valid authentication (validating against username,password,realm and nonce).
             // One snapshot for the whole check, so a scheme change cannot validate against one scheme
             // and then challenge with the other.
-            Authentication authentication = _authentication;
-            if (authentication != null)
+            Authentication[] authentications = _authentications;
+            if (authentications.Length > 0)
             {
+                // Challenge with the newest, but accept any that is still within its grace period.
+                Authentication authentication = authentications[0];
+
                 if (message.Headers.ContainsKey("Authorization"))
                 {
                     // The Header contained Authorization
                     // Check the message has the correct Authorization
                     // If it does not have the correct Authorization then close the RTSP connection
-                    if (!authentication.IsValid(message))
+                    if (!authentications.Any(candidate => candidate.IsValid(message)))
                     {
                         // Send a 401 Authentication Failed reply, then close the RTSP Socket
                         RtspResponse authorizationResponse = message.CreateResponse();
@@ -1556,10 +1703,16 @@ namespace SharpRTSPServer
 
         protected virtual void Dispose(bool disposing)
         {
+            if (_disposed)
+            {
+                return;
+            }
+
             if (disposing)
             {
+                _disposed = true;
+
                 StopListen();
-                _stopping?.Dispose();
 
                 DisconnectAllClients();
 
