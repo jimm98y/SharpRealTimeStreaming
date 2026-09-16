@@ -48,6 +48,7 @@ namespace SharpRTSPServer.Tests
         {
             public int StatusCode { get; set; }
             public string Headers { get; set; }
+            public string Body { get; set; }
             public string Session => Match(@"Session:\s*([^\s;\r\n]+)");
             public string Match(string pattern)
             {
@@ -149,7 +150,9 @@ namespace SharpRTSPServer.Tests
                 }
             }
 
-            // drain any body so the next response starts at a clean boundary
+            // read any body, both to keep the next response starting at a clean boundary and because
+            // the SDP a DESCRIBE returns is worth looking at
+            string bodyText = null;
             var contentLength = Regex.Match(headers, @"Content-Length:\s*(\d+)", RegexOptions.IgnoreCase);
             if (contentLength.Success)
             {
@@ -162,6 +165,7 @@ namespace SharpRTSPServer.Tests
                     if (read == 0) break;
                     offset += read;
                 }
+                bodyText = Encoding.UTF8.GetString(body, 0, offset);
             }
 
             var statusLine = Regex.Match(headers, @"^RTSP/1\.0\s+(\d+)");
@@ -169,6 +173,7 @@ namespace SharpRTSPServer.Tests
             {
                 StatusCode = statusLine.Success ? int.Parse(statusLine.Groups[1].Value, CultureInfo.InvariantCulture) : 0,
                 Headers = headers,
+                Body = bodyText,
             };
         }
 

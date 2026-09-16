@@ -9,6 +9,7 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Diagnostics.Contracts;
+using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Security;
@@ -42,6 +43,11 @@ namespace SharpRTSPServer
         public const int DYNAMIC_PAYLOAD_TYPE = 96;  // Dynamic payload type base
 
         private const int RTSP_TIMEOUT = 60;         // 60 seconds
+
+        /// <summary>
+        /// SDP lines are CRLF terminated per RFC 4566.
+        /// </summary>
+        private const string SDP_LINE_ENDING = "\r\n";
 
         /// <summary>
         /// An RTP/RTCP pair is two consecutive ports, RTP on the first.
@@ -804,6 +810,27 @@ namespace SharpRTSPServer
                 return;
             }
 
+            // SAVP means the media is encrypted under a key the client can only have got from the
+            // SDP. A SETUP that skipped DESCRIBE has no key, so there is nothing we could send that
+            // it could read - and sending it unprotected instead would quietly undo the encryption
+            // the server was configured for, which is what used to happen.
+            ITrack setupTrack = trackType == TrackType.Video ? streamSource.VideoTrack : streamSource.AudioTrack;
+            if (setupTrack.RtpProfile == RtpProfiles.SAVP)
+            {
+                RTSPConnection existingConnection = ConnectionByListener(listener);
+                if (existingConnection == null || existingConnection.Streams[(int)trackType].Context == null)
+                {
+                    _logger.LogWarning(
+                        "Refusing SETUP of the SAVP track {trackType} from {remoteEndPoint}: there are no SRTP keys for it, the client did not DESCRIBE first",
+                        trackType, listener.RemoteEndPoint);
+
+                    RtspResponse noKeysResponse = setupMessage.CreateResponse();
+                    noKeysResponse.ReturnCode = 400; // Bad Request
+                    listener.SendMessage(noKeysResponse);
+                    return;
+                }
+            }
+
             if (transport.LowerTransport == RtspTransport.LowerTransportType.TCP)
             {
                 if (transport.Interleaved == null)
@@ -915,6 +942,7 @@ namespace SharpRTSPServer
                     // meant the second SETUP overwrote the first, so both streams went out under one
                     // SSRC while each SETUP reply had announced a different one.
                     stream.SSRC = trackSSRC;
+                    stream.RequiresSrtp = setupTrack.RtpProfile == RtpProfiles.SAVP;
 #pragma warning disable CS0618 // kept in step for anyone still reading the obsolete connection-wide value
                     connection.SSRC = trackSSRC;
 #pragma warning restore CS0618
@@ -984,6 +1012,15 @@ namespace SharpRTSPServer
             }
 
             string sdp = GenerateSDP(StreamSource, listener);
+            if (sdp == null)
+            {
+                // the connection went away between this request arriving and being handled
+                RtspResponse goneResponse = message.CreateResponse();
+                goneResponse.ReturnCode = 454; // Session Not Found
+                listener.SendMessage(goneResponse);
+                return;
+            }
+
             byte[] sdpBytes = Encoding.UTF8.GetBytes(sdp);
 
             // Create the response to DESCRIBE
@@ -995,6 +1032,109 @@ namespace SharpRTSPServer
             describeResponse.Data = sdpBytes;
             describeResponse.AdjustContentLength();
             listener.SendMessage(describeResponse);
+        }
+
+        /// <summary>
+        /// The "a=crypto" attribute for a stream, deriving the SRTP keys it announces.
+        /// </summary>
+        /// <remarks>
+        /// The key lives in the SDP, which is why it is made here: a client that never receives the
+        /// SDP has no way to read anything the server would send it.
+        /// </remarks>
+        private string BuildCryptoAttribute(RTPStream stream)
+        {
+            if (string.IsNullOrEmpty(SrtpCryptoSuite))
+            {
+                throw new InvalidOperationException(
+                    "A track asked for the SAVP profile but the server has no SRTP crypto suite configured. " +
+                    "Pass one to the RTSPServer constructor, or leave the track on AVP.");
+            }
+
+            byte[] masterKeySalt = stream.PrepareSrtpContext(SrtpCryptoSuite);
+            var mki = stream.Context.EncodeRtpContext.Mki;
+
+            string optionalMki = "";
+            if (mki.Length > 0)
+            {
+                // ffplay does not seem to support MKI or any optional parameters in crypto
+                // appending a zero byte at the end to yield always positive value of the BigInteger
+                optionalMki = $"|{new BigInteger(mki.ToArray())}:{mki.Length}";
+            }
+
+            // https://www.rfc-editor.org/rfc/rfc4568.txt
+            return $"a=crypto:1 {SrtpCryptoSuite} inline:{Convert.ToBase64String(masterKeySalt)}{optionalMki}";
+        }
+
+        /// <summary>
+        /// Adds an "a=crypto" attribute to each media section of an overridden SDP whose track asked
+        /// for SAVP and that does not already carry one.
+        /// </summary>
+        /// <remarks>
+        /// The keys are per connection, so this runs per DESCRIBE rather than once when the SDP is
+        /// set. A section that already has a crypto attribute is left alone - whoever wrote that SDP
+        /// is managing the keys themselves, and SETUP will tell them if the server disagrees.
+        /// </remarks>
+        private string AddMissingCryptoAttributes(string sdp, RTSPStreamSource streamSource, RTSPConnection connection)
+        {
+            ITrack[] tracksBySection = { streamSource.VideoTrack, streamSource.AudioTrack };
+            RTPStream[] streamsBySection = { connection.Video, connection.Audio };
+
+            if (!tracksBySection.Any(track => track != null && track.RtpProfile == RtpProfiles.SAVP))
+            {
+                // nothing to add, so hand back exactly what we were given rather than reformatting it
+                return sdp;
+            }
+
+            var lines = new List<string>();
+            using (var textReader = new StringReader(sdp))
+            {
+                string line;
+                while ((line = textReader.ReadLine()) != null)
+                {
+                    lines.Add(line);
+                }
+            }
+
+            var mediaHasCrypto = new List<bool>();
+            foreach (string line in lines)
+            {
+                if (line.StartsWith("m="))
+                {
+                    mediaHasCrypto.Add(false);
+                }
+                else if (line.StartsWith("a=crypto:") && mediaHasCrypto.Count > 0)
+                {
+                    mediaHasCrypto[mediaHasCrypto.Count - 1] = true;
+                }
+            }
+
+            StringBuilder builder = new StringBuilder();
+            int mediaSection = -1;
+
+            foreach (string line in lines)
+            {
+                builder.Append(line).Append(SDP_LINE_ENDING);
+
+                if (!line.StartsWith("m="))
+                {
+                    continue;
+                }
+
+                mediaSection++;
+
+                if (mediaSection >= tracksBySection.Length || mediaHasCrypto[mediaSection])
+                {
+                    continue;
+                }
+
+                ITrack track = tracksBySection[mediaSection];
+                if (track != null && track.RtpProfile == RtpProfiles.SAVP)
+                {
+                    builder.Append(BuildCryptoAttribute(streamsBySection[mediaSection])).Append(SDP_LINE_ENDING);
+                }
+            }
+
+            return builder.ToString();
         }
 
         private RTSPStreamSource GetStreamSource(Uri rtspUri)
@@ -1017,10 +1157,19 @@ namespace SharpRTSPServer
 
         private string GenerateSDP(RTSPStreamSource streamSource, RtspListener listener)
         {
-            if (!string.IsNullOrEmpty(streamSource.Sdp))
-                return streamSource.Sdp; // sdp
-
             RTSPConnection connection = ConnectionByListener(listener);
+            if (connection == null)
+            {
+                // dropped between the request arriving and being handled
+                return null;
+            }
+
+            if (!string.IsNullOrEmpty(streamSource.Sdp))
+            {
+                // An overridden SDP used to be handed back as it stood, which meant no SRTP keys were
+                // ever derived for it - so a server configured for SAVP sent the media in the clear.
+                return AddMissingCryptoAttributes(streamSource.Sdp, streamSource, connection);
+            }
 
             StringBuilder sdp = new StringBuilder();
 
@@ -1039,19 +1188,7 @@ namespace SharpRTSPServer
 
                 if (streamSource.VideoTrack.RtpProfile == RtpProfiles.SAVP)
                 {
-                    byte[] masterKeySalt = connection.Video.PrepareSrtpContext(SrtpCryptoSuite);
-                    byte[] mki = connection.Video.Context.EncodeRtpContext.Mki.ToArray();
-
-                    string optionalMki = "";
-                    if (mki.Length > 0)
-                    {
-                        // ffplay does not seem to support MKI or any optional parameters in crypto
-                        optionalMki = $"|{new BigInteger(connection.Video.Context.EncodeRtpContext.Mki.ToArray())}:{connection.Video.Context.EncodeRtpContext.Mki.Length}";
-                    }
-
-                    // https://www.rfc-editor.org/rfc/rfc4568.txt
-                    // appending a zero byte at the end to yield always positive value of the BigInteger
-                    sdp.AppendLine($"a=crypto:1 {SrtpCryptoSuite} inline:{Convert.ToBase64String(masterKeySalt)}{optionalMki}");
+                    sdp.Append(BuildCryptoAttribute(connection.Video)).Append(SDP_LINE_ENDING);
                 }
             }
 
@@ -1062,19 +1199,7 @@ namespace SharpRTSPServer
 
                 if (streamSource.AudioTrack.RtpProfile == RtpProfiles.SAVP)
                 {
-                    var masterKeySalt = connection.Audio.PrepareSrtpContext(SrtpCryptoSuite);
-                    var mki = connection.Audio.Context.EncodeRtpContext.Mki;
-
-                    string optionalMki = "";
-                    if (mki.Length > 0)
-                    {
-                        // ffplay does not seem to support MKI or any optional parameters in crypto
-                        optionalMki = $"|{new BigInteger(mki.ToArray())}:{mki.Length}";
-                    }
-
-                    // https://www.rfc-editor.org/rfc/rfc4568.txt
-                    // appending a zero byte at the end to yield always positive value of the BigInteger
-                    sdp.AppendLine($"a=crypto:1 {SrtpCryptoSuite} inline:{Convert.ToBase64String(masterKeySalt)}{optionalMki}");
+                    sdp.Append(BuildCryptoAttribute(connection.Audio)).Append(SDP_LINE_ENDING);
                 }
             }
 
@@ -1132,6 +1257,9 @@ namespace SharpRTSPServer
         public void SendRawRTP(RTSPConnection connection, RTPStream stream, List<Memory<byte>> rtpPackets, bool preserveSourceHeaders)
         {
             if (!connection.Play)
+                return;
+
+            if (!CanSend(stream, "RTP"))
                 return;
 
             bool writeError = false;
@@ -1241,6 +1369,9 @@ namespace SharpRTSPServer
 
         public bool SendRawRTCP(RTSPConnection connection, RTPStream stream, Span<byte> rtcpSenderReport)
         {
+            if (!CanSend(stream, "RTCP"))
+                return false;
+
             try
             {
                 Debug.Assert(stream.RtpChannel != null, "If stream.rtpChannel is null here the program did not handle well connection problem");
@@ -1341,6 +1472,25 @@ namespace SharpRTSPServer
             }
 
             return udpPair;
+        }
+
+        /// <summary>
+        /// Whether anything may go out on this stream.
+        /// </summary>
+        /// <remarks>
+        /// A stream whose track asked for SAVP but that has no SRTP context cannot be sent on at all.
+        /// Sending it in the clear would be worse than sending nothing: the server was configured to
+        /// encrypt, and nothing downstream would report that it had not.
+        /// </remarks>
+        private bool CanSend(RTPStream stream, string what)
+        {
+            if (!stream.RequiresSrtp || stream.Context != null)
+            {
+                return true;
+            }
+
+            _logger.LogError("Dropping {what} for a stream that asked for SAVP but has no SRTP keys - refusing to send it unprotected", what);
+            return false;
         }
 
         /// <summary>

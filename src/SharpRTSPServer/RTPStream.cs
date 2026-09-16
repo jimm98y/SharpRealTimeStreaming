@@ -31,6 +31,17 @@ namespace SharpRTSPServer
         public bool MustSendRtcpPacket { get; set; } = false;
 
         /// <summary>
+        /// True when the track this stream carries asked for SAVP, so everything sent on it has to be
+        /// protected. Set by SETUP.
+        /// </summary>
+        /// <remarks>
+        /// Kept apart from <see cref="Context"/> being present: the two differing is exactly the case
+        /// worth catching, because sending unprotected RTP for a track that asked for SAVP would
+        /// quietly undo the encryption the server was configured for.
+        /// </remarks>
+        public bool RequiresSrtp { get; set; }
+
+        /// <summary>
         /// SSRC carried by the RTP this stream sends.
         /// </summary>
         /// <remarks>
