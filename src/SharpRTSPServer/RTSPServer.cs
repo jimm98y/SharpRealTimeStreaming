@@ -388,57 +388,118 @@ namespace SharpRTSPServer
 
         private async Task AcceptConnection(CancellationToken cancellationToken)
         {
-            try
+            while (!cancellationToken.IsCancellationRequested)
             {
-                while (_stopping?.IsCancellationRequested == false)
+                IRtspTransport rtspSocket;
+
+                try
                 {
                     // Wait for an incoming TCP Connection
-                    IRtspTransport rtspSocket = await _serverListener.AcceptAsync(cancellationToken);
-                    _logger.LogDebug("Connection from {remoteEndPoint}", rtspSocket.RemoteEndPoint);
+                    rtspSocket = await _serverListener.AcceptAsync(cancellationToken);
+                }
+                catch (Exception ex) when (cancellationToken.IsCancellationRequested)
+                {
+                    // StopListen stops the listener and cancels the token, and whichever of the two
+                    // the accept notices first surfaces as an exception. Nothing has gone wrong.
+                    _logger.LogDebug(ex, "The accept loop is stopping");
+                    return;
+                }
+                catch (Exception ex) when (ex is ObjectDisposedException || ex is InvalidOperationException)
+                {
+                    // The listener itself is gone, so there is nothing left to accept on and retrying
+                    // would spin. Anything else is the fault of the one connection being accepted.
+                    _logger.LogWarning(ex, "The listener is no longer usable, the server has stopped accepting connections");
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    // One connection that cannot be accepted must not take the server with it. A
+                    // client that opens the RTSPS port and sends something that is not a TLS
+                    // ClientHello fails the handshake inside the accept, and that used to end this
+                    // loop for good: the server stopped taking new connections while everything
+                    // already connected carried on, so nothing looked wrong from the outside.
+                    _logger.LogWarning(ex, "Could not accept a connection");
+                    continue;
+                }
 
-                    RtspListener newListener = new RtspListener(rtspSocket, _loggerFactory.CreateLogger<RtspListener>());
-                    newListener.MessageReceived += RTSPMessageReceived;
-
-                    // Add the RtspListener to the RTSPConnections List
-                    bool accepted;
-                    lock (_connectionList)
-                    {
-                        // sweep first, so that connections that have already gone away do not count
-                        // towards the limit and keep a legitimate client out
-                        ReapIdleConnections();
-
-                        accepted = MaxConnections <= 0 || _connectionList.Count < MaxConnections;
-                        if (accepted)
-                        {
-                            RTSPConnection newConnection = new RTSPConnection()
-                            {
-                                Listener = newListener,
-                                Transport = rtspSocket
-                            };
-                            _connectionList.Add(newConnection);
-                        }
-                    }
-
-                    if (!accepted)
-                    {
-                        _logger.LogWarning("Refusing connection from {remoteEndPoint}, the limit of {maxConnections} connections is reached",
-                            rtspSocket.RemoteEndPoint, MaxConnections);
-                        newListener.MessageReceived -= RTSPMessageReceived;
-                        newListener.Dispose();
-                        continue;
-                    }
-
-                    newListener.Start();
+                try
+                {
+                    AdmitConnection(rtspSocket);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Could not admit the connection from {remoteEndPoint}", TryGetRemoteEndPoint(rtspSocket));
+                    TryDispose(rtspSocket);
                 }
             }
-            catch (SocketException eex)
+        }
+
+        /// <summary>
+        /// Takes on a freshly accepted connection, unless the server is already full.
+        /// </summary>
+        private void AdmitConnection(IRtspTransport rtspSocket)
+        {
+            _logger.LogDebug("Connection from {remoteEndPoint}", rtspSocket.RemoteEndPoint);
+
+            RtspListener newListener = new RtspListener(rtspSocket, _loggerFactory.CreateLogger<RtspListener>());
+            newListener.MessageReceived += RTSPMessageReceived;
+
+            // Add the RtspListener to the RTSPConnections List
+            bool accepted;
+            lock (_connectionList)
             {
-                _logger.LogWarning("Got an error listening, I have to handle the stopping which also throw an error: {eex}", eex);
+                // sweep first, so that connections that have already gone away do not count
+                // towards the limit and keep a legitimate client out
+                ReapIdleConnections();
+
+                accepted = MaxConnections <= 0 || _connectionList.Count < MaxConnections;
+                if (accepted)
+                {
+                    RTSPConnection newConnection = new RTSPConnection()
+                    {
+                        Listener = newListener,
+                        Transport = rtspSocket
+                    };
+                    _connectionList.Add(newConnection);
+                }
+            }
+
+            if (!accepted)
+            {
+                _logger.LogWarning("Refusing connection from {remoteEndPoint}, the limit of {maxConnections} connections is reached",
+                    rtspSocket.RemoteEndPoint, MaxConnections);
+                newListener.MessageReceived -= RTSPMessageReceived;
+                newListener.Dispose();
+                return;
+            }
+
+            newListener.Start();
+        }
+
+        /// <summary>
+        /// The remote end point of a transport that may already be broken, for a log line.
+        /// </summary>
+        private static string TryGetRemoteEndPoint(IRtspTransport transport)
+        {
+            try
+            {
+                return transport?.RemoteEndPoint?.ToString() ?? "unknown";
+            }
+            catch (Exception)
+            {
+                return "unknown";
+            }
+        }
+
+        private void TryDispose(IRtspTransport transport)
+        {
+            try
+            {
+                transport?.Close();
             }
             catch (Exception ex)
             {
-                _logger.LogError("Got an error listening... {ex}", ex);
-                throw;
+                _logger.LogDebug(ex, "Error closing a transport");
             }
         }
 
