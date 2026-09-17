@@ -613,14 +613,20 @@ namespace SharpRTSPClient
 
         private void StopClient()
         {
-            // Send TEARDOWN
-            RtspRequest teardown_message = new RtspRequestTeardown
+            // Only when there is a session to tear down. Stopping during the handshake - refusing a
+            // stream that came without the key it needs, say - used to send a TEARDOWN naming no
+            // session at all, which the server can only answer with "session not found".
+            if (!string.IsNullOrEmpty(_session))
             {
-                RtspUri = _uri,
-                Session = _session
-            };
-            teardown_message.AddAuthorization(_authentication, _uri, _rtspSocket?.NextCommandIndex() ?? 0);
-            _rtspClient?.SendMessage(teardown_message);
+                // Send TEARDOWN
+                RtspRequest teardown_message = new RtspRequestTeardown
+                {
+                    RtspUri = _uri,
+                    Session = _session
+                };
+                teardown_message.AddAuthorization(_authentication, _uri, _rtspSocket?.NextCommandIndex() ?? 0);
+                _rtspClient?.SendMessage(teardown_message);
+            }
 
             TeardownClient();
         }
@@ -1429,6 +1435,11 @@ namespace SharpRTSPClient
             {
                 foreach (Media media in sdpData.Medias.Where(m => m.MediaType == Media.MediaTypes.video))
                 {
+                    if (!IsUsablePayloadType(media.PayloadType, "video"))
+                    {
+                        continue;
+                    }
+
                     // search the attributes for control, rtpmap and fmtp
                     // holds SPS and PPS in base64 (h264 video)
                     AttributFmtp fmtp = media.Attributs.FirstOrDefault(x => x.Key == "fmtp") as AttributFmtp;
@@ -1529,60 +1540,75 @@ namespace SharpRTSPClient
 
                     IStreamConfigurationData streamConfigurationData = null;
 
-                    if (_videoPayloadProcessor is H264Payload && fmtp?.FormatParameter != null)
+                    try
                     {
-                        // If the rtpmap contains H264 then split the fmtp to get the sprop-parameter-sets which hold the SPS and PPS in base64
-                        var param = H264Parameters.Parse(fmtp.FormatParameter);
-                        var spsPps = param.SpropParameterSets;
-                        if (spsPps.Count >= 2)
+                        if (_videoPayloadProcessor is H264Payload && fmtp?.FormatParameter != null)
                         {
-                            byte[] sps = spsPps[0];
-                            byte[] pps = spsPps[1];
-                            streamConfigurationData = new H264StreamConfigurationData(sps, pps);
+                            // If the rtpmap contains H264 then split the fmtp to get the sprop-parameter-sets which hold the SPS and PPS in base64
+                            var param = H264Parameters.Parse(fmtp.FormatParameter);
+                            var spsPps = param.SpropParameterSets;
+                            if (spsPps.Count >= 2)
+                            {
+                                byte[] sps = spsPps[0];
+                                byte[] pps = spsPps[1];
+                                streamConfigurationData = new H264StreamConfigurationData(sps, pps);
+                            }
                         }
-                    }
-                    else if (_videoPayloadProcessor is H265Payload && fmtp?.FormatParameter != null)
-                    {
-                        // If the rtpmap contains H265 then split the fmtp to get the sprop-vps, sprop-sps and sprop-pps
-                        // The RFC makes the VPS, SPS and PPS OPTIONAL so they may not be present. In which we pass back NULL values
-                        var param = H265Parameters.Parse(fmtp.FormatParameter);
-                        var vpsSpsPps = param.SpropParameterSets;
-                        if (vpsSpsPps.Count >= 3)
+                        else if (_videoPayloadProcessor is H265Payload && fmtp?.FormatParameter != null)
                         {
-                            byte[] vps = vpsSpsPps[0];
-                            byte[] sps = vpsSpsPps[1];
-                            byte[] pps = vpsSpsPps[2];
-                            streamConfigurationData = new H265StreamConfigurationData(vps, sps, pps);
+                            // If the rtpmap contains H265 then split the fmtp to get the sprop-vps, sprop-sps and sprop-pps
+                            // The RFC makes the VPS, SPS and PPS OPTIONAL so they may not be present. In which we pass back NULL values
+                            var param = H265Parameters.Parse(fmtp.FormatParameter);
+                            var vpsSpsPps = param.SpropParameterSets;
+                            if (vpsSpsPps.Count >= 3)
+                            {
+                                byte[] vps = vpsSpsPps[0];
+                                byte[] sps = vpsSpsPps[1];
+                                byte[] pps = vpsSpsPps[2];
+                                streamConfigurationData = new H265StreamConfigurationData(vps, sps, pps);
+                            }
+                            else if (vpsSpsPps.Count >= 2)
+                            {
+                                // some implementations only send SPS and PPS, e.g. some HikVision cameras
+                                byte[] sps = vpsSpsPps[0];
+                                byte[] pps = vpsSpsPps[1];
+                                streamConfigurationData = new H265StreamConfigurationData(null, sps, pps);
+                            }
                         }
-                        else if (vpsSpsPps.Count >= 2)
+                        else if (_videoPayloadProcessor is H266Payload && fmtp?.FormatParameter != null)
                         {
-                            // some implementations only send SPS and PPS, e.g. some HikVision cameras
-                            byte[] sps = vpsSpsPps[0];
-                            byte[] pps = vpsSpsPps[1];
-                            streamConfigurationData = new H265StreamConfigurationData(null, sps, pps);
+                            // If the rtpmap contains H266 then split the fmtp to get the sprop-dci, sprop-vps, sprop-sps, sprop-pps and sprop-sei
+                            // The RFC makes the DCI, VPS, SPS and PPS OPTIONAL so they may not be present. In which we pass back NULL values
+                            var param = H266Parameters.Parse(fmtp.FormatParameter);
+                            var vpsSpsPps = param.SpropParameterSets;
+                            if (vpsSpsPps.Count >= 5)
+                            {
+                                byte[] dci = vpsSpsPps[0];
+                                byte[] vps = vpsSpsPps[1];
+                                byte[] sps = vpsSpsPps[2];
+                                byte[] pps = vpsSpsPps[3];
+                                byte[] sei = vpsSpsPps[4];
+                                streamConfigurationData = new H266StreamConfigurationData(dci, vps, sps, pps, sei);
+                            }
                         }
-                    }
-                    else if (_videoPayloadProcessor is H266Payload && fmtp?.FormatParameter != null)
-                    {
-                        // If the rtpmap contains H266 then split the fmtp to get the sprop-dci, sprop-vps, sprop-sps, sprop-pps and sprop-sei
-                        // The RFC makes the DCI, VPS, SPS and PPS OPTIONAL so they may not be present. In which we pass back NULL values
-                        var param = H266Parameters.Parse(fmtp.FormatParameter);
-                        var vpsSpsPps = param.SpropParameterSets;
-                        if (vpsSpsPps.Count >= 5)
+                        else if (_videoPayloadProcessor is AV1Payload && fmtp?.FormatParameter != null)
                         {
-                            byte[] dci = vpsSpsPps[0];
-                            byte[] vps = vpsSpsPps[1];
-                            byte[] sps = vpsSpsPps[2];
-                            byte[] pps = vpsSpsPps[3];
-                            byte[] sei = vpsSpsPps[4];
-                            streamConfigurationData = new H266StreamConfigurationData(dci, vps, sps, pps, sei);
+                            var param = AV1Parameters.Parse(fmtp.FormatParameter);
+                            // TODO: the rtpmap contains AV1
                         }
-                    }
-                    else if (_videoPayloadProcessor is AV1Payload && fmtp?.FormatParameter != null)
-                    {
-                        var param = AV1Parameters.Parse(fmtp.FormatParameter);
-                        // TODO: the rtpmap contains AV1
-                    }
+
+                        }
+                        catch (Exception ex)
+                        {
+                            // A stream whose fmtp is missing altogether plays perfectly well, because the
+                            // parameter sets arrive in the stream itself - so one that is present and
+                            // malformed has no business being worse than that. It used to take the whole
+                            // session down as a bare protocol error, naming nothing.
+                            _logger.LogWarning(ex,
+                                "Ignoring the format parameters of the video stream, they could not be read: {formatParameter}",
+                                fmtp?.FormatParameter);
+                            streamConfigurationData = null;
+                        }
 
                     // Send the SETUP RTSP command if we have a matching Payload Decoder
                     if (_videoPayloadProcessor != null)
@@ -1623,6 +1649,11 @@ namespace SharpRTSPClient
             {
                 foreach (Media media in sdpData.Medias.Where(m => m.MediaType == Media.MediaTypes.audio))
                 {
+                    if (!IsUsablePayloadType(media.PayloadType, "audio"))
+                    {
+                        continue;
+                    }
+
                     // search the attributes for control, rtpmap and fmtp
                     AttributFmtp fmtp = media.Attributs.FirstOrDefault(x => x.Key == "fmtp") as AttributFmtp;
                     AttributRtpMap rtpmap = media.Attributs.FirstOrDefault(x => x.Key == "rtpmap") as AttributRtpMap;
@@ -1865,6 +1896,29 @@ namespace SharpRTSPClient
 
             StopClient();
             Stopped?.Invoke(this, new StoppedEventArgs(StoppedReason.EncryptionUnavailable));
+            return false;
+        }
+
+        /// <summary>
+        /// Whether a payload number from the SDP is one that can ever turn up in an RTP packet.
+        /// </summary>
+        /// <remarks>
+        /// The field in an RTP header is seven bits wide, so anything above 127 can be advertised but
+        /// never received. Taken at face value it produced a session that set up, played, reported
+        /// nothing, and quietly discarded every packet that arrived for not matching.
+        /// </remarks>
+        private bool IsUsablePayloadType(int payloadType, string what)
+        {
+            const int maxPayloadType = 127;
+
+            if (payloadType >= 0 && payloadType <= maxPayloadType)
+            {
+                return true;
+            }
+
+            _logger.LogWarning(
+                "Ignoring the {what} stream, its payload type {payloadType} is outside the 0 to {maxPayloadType} an RTP packet can carry",
+                what, payloadType, maxPayloadType);
             return false;
         }
 
