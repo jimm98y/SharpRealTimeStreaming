@@ -828,7 +828,13 @@ namespace SharpRTSPClient
                 {
                     if (frames.Any())
                     {
-                        ReceivedVideoData?.Invoke(this, new SimpleDataEventArgs(frames.Data, frames.ClockTimestamp, frames.RtpTimestamp));
+                        bool synced = _videoRtcpState.TryMapToSenderClock(frames.RtpTimestamp, out DateTime senderTime);
+
+                        ReceivedVideoData?.Invoke(this, new SimpleDataEventArgs(
+                            frames.Data,
+                            synced ? senderTime : frames.ClockTimestamp,
+                            frames.RtpTimestamp,
+                            synced));
                     }
                 }
             }
@@ -911,7 +917,13 @@ namespace SharpRTSPClient
                 {
                     if (audioFrames.Any())
                     {
-                        ReceivedAudioData?.Invoke(this, new SimpleDataEventArgs(audioFrames.Data, audioFrames.ClockTimestamp, audioFrames.RtpTimestamp));
+                        bool synced = _audioRtcpState.TryMapToSenderClock(audioFrames.RtpTimestamp, out DateTime senderTime);
+
+                        ReceivedAudioData?.Invoke(this, new SimpleDataEventArgs(
+                            audioFrames.Data,
+                            synced ? senderTime : audioFrames.ClockTimestamp,
+                            audioFrames.RtpTimestamp,
+                            synced));
                     }
                 }
             }
@@ -1065,19 +1077,26 @@ namespace SharpRTSPClient
                         UInt32 ntpMswSeconds = (uint)(span[packetIndex + 8] << 24) + (uint)(span[packetIndex + 9] << 16)
                         + (uint)(span[packetIndex + 10] << 8) + span[packetIndex + 11];
 
-                        //UInt32 ntpLswFractions = (uint)(span[packetIndex + 12] << 24) + (uint)(span[packetIndex + 13] << 16)
-                        //+ (uint)(span[packetIndex + 14] << 8) + span[packetIndex + 15];
+                        UInt32 ntpLswFractions = (uint)(span[packetIndex + 12] << 24) + (uint)(span[packetIndex + 13] << 16)
+                        + (uint)(span[packetIndex + 14] << 8) + span[packetIndex + 15];
 
                         UInt32 rtpTimestamp = (uint)(span[packetIndex + 16] << 24) + (uint)(span[packetIndex + 17] << 16)
                         + (uint)(span[packetIndex + 18] << 8) + span[packetIndex + 19];
 
-                        //double ntp = ntpMswSeconds + (ntpLswFractions / UInt32.MaxValue);
+                        // The fraction matters. Lip sync is a matter of tens of milliseconds and the
+                        // seconds word alone is a second wide, so reading only that would be two
+                        // orders of magnitude too coarse to be worth anything. Divided by 2^32 as a
+                        // double, because uint over uint is integer division and comes out zero -
+                        // which is what the line that used to be commented out here would have done.
+                        double ntpSeconds = ntpMswSeconds + ntpLswFractions / 4294967296.0;
 
                         // NTP Most Significant Word is relative to 0h, 1 Jan 1900
                         // This will wrap around in 2036
-                        var time = new DateTime(1900, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+                        var time = new DateTime(1900, 1, 1, 0, 0, 0, DateTimeKind.Utc).AddSeconds(ntpSeconds);
 
-                        time = time.AddSeconds(ntpMswSeconds); // adds 'double' (whole&fraction)
+                        // What makes the two streams of a session comparable: this pairs a wall clock
+                        // time with the RTP timestamp of that same instant on this stream.
+                        channel.RecordSenderReport(time, rtpTimestamp);
 
                         _logger.LogDebug("RTCP time (UTC) for RTP timestamp {timestamp} is {time}", rtpTimestamp, time);
 
@@ -1610,6 +1629,11 @@ namespace SharpRTSPClient
                             streamConfigurationData = null;
                         }
 
+                    // Kept because a sender report is useless without it: it says when a given RTP
+                    // timestamp happened, and turning the gap to another timestamp into a span of
+                    // time needs to know how fast this stream's clock runs.
+                    _videoRtcpState.ClockRate = ClockRateOf(rtpmap, DEFAULT_VIDEO_CLOCK_RATE);
+
                     // Send the SETUP RTSP command if we have a matching Payload Decoder
                     if (_videoPayloadProcessor != null)
                     {
@@ -1660,6 +1684,7 @@ namespace SharpRTSPClient
 
                     _audioUri = GetControlUri(media);
                     _audioPayload = media.PayloadType;
+                    _audioRtcpState.ClockRate = ClockRateOf(rtpmap, DEFAULT_AUDIO_CLOCK_RATE);
 
                     IStreamConfigurationData streamConfigurationData = null;
                     if (media.PayloadType < 96)
@@ -1897,6 +1922,32 @@ namespace SharpRTSPClient
             StopClient();
             Stopped?.Invoke(this, new StoppedEventArgs(StoppedReason.EncryptionUnavailable));
             return false;
+        }
+
+        /// <summary>
+        /// The clock rate of a stream whose rtpmap did not give one. 90 kHz is what every video
+        /// payload RFC 3551 defines uses.
+        /// </summary>
+        private const int DEFAULT_VIDEO_CLOCK_RATE = 90000;
+
+        /// <summary>
+        /// The clock rate of an audio stream whose rtpmap did not give one. Only the static payload
+        /// types come without an rtpmap, and those are all 8 kHz.
+        /// </summary>
+        private const int DEFAULT_AUDIO_CLOCK_RATE = 8000;
+
+        /// <summary>
+        /// The clock rate an rtpmap declares, falling back to the one the payload type implies.
+        /// </summary>
+        private int ClockRateOf(AttributRtpMap rtpmap, int fallback)
+        {
+            if (rtpmap?.ClockRate != null && int.TryParse(rtpmap.ClockRate, out int clockRate) && clockRate > 0)
+            {
+                return clockRate;
+            }
+
+            _logger.LogDebug("No usable clock rate in the rtpmap, assuming {fallback}", fallback);
+            return fallback;
         }
 
         /// <summary>
@@ -2183,11 +2234,37 @@ namespace SharpRTSPClient
     public class SimpleDataEventArgs : EventArgs
     {
         public SimpleDataEventArgs(IEnumerable<ReadOnlyMemory<byte>> data, DateTime timestamp, uint rtpTimestamp)
+            : this(data, timestamp, rtpTimestamp, false)
+        {
+        }
+
+        public SimpleDataEventArgs(IEnumerable<ReadOnlyMemory<byte>> data, DateTime timestamp, uint rtpTimestamp, bool hasSenderSync)
         {
             Data = data;
             Timestamp = timestamp;
-            RtpTimestamp = rtpTimestamp;    
+            RtpTimestamp = rtpTimestamp;
+            HasSenderSync = hasSenderSync;
         }
+
+        /// <summary>
+        /// Whether <see cref="Timestamp"/> is this frame's time on the sender's clock, and so
+        /// comparable with the other stream of the same session.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// False until a sender report has arrived for this stream, which is what pairs its RTP
+        /// clock with a wall clock. Until then the two streams cannot be lined up at all: each runs
+        /// at its own rate from a starting point the sender picked at random, so their RTP
+        /// timestamps say nothing about one another. A sender that never reports is never
+        /// synchronisable, and this stays false for the life of the session.
+        /// </para>
+        /// <para>
+        /// The sender's clock need not agree with this machine's, or with real time. Both streams
+        /// are timed by the one clock at the far end, which is all that lining them up against
+        /// each other requires.
+        /// </para>
+        /// </remarks>
+        public bool HasSenderSync { get; }
 
         public DateTime Timestamp { get; }
         public uint RtpTimestamp { get; }

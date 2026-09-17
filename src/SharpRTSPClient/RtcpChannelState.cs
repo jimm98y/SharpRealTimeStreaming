@@ -41,6 +41,73 @@ namespace SharpRTSPClient
 
         private long _lastReceiverReportTicks;
 
+        private readonly object _syncGate = new object();
+        private bool _hasSync;
+        private DateTime _syncSenderTime;
+        private uint _syncRtpTimestamp;
+
+        /// <summary>
+        /// Ticks of this stream's RTP clock per second, from the SDP. 90000 for video, the sampling
+        /// rate for audio. Without it a sender report cannot be turned into a span of time.
+        /// </summary>
+        public int ClockRate { get; set; }
+
+        /// <summary>
+        /// Whether a sender report has arrived, so frames on this stream can be placed on the
+        /// sender's clock.
+        /// </summary>
+        public bool HasSenderSync
+        {
+            get { lock (_syncGate) { return _hasSync; } }
+        }
+
+        /// <summary>
+        /// Records the pairing a sender report carries: a wall clock time, and the RTP timestamp of
+        /// that same instant on this stream.
+        /// </summary>
+        /// <remarks>
+        /// This pairing is the only thing that makes two streams comparable. Each has its own clock,
+        /// running at its own rate from a starting point the sender picked at random, so their RTP
+        /// timestamps say nothing about each other. Both reports come from one sender and one clock,
+        /// which is what makes the streams line up - the sender's clock does not have to agree with
+        /// ours, or with anything else, for that to hold.
+        /// </remarks>
+        public void RecordSenderReport(DateTime senderTimeUtc, uint rtpTimestamp)
+        {
+            lock (_syncGate)
+            {
+                _hasSync = true;
+                _syncSenderTime = senderTimeUtc;
+                _syncRtpTimestamp = rtpTimestamp;
+            }
+        }
+
+        /// <summary>
+        /// Places one packet's RTP timestamp on the sender's clock, using the most recent report.
+        /// </summary>
+        /// <returns>False until a report has arrived, or if the SDP gave no clock rate.</returns>
+        public bool TryMapToSenderClock(uint rtpTimestamp, out DateTime senderTimeUtc)
+        {
+            int clockRate = ClockRate;
+
+            lock (_syncGate)
+            {
+                if (!_hasSync || clockRate <= 0)
+                {
+                    senderTimeUtc = default(DateTime);
+                    return false;
+                }
+
+                // Subtracted as a signed 32 bit difference, so it reads correctly either side of the
+                // point where a 32 bit RTP clock wraps - about every thirteen hours at 90 kHz.
+                int elapsed = unchecked((int)(rtpTimestamp - _syncRtpTimestamp));
+
+                senderTimeUtc = _syncSenderTime.AddSeconds(elapsed / (double)clockRate);
+                return true;
+            }
+        }
+
+
         /// <summary>
         /// Whether a receiver report is due on this channel, and records that one is being sent.
         /// </summary>
@@ -76,6 +143,12 @@ namespace SharpRTSPClient
         {
             Interlocked.Exchange(ref _remoteSsrc, Unknown);
             Interlocked.Exchange(ref _lastReceiverReportTicks, 0);
+
+            lock (_syncGate)
+            {
+                // a reconnect is a new stream, whose clock starts wherever the sender decides
+                _hasSync = false;
+            }
         }
     }
 }
