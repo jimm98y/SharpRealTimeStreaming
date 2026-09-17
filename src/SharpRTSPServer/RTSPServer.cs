@@ -92,6 +92,12 @@ namespace SharpRTSPServer
         private static readonly TimeSpan CLOSE_WAIT_FOR_WRITER = TimeSpan.FromSeconds(5);
 
         /// <summary>
+        /// How long handing a connection's UDP ports back waits for its writer to be out of them. A
+        /// UDP send waits on nothing at the far end, so this only has to cover the send itself.
+        /// </summary>
+        private static readonly TimeSpan RELEASE_WAIT_FOR_WRITER = TimeSpan.FromSeconds(1);
+
+        /// <summary>
         /// Default value of <see cref="MaxQueuedFramesPerConnection"/>. At twenty five frames a
         /// second this is a couple of seconds of video.
         /// </summary>
@@ -2257,7 +2263,6 @@ namespace SharpRTSPServer
         /// </remarks>
         private void RemoveSession(RTSPConnection connection)
         {
-            List<IRtpTransport> interleaved = null;
             RtspListener listener;
 
             lock (_connectionList)
@@ -2278,22 +2283,11 @@ namespace SharpRTSPServer
                 connection.Outbound?.Dispose();
                 connection.Outbound = null;
 
-                foreach (var stream in connection.Streams)
-                {
-                    if (stream.RtpChannel is UDPSocket || stream.RtpChannel is MulticastUDPSocket)
-                    {
-                        // A UDP socket closes at once, and there are only so many ports, so these are
-                        // given back here rather than whenever a background thread gets to them.
-                        ReleaseTransport(stream.RtpChannel);
-                    }
-                    else if (stream.RtpChannel != null)
-                    {
-                        (interleaved = interleaved ?? new List<IRtpTransport>()).Add(stream.RtpChannel);
-                    }
-
-                    stream.RtpChannel = null;
-                }
-
+                // Deliberately left attached. Taking a transport off a connection is half of
+                // releasing it, and doing that here - with the writer possibly part way through a
+                // frame on it - makes the rest of that frame fail on a channel that went null
+                // underneath it, and reports a session that ended perfectly well as a lost client.
+                // Both halves happen together below, with the writer held out.
                 listener = connection.Listener;
 
                 _connectionList.Remove(connection);
@@ -2303,7 +2297,78 @@ namespace SharpRTSPServer
                 }
             }
 
-            CloseConnection(connection, interleaved, listener);
+            // Outside the list lock, so waiting for the writer cannot hold up the rest of the server.
+            ReleaseUdpTransports(connection);
+            CloseConnection(connection, listener);
+        }
+
+        /// <summary>
+        /// Hands a connection's UDP ports back, once its writer is out of them.
+        /// </summary>
+        /// <remarks>
+        /// Disposing a socket while the writer is in the middle of sending on it is how a torn down
+        /// session ends up throwing from inside a write - the writer holds the reference it read
+        /// before the teardown started, and finds it disposed underneath itself.
+        /// <para>
+        /// A UDP send does not block on anything the far end does, so the wait is short. If it
+        /// somehow expires the ports are handed back anyway: there are only five hundred pairs, and
+        /// a write that loses the race throws where it is already handled.
+        /// </para>
+        /// </remarks>
+        private void ReleaseUdpTransports(RTSPConnection connection)
+        {
+            if (!connection.Streams.Any(stream => IsUdp(stream.RtpChannel)))
+            {
+                return;
+            }
+
+            bool exclusive = Monitor.TryEnter(connection.SendLock, RELEASE_WAIT_FOR_WRITER);
+
+            try
+            {
+                if (!exclusive)
+                {
+                    _logger.LogDebug("Session {sessionId} is still writing, handing its UDP ports back regardless",
+                        connection.SessionId);
+                }
+
+                DetachAndRelease(connection, IsUdp);
+            }
+            finally
+            {
+                if (exclusive)
+                {
+                    Monitor.Exit(connection.SendLock);
+                }
+            }
+        }
+
+        private static bool IsUdp(IRtpTransport transport) =>
+            transport is UDPSocket || transport is MulticastUDPSocket;
+
+        /// <summary>
+        /// Takes the connection's matching transports off it and releases them, in that order and
+        /// without letting go in between.
+        /// </summary>
+        /// <remarks>
+        /// Called with the connection's send lock held, so a writer is either not in a frame yet - in
+        /// which case it will find the connection no longer playing - or has finished the one it was
+        /// in. Either way no write sees half of this.
+        /// </remarks>
+        private void DetachAndRelease(RTSPConnection connection, Func<IRtpTransport, bool> matches)
+        {
+            foreach (RTPStream stream in connection.Streams)
+            {
+                IRtpTransport transport = stream.RtpChannel;
+
+                if (transport == null || !matches(transport))
+                {
+                    continue;
+                }
+
+                stream.RtpChannel = null;
+                ReleaseTransport(transport);
+            }
         }
 
         /// <summary>
@@ -2316,7 +2381,7 @@ namespace SharpRTSPServer
         /// would stall every other connection, every request and every other stream for that minute,
         /// which is the stall the outbound queue exists to prevent in the first place.
         /// </remarks>
-        private void CloseConnection(RTSPConnection connection, List<IRtpTransport> interleaved, RtspListener listener)
+        private void CloseConnection(RTSPConnection connection, RtspListener listener)
         {
             Action close = () =>
             {
@@ -2344,13 +2409,9 @@ namespace SharpRTSPServer
 
                 try
                 {
-                    if (interleaved != null)
-                    {
-                        foreach (IRtpTransport transport in interleaved)
-                        {
-                            ReleaseTransport(transport);
-                        }
-                    }
+                    // whatever was not handed back already - the interleaved ones, which share the
+                    // connection's own socket rather than holding a port of their own
+                    DetachAndRelease(connection, transport => true);
 
                     try
                     {
