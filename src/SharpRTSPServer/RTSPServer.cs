@@ -86,6 +86,12 @@ namespace SharpRTSPServer
         private static readonly TimeSpan RTCP_SEND_LOCK_TIMEOUT = TimeSpan.FromSeconds(2);
 
         /// <summary>
+        /// How long closing a connection waits for its writer to leave the transport before giving up
+        /// on disposing it. The socket is already closed by then, so a write in progress has failed.
+        /// </summary>
+        private static readonly TimeSpan CLOSE_WAIT_FOR_WRITER = TimeSpan.FromSeconds(5);
+
+        /// <summary>
         /// Default value of <see cref="MaxQueuedFramesPerConnection"/>. At twenty five frames a
         /// second this is a couple of seconds of video.
         /// </summary>
@@ -1949,6 +1955,81 @@ namespace SharpRTSPServer
         }
 
         /// <summary>
+        /// Says that a write to a client failed, as loudly as the reason deserves.
+        /// </summary>
+        /// <remarks>
+        /// A client going away is the ordinary end of a session, not a fault: players close, networks
+        /// drop, people stop watching. It used to be three warnings and a stack trace each time, which
+        /// buries the failures that are worth looking at among the ones that are not.
+        /// </remarks>
+        private void ReportWriteFailure(RTSPConnection connection, Exception exception, string what)
+        {
+            string remoteEndPoint = DescribeRemoteEndPoint(connection);
+
+            if (exception == null || IsClientGone(exception))
+            {
+                _logger.LogDebug("Session {sessionId} at {remoteEndPoint} has gone away, dropping it ({what})",
+                    connection.SessionId, remoteEndPoint, what);
+                return;
+            }
+
+            _logger.LogWarning(exception, "Error writing {what} to session {sessionId} at {remoteEndPoint}, dropping it",
+                what, connection.SessionId, remoteEndPoint);
+        }
+
+        /// <summary>
+        /// Whether an exception from a write means the client is no longer there.
+        /// </summary>
+        private static bool IsClientGone(Exception exception)
+        {
+            for (Exception e = exception; e != null; e = e.InnerException)
+            {
+                if (e is ObjectDisposedException || e is IOException)
+                {
+                    return true;
+                }
+
+                if (e is SocketException socket)
+                {
+                    switch (socket.SocketErrorCode)
+                    {
+                        case SocketError.ConnectionReset:
+                        case SocketError.ConnectionAborted:
+                        case SocketError.Shutdown:
+                        case SocketError.NotConnected:
+                        case SocketError.OperationAborted:
+                        case SocketError.Interrupted:
+                            return true;
+                    }
+                }
+
+                // The transport reports a closed connection as a plain exception carrying a message,
+                // so for that one there is nothing better to go on than the message.
+                if (e.Message.IndexOf("Connection is lost", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// The remote end point of a connection that may already have been torn down, for a log line.
+        /// </summary>
+        private static string DescribeRemoteEndPoint(RTSPConnection connection)
+        {
+            try
+            {
+                return connection?.Listener?.RemoteEndPoint?.ToString() ?? "an unknown address";
+            }
+            catch (Exception)
+            {
+                return "an unknown address";
+            }
+        }
+
+        /// <summary>
         /// Whether this stream owes its client a sender report.
         /// </summary>
         /// <remarks>
@@ -1986,8 +2067,13 @@ namespace SharpRTSPServer
                 return true;
 
             bool writeError = false;
+            Exception writeException = null;
             uint writtenBytes = 0;
             uint writtenPackets = 0;
+            List<byte[]> rented = null;
+
+            try
+            {
             // There could be more than 1 RTP packet (if the data is fragmented)
             foreach (var r in rtpPackets)
             {
@@ -2001,6 +2087,17 @@ namespace SharpRTSPServer
                 }
                 else
                 {
+                    // Stamped into a copy, not into what was handed in. One frame is shared by every
+                    // connection watching the stream, and the sequence number and SSRC below are
+                    // this connection's - writing them into the shared bytes meant each client
+                    // stamping over the others, and whichever won was what they all received.
+                    byte[] stamped = ArrayPool<byte>.Shared.Rent(rtpPacket.Length);
+                    rented = rented ?? new List<byte[]>(rtpPackets.Count);
+                    rented.Add(stamped);
+
+                    rtpPacket.CopyTo(stamped);
+                    rtpPacket = stamped.AsMemory(0, rtpPacket.Length);
+
                     // Add the specific data for each transmission
                     RTPPacketUtil.WriteSequenceNumber(rtpPacket.Span, stream.SequenceNumber);
                     stream.SequenceNumber++;
@@ -2038,16 +2135,15 @@ namespace SharpRTSPServer
                 }
                 catch (Exception e)
                 {
-                    _logger.LogWarning("UDP Write Exception " + e);
                     writeError = true;
+                    writeException = e;
                     break; // exit out of foreach loop
                 }
             }
 
             if (writeError)
             {
-                _logger.LogWarning("Error writing to listener " + connection.Listener.RemoteEndPoint.Address.ToString());
-                _logger.LogWarning("Removing session " + connection.SessionId + " due to write error");
+                ReportWriteFailure(connection, writeException, "RTP");
                 return false;
             }
 
@@ -2055,6 +2151,17 @@ namespace SharpRTSPServer
             // the RTCP Sender Report reports this back to the receiver so it can work out packet loss
             stream.RtpPacketCount += writtenPackets;
             return true;
+            }
+            finally
+            {
+                if (rented != null)
+                {
+                    foreach (byte[] buffer in rented)
+                    {
+                        ArrayPool<byte>.Shared.Return(buffer);
+                    }
+                }
+            }
             }
         }
 
@@ -2128,7 +2235,7 @@ namespace SharpRTSPServer
             }
             catch (Exception e)
             {
-                _logger.LogError(e, "Error writing RTCP to listener {remoteAdress}", connection.Listener.RemoteEndPoint.Address.ToString());
+                ReportWriteFailure(connection, e, "RTCP");
                 return false;
             }
             return true;
@@ -2213,34 +2320,55 @@ namespace SharpRTSPServer
         {
             Action close = () =>
             {
-                // first, because it is what fails a write that is stuck and so unblocks the rest
+                // Closing the socket first is what fails a write that is stuck, and it is safe to do
+                // underneath one - it is the disposing below that is not.
                 TryCloseTransport(connection.Transport);
 
-                if (interleaved != null)
+                // Then wait for the writer to be out of the transport before anything is disposed.
+                // Disposing one while a write is in it corrupts memory: the write is still reading
+                // from buffers the dispose hands back, and the crash lands later and somewhere else,
+                // as an access violation on whoever was given them next.
+                //
+                // The wait is short because the socket is already closed, so a write that was stuck
+                // in it has failed by now. If it somehow has not, the transport is left to the
+                // finalizer rather than pulled out from under the thread using it.
+                bool exclusive = Monitor.TryEnter(connection.SendLock, CLOSE_WAIT_FOR_WRITER);
+
+                if (!exclusive)
                 {
-                    foreach (IRtpTransport transport in interleaved)
-                    {
-                        ReleaseTransport(transport);
-                    }
+                    _logger.LogWarning(
+                        "Session {sessionId} is still being written to, leaving its transports to be collected rather than disposing them underneath it",
+                        connection.SessionId);
+                    return;
                 }
 
                 try
                 {
-                    listener?.Dispose();
+                    if (interleaved != null)
+                    {
+                        foreach (IRtpTransport transport in interleaved)
+                        {
+                            ReleaseTransport(transport);
+                        }
+                    }
+
+                    try
+                    {
+                        listener?.Dispose();
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogDebug(ex, "Error disposing an RTSP listener");
+                    }
                 }
-                catch (Exception ex)
+                finally
                 {
-                    _logger.LogDebug(ex, "Error disposing an RTSP listener");
+                    Monitor.Exit(connection.SendLock);
                 }
             };
 
-            if (interleaved == null)
-            {
-                // nothing here can block, so there is no reason to hand it to another thread
-                close();
-                return;
-            }
-
+            // Always off this thread. Waiting for the writer is a wait, however short, and the
+            // callers of this hold nothing but must not be delayed by it.
             Task.Run(close);
         }
 

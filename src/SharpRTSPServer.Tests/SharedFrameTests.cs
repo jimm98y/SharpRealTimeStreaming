@@ -42,6 +42,8 @@ namespace SharpRTSPServer.Tests
 
         private static byte[] PayloadOf(byte[] rtpPacket) => rtpPacket.AsSpan(12).ToArray();
 
+        private static ushort Seq(byte[] rtpPacket) => BinaryPrimitives.ReadUInt16BigEndian(rtpPacket.AsSpan(2));
+
         [TestMethod]
         public void EveryClientGetsTheWholeFrameIntact()
         {
@@ -75,6 +77,40 @@ namespace SharpRTSPServer.Tests
                         Assert.AreEqual(expected, payload[i],
                             $"frame {expected} came out with byte {i} belonging to something else");
                     }
+                }
+            }
+        }
+
+        [TestMethod]
+        public void EachClientGetsItsOwnSequenceNumbering()
+        {
+            int port = TestPorts.FindFree();
+            using var server = new RTSPServer(port, "admin", "password");
+            var videoTrack = new H264Track(Sps, Pps);
+            server.AddStreamSource(new RTSPStreamSource("stream1", videoTrack, null));
+            server.StartListen();
+
+            string baseUri = "rtsp://127.0.0.1:" + port + "/stream1";
+
+            using var first = Play(port, baseUri);
+            using var second = Play(port, baseUri);
+
+            const int frames = 60;
+            for (byte i = 0; i < frames; i++)
+            {
+                videoTrack.FeedInRawSamples((uint)(i * 3000), NumberedNal(i));
+            }
+
+            // One frame is shared by both connections, but the sequence number stamped into it is
+            // each connection's own - counted separately, from one. Stamping them into the shared
+            // bytes had each client writing over the other, so what either received was whichever
+            // got there last.
+            foreach (var client in new[] { first, second })
+            {
+                for (int expected = 1; expected <= frames; expected++)
+                {
+                    Assert.AreEqual((ushort)expected, Seq(NextRtp(client)),
+                        "each connection numbers what it sends for itself");
                 }
             }
         }
