@@ -14,6 +14,22 @@ namespace SharpRTSPServer
         public RtspListener Listener { get; set; }
 
         /// <summary>
+        /// Guards writing to this connection, so that what goes out on it goes out in one piece and
+        /// in order.
+        /// </summary>
+        /// <remarks>
+        /// One per connection, deliberately not the server wide list lock. Writing to a socket can
+        /// block for as long as the client at the other end feels like not reading, and holding the
+        /// list lock across that stopped every other connection, every RTSP request and every other
+        /// stream until it finished.
+        /// <para>
+        /// Lock order: the connection list lock may be taken and then this one. Never the reverse -
+        /// anything that needs the list after writing has to let go of this first.
+        /// </para>
+        /// </remarks>
+        public object SendLock { get; } = new object();
+
+        /// <summary>
         /// The transport the listener sits on. Kept so the server can notice that a client has gone
         /// away without tearing its session down, and release its RTP ports straight away.
         /// </summary>

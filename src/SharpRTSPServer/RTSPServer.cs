@@ -1157,15 +1157,15 @@ namespace SharpRTSPServer
                         {
                             playResponse.AddHeader("RTP-Info: " + rtpInfo);
                         }
-                        // Answer and start playing under the lock the media path takes. Done outside
-                        // it, a sample produced between the response going out and the session being
-                        // marked as playing was dropped, so a client that fed the moment its PLAY was
-                        // answered lost whatever fell in that window; and marking it first without
-                        // the lock would let the media overtake the response on the wire.
-                        lock (_connectionList)
+                        // Answer and start playing under this connection's send lock, which the media
+                        // path takes too. Done outside it, a sample produced between the response
+                        // going out and the session being marked as playing was dropped, so a client
+                        // that fed the moment its PLAY was answered lost whatever fell in that
+                        // window; and marking it first without the lock would let the media overtake
+                        // the response on the wire. It is the connection's lock rather than the
+                        // server's, so answering a slow client does not stall everyone else.
+                        lock (connection.SendLock)
                         {
-                            listener.SendMessage(playResponse);
-
                             foreach (var stream in connection.Streams)
                             {
                                 if (stream.RtpChannel != null)
@@ -1174,8 +1174,16 @@ namespace SharpRTSPServer
                                 }
                             }
 
-                            // Allow video and audio to go to this client
+                            // Marked as playing before the reply goes out, not after. What keeps the
+                            // media behind the reply is this lock, which every write to this
+                            // connection takes - so a producer that sees the session playing while
+                            // the reply is still being written waits here and goes out after it.
+                            // Setting the flag afterwards instead left a window where the client had
+                            // the reply and fed a sample, and the sample was turned away for a
+                            // session that was not marked as playing yet.
                             connection.Play = true;
+
+                            listener.SendMessage(playResponse);
                         }
 
                         RaiseReceivedRtspMessage(sender, new RtspMessageEventArgs(message, connection));
@@ -1774,11 +1782,29 @@ namespace SharpRTSPServer
         /// </param>
         public void SendRawRTP(RTSPConnection connection, RTPStream stream, List<Memory<byte>> rtpPackets, bool preserveSourceHeaders)
         {
+            if (!TrySendRawRTP(connection, stream, rtpPackets, preserveSourceHeaders))
+            {
+                // outside the send lock: see RTSPConnection.SendLock for why that order matters
+                lock (_connectionList)
+                {
+                    RemoveSession(connection);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Writes RTP to one connection, reporting whether it got there rather than acting on it.
+        /// </summary>
+        /// <returns>False if the connection could not be written to and should be dropped.</returns>
+        private bool TrySendRawRTP(RTSPConnection connection, RTPStream stream, List<Memory<byte>> rtpPackets, bool preserveSourceHeaders)
+        {
+            lock (connection.SendLock)
+            {
             if (!connection.Play)
-                return;
+                return true;
 
             if (!CanSend(stream, "RTP"))
-                return;
+                return true;
 
             bool writeError = false;
             uint writtenBytes = 0;
@@ -1843,13 +1869,13 @@ namespace SharpRTSPServer
             {
                 _logger.LogWarning("Error writing to listener " + connection.Listener.RemoteEndPoint.Address.ToString());
                 _logger.LogWarning("Removing session " + connection.SessionId + " due to write error");
-                RemoveSession(connection);
+                return false;
             }
-            else
-            {
-                stream.OctetCount += writtenBytes;
-                // the RTCP Sender Report reports this back to the receiver so it can work out packet loss
-                stream.RtpPacketCount += writtenPackets;
+
+            stream.OctetCount += writtenBytes;
+            // the RTCP Sender Report reports this back to the receiver so it can work out packet loss
+            stream.RtpPacketCount += writtenPackets;
+            return true;
             }
         }
 
@@ -1890,6 +1916,9 @@ namespace SharpRTSPServer
             if (!CanSend(stream, "RTCP"))
                 return false;
 
+            // The same lock the RTP takes, so a report keeps its place among the packets it reports on
+            lock (connection.SendLock)
+            {
             try
             {
                 Debug.Assert(stream.RtpChannel != null, "If stream.rtpChannel is null here the program did not handle well connection problem");
@@ -1913,6 +1942,7 @@ namespace SharpRTSPServer
                 return false;
             }
             return true;
+            }
         }
 
         /// <summary>
@@ -1927,6 +1957,7 @@ namespace SharpRTSPServer
         private void RemoveSession(RTSPConnection connection)
         {
             lock (_connectionList)
+            lock (connection.SendLock) // so nothing is part way through writing to what we are disposing
             {
                 connection.Play = false; // stop sending data
 
@@ -2212,6 +2243,14 @@ namespace SharpRTSPServer
             if (streamType != 0 && streamType != 1)
                 throw new ArgumentException("Invalid streamType! Video = 0, Audio = 1");
 
+            RTSPConnection[] connections;
+            ITrack track;
+            bool preserveSourceHeaders;
+
+            // The list lock is held just long enough to read the list, not across the writing. A
+            // write blocks for as long as the client at the other end declines to read, and doing
+            // that under this lock stopped every other connection, every RTSP request and every
+            // other stream until it finished.
             lock (_connectionList)
             {
                 var streamSource = GetStreamSource(streamID);
@@ -2223,15 +2262,26 @@ namespace SharpRTSPServer
 
                 // A track that forwards RTP from elsewhere can ask for it to go out exactly as it
                 // arrived, rather than being restamped as if this server had produced it.
-                ITrack track = streamType == (int)TrackType.Video ? streamSource.VideoTrack : streamSource.AudioTrack;
-                bool preserveSourceHeaders = track is ProxyTrack proxyTrack && proxyTrack.PreserveSourceHeaders;
+                track = streamType == (int)TrackType.Video ? streamSource.VideoTrack : streamSource.AudioTrack;
+                preserveSourceHeaders = track is ProxyTrack proxyTrack && proxyTrack.PreserveSourceHeaders;
 
-                // Go through each RTSP connection and output the RTP on the Session
-                foreach (RTSPConnection connection in streamSource.ConnectionList.ToArray()) // ToArray makes a temp copy of the list. This lets us delete items in the foreach eg when there is Write Error
+                // ToArray makes a temp copy of the list, so the list itself can change while we write
+                connections = streamSource.ConnectionList.ToArray();
+            }
+
+            List<RTSPConnection> failed = null;
+
+            // Go through each RTSP connection and output the RTP on the Session
+            foreach (RTSPConnection connection in connections)
+            {
+                // Whether this connection is playing is decided under its send lock rather than out
+                // here. PLAY answers the client and marks the session as playing under that same
+                // lock, so a packet produced the instant the response went out waits for it and then
+                // goes, instead of being read as not playing yet and dropped.
+                lock (connection.SendLock)
                 {
-                    // Only process Sessions in Play Mode.
-                    // Note: 'continue', not 'return' - one connection that is paused or not fully set up
-                    // must not stop the data going to every other connection on this stream.
+                    // Note: 'continue', not 'return' - one connection that is paused or not fully set
+                    // up must not stop the data going to every other connection on this stream.
                     if (!connection.Play)
                         continue;
 
@@ -2248,16 +2298,29 @@ namespace SharpRTSPServer
                     _logger.LogDebug("Sending RTP session {sessionId} {TransportLogName} RTP timestamp={rtpTimestamp}. Sequence={sequenceNumber}",
                         connection.SessionId, TransportLogName(stream.RtpChannel), rtpTimestamp, stream.SequenceNumber);
 
-                    if (stream.MustSendRtcpPacket)
+                    if (stream.MustSendRtcpPacket && !SendRTCPSenderReport(rtpTimestamp, connection, stream))
                     {
-                        if (!SendRTCPSenderReport(rtpTimestamp, connection, stream))
-                        {
-                            RemoveSession(connection);
-                            continue;
-                        }
+                        (failed = failed ?? new List<RTSPConnection>()).Add(connection);
+                        continue;
                     }
 
-                    SendRawRTP(connection, stream, rtpPackets, preserveSourceHeaders);
+                    if (!TrySendRawRTP(connection, stream, rtpPackets, preserveSourceHeaders))
+                    {
+                        (failed = failed ?? new List<RTSPConnection>()).Add(connection);
+                    }
+                }
+            }
+
+            // Dropping a session needs the list lock, and taking that while holding a send lock is
+            // the one order that deadlocks, so it happens once the writing is done.
+            if (failed != null)
+            {
+                lock (_connectionList)
+                {
+                    foreach (RTSPConnection connection in failed)
+                    {
+                        RemoveSession(connection);
+                    }
                 }
             }
         }
