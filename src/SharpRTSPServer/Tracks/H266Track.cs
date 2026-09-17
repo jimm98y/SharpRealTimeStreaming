@@ -31,11 +31,6 @@ namespace SharpRTSPServer
         public int VideoClock { get; set; } = DEFAULT_CLOCK;
 
         /// <summary>
-        /// Maximum size of the packet. If the resulting RTP packet exceeds this size, fragmentation will be used. Default value is 1400 and RTP over RTSP is constrained to 65535.
-        /// </summary>
-        public int PacketMTU { get; set; } = 1400;
-
-        /// <summary>
         /// Decoding Capability Information (DCI).
         /// </summary>
         public byte[] DCI { get; set; }
@@ -183,15 +178,7 @@ namespace SharpRTSPServer
                 // or as a Fragmented Data, split over several RTP packets with the same Timestamp.
                 bool fragmenting = false;
 
-                int packetMTU = PacketMTU; // 65535; 
-                packetMTU += -8 - 20 - 16; // -8 for UDP header, -20 for IP header, -16 normal RTP header len. ** LESS RTP EXTENSIONS !!!
-
-                if (packetMTU <= 0)
-                {
-                    // otherwise the fragmentation loop below would never make progress
-                    throw new InvalidOperationException(
-                        $"{nameof(PacketMTU)} of {PacketMTU} is too small to carry any payload, it must leave room for the IP, UDP and RTP headers.");
-                }
+                int packetMTU = PayloadMTU();
 
                 if (rawNal.Length > packetMTU)
                 {

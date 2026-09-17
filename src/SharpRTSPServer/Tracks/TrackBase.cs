@@ -21,6 +21,46 @@ namespace SharpRTSPServer
         /// </remarks>
         public uint SSRC { get; set; } = RandomGenerator.NextUInt32();
 
+        /// <summary>
+        /// Default value of <see cref="PacketMTU"/>, chosen to fit inside a 1500 byte Ethernet frame.
+        /// </summary>
+        public const int DEFAULT_PACKET_MTU = 1400;
+
+        /// <summary>
+        /// Maximum size of the packet. If the resulting RTP packet exceeds this size, fragmentation
+        /// will be used. Default value is 1400 and RTP over RTSP is constrained to 65535.
+        /// </summary>
+        /// <remarks>
+        /// Here rather than on each track, where four of them declared it identically and a fifth
+        /// did not have it at all and fragmented at a fixed size - so setting it was honoured by
+        /// some of the codecs and quietly ignored by the others.
+        /// </remarks>
+        public int PacketMTU { get; set; } = DEFAULT_PACKET_MTU;
+
+        /// <summary>
+        /// What is left of <see cref="PacketMTU"/> for payload once the headers below RTP are
+        /// accounted for: 20 for IP, 8 for UDP, and 16 rather than the RTP header's 12 so that a
+        /// packet carrying a small extension still fits.
+        /// </summary>
+        /// <exception cref="InvalidOperationException">
+        /// The MTU leaves no room for any payload, which would make fragmentation loop for ever.
+        /// </exception>
+        protected int PayloadMTU()
+        {
+            const int belowRtp = 20 + 8;
+            const int rtpHeaderAllowance = 16;
+
+            int payloadMTU = PacketMTU - belowRtp - rtpHeaderAllowance;
+
+            if (payloadMTU <= 0)
+            {
+                throw new InvalidOperationException(
+                    $"{nameof(PacketMTU)} of {PacketMTU} is too small to carry any payload, it must leave room for the IP, UDP and RTP headers.");
+            }
+
+            return payloadMTU;
+        }
+
         public IRtpSender Sink { get; set; } = null;
 
         public string StreamID { get; set; } = null;

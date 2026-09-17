@@ -89,8 +89,9 @@ namespace SharpRTSPServer
                 var endOfFrame = false;
                 var firstFrame = true;
 
-                // -8 for UDP header, -20 for IP header, -16 normal RTP header len. ** LESS RTP EXTENSIONS !!!
-                var packetMTU = 1400; // 65535; 
+                // This used to be a fixed 1400 with no way to change it, so a deployment that lowered
+                // the MTU had it honoured on every other codec and silently not on this one.
+                var packetMTU = PayloadMTU();
 
                 var dataPointer = 0;
 
