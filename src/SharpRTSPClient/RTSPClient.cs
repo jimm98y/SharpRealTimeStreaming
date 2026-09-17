@@ -49,6 +49,22 @@ namespace SharpRTSPClient
         public event EventHandler<StoppedEventArgs> Stopped;
 
         public bool ProcessRTCP { get; set; } = true; // answer RTCP
+
+        /// <summary>
+        /// Default value of <see cref="ReceiverReportInterval"/>.
+        /// </summary>
+        public static readonly TimeSpan DEFAULT_RECEIVER_REPORT_INTERVAL = TimeSpan.FromSeconds(5);
+
+        /// <summary>
+        /// How long to leave between the receiver reports this client sends back.
+        /// <see cref="DEFAULT_RECEIVER_REPORT_INTERVAL"/> by default.
+        /// </summary>
+        /// <remarks>
+        /// One used to go back for every sender report that arrived, so a server that reported often
+        /// - one per frame, in the case of this project's own server until recently - was answered
+        /// just as often. Set it to zero to go back to answering every one.
+        /// </remarks>
+        public TimeSpan ReceiverReportInterval { get; set; } = DEFAULT_RECEIVER_REPORT_INTERVAL;
         public event EventHandler<RawRtcpDataEventArgs> ReceivedRawVideoRTCP;
         public event EventHandler<RawRtcpDataEventArgs> ReceivedRawAudioRTCP;
 
@@ -956,7 +972,10 @@ namespace SharpRTSPClient
                     }
                 }
 
-                ReceivedRawAudioRTCP?.Invoke(this, new RawRtcpDataEventArgs(data.Data));
+                // rtcpData, not data.Data: under SAVP the first is the unprotected copy and the
+                // second is what arrived, and a subscriber was being handed ciphertext for audio
+                // while getting plaintext for everything else
+                ReceivedRawAudioRTCP?.Invoke(this, new RawRtcpDataEventArgs(rtcpData));
 
                 if (!ProcessRTCP)
                     return;
@@ -1056,8 +1075,13 @@ namespace SharpRTSPClient
 
                         _logger.LogDebug("RTCP time (UTC) for RTP timestamp {timestamp} is {time}", rtpTimestamp, time);
 
-                        // Send a Receiver Report
-                        reports.Add(BuildRtcpReceiverReport(ssrc));
+                        // Send a Receiver Report, if one is due. Answering every sender report meant
+                        // reporting at whatever rate the far end chose, which for a server that
+                        // reports per frame is a report per frame back.
+                        if (channel.ClaimReceiverReportSlot(ReceiverReportInterval))
+                        {
+                            reports.Add(BuildRtcpReceiverReport(ssrc));
+                        }
                     }
                 }
                 else if (rtcpPacketType == 203)

@@ -71,7 +71,10 @@ namespace SharpRTSPClient.Tests
         [TestMethod]
         public void CompoundPacket_EveryElementIsWalked()
         {
-            using var client = new RTSPClient();
+            // answering every report, so that what is counted here is how far the walk got rather
+            // than how often this client chooses to answer
+            using var client = new RTSPClient { ReceiverReportInterval = TimeSpan.Zero };
+
             // Receiver Report, then two Sender Reports - we should answer both SRs and not fall off the end
             byte[] data = Packet(ReceiverReport, ServerSsrc)
                 .Concat(SenderReportPacket(ServerSsrc))

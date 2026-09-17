@@ -125,12 +125,12 @@ namespace SharpRTSPServer
 
             for (int i = 0; i < samples.Count; i++)
             {
-                // append AU header (required for AAC)
-                var audioPacket = AppendAUHeader(samples[i]);
+                ReadOnlyMemory<byte> frame = samples[i];
+                ThrowIfTooLongForAUHeader(frame.Length);
 
                 // Put the whole Audio Packet into one RTP packet.
-                // 12 is header size when there are no CSRCs or extensions
-                var size = 12 + audioPacket.Length;
+                // 12 is header size when there are no CSRCs or extensions, 4 for the AU header section
+                var size = RTP_HEADER_LENGTH + AU_HEADER_LENGTH + frame.Length;
                 var owner = MemoryPool<byte>.Shared.Rent(size);
                 memoryOwners.Add(owner);
 
@@ -147,8 +147,11 @@ namespace SharpRTSPServer
                 // sequence number is set just before send
                 RTPPacketUtil.WriteTS(rtpPacket.Span, rtpTimestamp);
 
-                // Now append the audio packet
-                audioPacket.CopyTo(rtpPacket.Slice(12));
+                // The AU header and the frame go straight into the packet. Building them in an array
+                // of their own first meant an allocation and a second copy for every audio frame,
+                // which at forty odd frames a second per stream is steady garbage for nothing.
+                WriteAUHeader(rtpPacket.Span.Slice(RTP_HEADER_LENGTH), frame.Length);
+                frame.Span.CopyTo(rtpPacket.Span.Slice(RTP_HEADER_LENGTH + AU_HEADER_LENGTH));
 
                 rtpPackets.Add(rtpPacket);
             }
@@ -161,23 +164,36 @@ namespace SharpRTSPServer
         /// </summary>
         internal const int MAX_FRAME_LENGTH = (1 << 13) - 1;
 
-        private static Memory<byte> AppendAUHeader(ReadOnlyMemory<byte> frame)
+        /// <summary>
+        /// The RTP header, with no CSRCs or extensions.
+        /// </summary>
+        private const int RTP_HEADER_LENGTH = 12;
+
+        /// <summary>
+        /// The AU header section for a single access unit: two bytes saying the section is sixteen
+        /// bits long, then those sixteen bits - a thirteen bit size and a three bit index.
+        /// </summary>
+        private const int AU_HEADER_LENGTH = 4;
+
+        private static void ThrowIfTooLongForAUHeader(int frameLength)
         {
-            if (frame.Length > MAX_FRAME_LENGTH)
+            if (frameLength > MAX_FRAME_LENGTH)
             {
                 // silently truncating the AU-size here would produce a corrupt, undecodable stream
-                throw new ArgumentOutOfRangeException(nameof(frame), frame.Length,
+                throw new ArgumentOutOfRangeException(nameof(frameLength), frameLength,
                     $"An AAC frame must not be longer than {MAX_FRAME_LENGTH} bytes to fit the 13 bit AU-size field.");
             }
+        }
 
-            short frameLen = (short)(frame.Length << 3);
-            Memory<byte> header = new byte[4+frame.Length];
-            header.Span[0] = 0x00;
-            header.Span[1] = 0x10; // 16 bits size of the header
-            header.Span[2] = (byte)((frameLen >> 8) & 0xFF);
-            header.Span[3] = (byte)(frameLen & 0xFF);
-            frame.CopyTo(header.Slice(4));
-            return header;
+        private static void WriteAUHeader(Span<byte> destination, int frameLength)
+        {
+            destination[0] = 0x00;
+            destination[1] = 0x10; // 16 bits size of the header
+
+            // the size sits in the top thirteen bits, the AU index in the bottom three
+            int auSize = frameLength << 3;
+            destination[2] = (byte)((auSize >> 8) & 0xFF);
+            destination[3] = (byte)(auSize & 0xFF);
         }
 
         private static int GetAACLevel(int samplingFrequency, int channelConfiguration)

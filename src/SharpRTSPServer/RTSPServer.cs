@@ -2568,10 +2568,12 @@ namespace SharpRTSPServer
                 // receiver ties the two together by SSRC and ignores one that does not match.
                 SourceSsrc = preserveSourceHeaders ? track.SSRC : 0u,
             };
-            frame.Take(rtpPackets);
-
             try
             {
+                // inside the try: renting the buffers can fail partway, and the ones already taken
+                // still have to go back
+                frame.Take(rtpPackets);
+
                 // Go through each RTSP connection and output the RTP on the Session
                 foreach (RTSPConnection connection in connections)
                 {

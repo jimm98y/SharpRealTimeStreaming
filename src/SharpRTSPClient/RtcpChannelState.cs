@@ -1,3 +1,4 @@
+using System;
 using System.Threading;
 
 namespace SharpRTSPClient
@@ -38,12 +39,43 @@ namespace SharpRTSPClient
             Interlocked.CompareExchange(ref _remoteSsrc, ssrc, Unknown);
         }
 
+        private long _lastReceiverReportTicks;
+
+        /// <summary>
+        /// Whether a receiver report is due on this channel, and records that one is being sent.
+        /// </summary>
+        /// <remarks>
+        /// A report used to go back for every sender report that arrived, so the client answered at
+        /// whatever rate the far end chose to report at. RFC 3550 has RTCP at a few per cent of what
+        /// a session carries, from both ends.
+        /// </remarks>
+        /// <param name="interval">How long to leave between reports. Zero or less sends one each time.</param>
+        public bool ClaimReceiverReportSlot(TimeSpan interval)
+        {
+            if (interval <= TimeSpan.Zero)
+            {
+                return true;
+            }
+
+            long now = DateTime.UtcNow.Ticks;
+            long last = Interlocked.Read(ref _lastReceiverReportTicks);
+
+            if (last != 0 && now - last < interval.Ticks)
+            {
+                return false;
+            }
+
+            // whoever gets the slot sends the report, so two arriving at once do not both answer
+            return Interlocked.CompareExchange(ref _lastReceiverReportTicks, now, last) == last;
+        }
+
         /// <summary>
         /// Forgets the learned SSRC, so the channel can be used again after a reconnect.
         /// </summary>
         public void Reset()
         {
             Interlocked.Exchange(ref _remoteSsrc, Unknown);
+            Interlocked.Exchange(ref _lastReceiverReportTicks, 0);
         }
     }
 }
