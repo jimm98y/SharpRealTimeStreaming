@@ -90,7 +90,7 @@ namespace SharpRTSPServer
     }
 
     /// <summary>
-    /// The media waiting to go out on one connection, and the thread that writes it.
+    /// The media waiting to go out on one connection.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -98,6 +98,12 @@ namespace SharpRTSPServer
     /// produced it, so a client that stopped reading held up the media behind it for everyone on
     /// that stream. The producer now hands a frame over and carries on; each connection drains its
     /// own queue at whatever rate its client manages.
+    /// </para>
+    /// <para>
+    /// The writing is done by threads from a <see cref="RtpWriterPool"/> shared by every connection,
+    /// not by one of its own. A queue asks to be run when it has something, is picked up by whatever
+    /// thread is free, and gives that thread back when it runs out or has had a fair turn. Only one
+    /// thread holds it at a time, so its frames still go out in order.
     /// </para>
     /// <para>
     /// The queue is bounded, because a client that never reads would otherwise grow it until the
@@ -116,15 +122,29 @@ namespace SharpRTSPServer
         private readonly long _maxBytes;
         private readonly Action<QueuedFrame> _write;
         private readonly string _describedAs;
+        private readonly RtpWriterPool _pool;
 
-        private Thread _writer;
+        /// <summary>
+        /// Whether a pool thread is writing this queue or is about to. While it is set no other
+        /// thread takes the queue on, which is what keeps the frames of one connection in order.
+        /// </summary>
+        private bool _scheduled;
+
         private bool _stopping;
         private long _dropped;
         private long _reportedDrops;
         private long _queuedBytes;
 
-        public OutboundQueue(int maxFrames, long maxBytes, Action<QueuedFrame> write, string describedAs, ILogger logger)
+        /// <summary>
+        /// How many frames a connection may send before it goes to the back of the queue. Without a
+        /// limit, one connection with a lot waiting would hold a writer for as long as its producer
+        /// kept up, and the connections behind it would not be written to at all.
+        /// </summary>
+        private const int FRAMES_PER_TURN = 8;
+
+        public OutboundQueue(RtpWriterPool pool, int maxFrames, long maxBytes, Action<QueuedFrame> write, string describedAs, ILogger logger)
         {
+            _pool = pool;
             _maxFrames = maxFrames < 1 ? 1 : maxFrames;
             _maxBytes = maxBytes < 1 ? 1 : maxBytes;
             _write = write;
@@ -137,6 +157,8 @@ namespace SharpRTSPServer
         /// </summary>
         public void Enqueue(QueuedFrame frame)
         {
+            bool ask;
+
             lock (_gate)
             {
                 if (_stopping)
@@ -161,29 +183,21 @@ namespace SharpRTSPServer
 
                 _frames.Enqueue(frame);
                 _queuedBytes += frame.Bytes;
-                Monitor.Pulse(_gate);
 
-                EnsureWriterStarted();
+                // Only when nobody has it. A thread that is already writing this connection will see
+                // the frame when it comes round again, and asking twice would put the connection in
+                // the queue of the pool twice and let two threads write it at once.
+                ask = !_scheduled;
+                _scheduled = true;
+            }
+
+            // Outside the lock, so that the lock of the pool is never taken while holding this one.
+            if (ask)
+            {
+                _pool.Schedule(this);
             }
 
             ReportDrops();
-        }
-
-        private void EnsureWriterStarted()
-        {
-            if (_writer != null)
-            {
-                return;
-            }
-
-            // A thread of its own rather than a pooled one: it spends its life blocked in a write,
-            // which is exactly what the pool should not be used for.
-            _writer = new Thread(Drain)
-            {
-                IsBackground = true,
-                Name = "RTSP send " + _describedAs
-            };
-            _writer.Start();
         }
 
         private void ReportDrops()
@@ -212,21 +226,27 @@ namespace SharpRTSPServer
             }
         }
 
-        private void Drain()
+        /// <summary>
+        /// Writes up to one turn of what is waiting, then either gives the queue up or asks for
+        /// another turn behind everyone else.
+        /// </summary>
+        /// <remarks>
+        /// Called by one pool thread at a time. Giving the queue up and finding it empty happen
+        /// under the same lock, so a frame arriving at that moment either finds the queue still
+        /// taken - and is written by this turn or the next - or finds it free and asks for a thread
+        /// itself. Neither leaves a frame in a queue that nobody will come back to.
+        /// </remarks>
+        internal void WriteSome()
         {
-            while (true)
+            for (int written = 0; written < FRAMES_PER_TURN; written++)
             {
                 QueuedFrame frame;
 
                 lock (_gate)
                 {
-                    while (_frames.Count == 0 && !_stopping)
+                    if (_stopping || _frames.Count == 0)
                     {
-                        Monitor.Wait(_gate);
-                    }
-
-                    if (_stopping && _frames.Count == 0)
-                    {
+                        _scheduled = false;
                         return;
                     }
 
@@ -247,12 +267,14 @@ namespace SharpRTSPServer
                     frame.Release();
                 }
             }
+
+            // Still holding its turn, so nothing else has taken the queue on - back to the end of
+            // the line rather than carrying on and starving whoever is behind it.
+            _pool.Schedule(this);
         }
 
         public void Dispose()
         {
-            Thread writer;
-
             lock (_gate)
             {
                 if (_stopping)
@@ -261,7 +283,6 @@ namespace SharpRTSPServer
                 }
 
                 _stopping = true;
-                writer = _writer;
 
                 // whatever is still waiting will never be sent, so its buffers go back now
                 while (_frames.Count > 0)
@@ -270,14 +291,12 @@ namespace SharpRTSPServer
                 }
 
                 _queuedBytes = 0;
-
-                Monitor.PulseAll(_gate);
             }
 
-            // The writer may be inside a write to a client that has stopped reading, and that only
-            // ends when the socket is closed - which the caller is about to do. So it is not waited
-            // on here; it is a background thread and it will notice.
-            _ = writer;
+            // A pool thread may be inside a write to a client that has stopped reading, and that
+            // only ends when the socket is closed - which the caller is on its way to doing. It is
+            // not waited on here; it will find the queue stopped and give it up. The flag is left
+            // for that thread to clear, so nothing else takes the queue on in the meantime.
         }
     }
 }

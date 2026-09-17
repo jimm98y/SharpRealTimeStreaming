@@ -157,6 +157,12 @@ namespace SharpRTSPServer
         public string SessionName { get; set; } = "SharpRTSP";
 
         private readonly List<RTSPConnection> _connectionList = new List<RTSPConnection>(); // list of RTSP Listeners
+
+        /// <summary>
+        /// The threads that write media to clients, shared by all of them. Made when the server
+        /// starts listening, so that the settings governing it can be changed until then.
+        /// </summary>
+        private RtpWriterPool _writers;
         private readonly IRtspListenSocket _serverListener;
         private readonly TcpListener _tcpListener;
         private readonly RemoteCertificateValidationCallback _userCertificateValidationCallback;
@@ -347,6 +353,29 @@ namespace SharpRTSPServer
         /// remotely the same amount of memory.
         /// </remarks>
         public long MaxQueuedBytesPerConnection { get; set; } = DEFAULT_MAX_QUEUED_BYTES;
+
+        /// <summary>
+        /// The most threads the server will use to write media, across all of its clients.
+        /// </summary>
+        /// <remarks>
+        /// Not a thread per client: a write to a client that is reading takes microseconds, so a few
+        /// threads carry a great many of them. The number matters only for clients that have stopped
+        /// reading, since a write to one of those holds its thread until the socket is closed - so
+        /// this is really how many stalled clients the server tolerates before the ones behind them
+        /// start to wait. Set it before <see cref="StartListen"/>; it is read once.
+        /// </remarks>
+        public int MaxWriterThreads { get; set; } = RtpWriterPool.DEFAULT_MAX_THREADS;
+
+        /// <summary>
+        /// How many threads the server is currently using to write media, across all of its clients.
+        /// </summary>
+        /// <remarks>
+        /// Worth watching. It follows the number of clients that are being written to at this
+        /// instant, so in normal service it settles at a handful whatever the audience; if it is
+        /// near <see cref="MaxWriterThreads"/> then that many clients are sitting in writes that
+        /// have not come back, which means they have stopped reading.
+        /// </remarks>
+        public int WriterThreadCount => _writers?.ThreadCount ?? 0;
 
         /// <summary>
         /// How often a sender report goes out on a playing stream.
@@ -643,6 +672,7 @@ namespace SharpRTSPServer
 
             _serverListener.Start();
             _stopping = new CancellationTokenSource();
+            _writers = _writers ?? new RtpWriterPool(_logger, MaxWriterThreads);
 
             // Unwrap, so the task handed back is the accept loop itself rather than the one that
             // starts it - the outer task completes at the first await, and StopListen waiting on it
@@ -887,6 +917,7 @@ namespace SharpRTSPServer
             // has to read it - making one would need a lock, and the producer is the one thread that
             // must not wait for anything here.
             candidate.Outbound = new OutboundQueue(
+                _writers,
                 MaxQueuedFramesPerConnection,
                 MaxQueuedBytesPerConnection,
                 frame => WriteQueuedFrame(candidate, frame),
@@ -2114,7 +2145,14 @@ namespace SharpRTSPServer
 
                 if (stream.Context != null)
                 {
-                    byte[] rtp = new byte[stream.Context.CalculateRequiredSrtpPayloadLength(rtpPacket.Length)];
+                    // Pooled, like the stamping above. This is per packet and per client, so on an
+                    // encrypted stream with an audience it was the largest single source of garbage
+                    // on the send path - and collecting it lands on these same writer threads.
+                    int required = stream.Context.CalculateRequiredSrtpPayloadLength(rtpPacket.Length);
+                    byte[] rtp = ArrayPool<byte>.Shared.Rent(required);
+                    rented = rented ?? new List<byte[]>(rtpPackets.Count);
+                    rented.Add(rtp);
+
                     rtpPacket.CopyTo(rtp);
                     int ret = stream.Context.ProtectRtp(rtp, rtpPacket.Length, out var len);
                     if (ret != 0) throw new Exception("Protect failed!");
@@ -2597,6 +2635,9 @@ namespace SharpRTSPServer
                 }
 
                 _pendingHandshakes.Dispose();
+
+                // After the clients, since it is what writes to them
+                _writers?.Dispose();
             }
         }
 
