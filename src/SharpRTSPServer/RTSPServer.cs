@@ -2556,45 +2556,54 @@ namespace SharpRTSPServer
 
             List<RTSPConnection> failed = null;
 
-            // Go through each RTSP connection and output the RTP on the Session
-            foreach (RTSPConnection connection in connections)
+            // Copied once, not once per client. Everything about the frame is the same for all of
+            // them, and the copy is the one cost here that grows with the size of the audience.
+            var frame = new QueuedFrame
             {
-                // Whether this connection is playing is decided under its send lock rather than out
-                // here. PLAY answers the client and marks the session as playing under that same
-                // lock, so a packet produced the instant the response went out waits for it and then
-                // goes, instead of being read as not playing yet and dropped.
-                // No lock here, deliberately. The lock that orders writes to a connection is held
-                // by its writer for as long as a write takes, and a write to a client that has
-                // stopped reading takes until TCP gives up - so waiting for it here would put the
-                // producer back exactly where this queue is meant to take it out of.
-                //
-                // Note: 'continue', not 'return' - one connection that is paused or not fully set up
-                // must not stop the data going to every other connection on this stream.
-                if (!connection.Play)
-                    continue;
+                StreamType = streamType,
+                RtpTimestamp = rtpTimestamp,
+                PreserveSourceHeaders = preserveSourceHeaders,
 
-                RTPStream stream = connection.Streams[streamType];
-                OutboundQueue outbound = connection.Outbound;
+                // The RTP keeps the source's SSRC, so the sender reports have to name it too - a
+                // receiver ties the two together by SSRC and ignores one that does not match.
+                SourceSsrc = preserveSourceHeaders ? track.SSRC : 0u,
+            };
+            frame.Take(rtpPackets);
 
-                if (stream.RtpChannel == null || outbound == null)
-                    continue;
-
-                // Handed to the connection rather than written here. Writing took as long as the
-                // client took to read, and every client on the stream waited its turn on this one
-                // thread, so one that stopped reading held up the media for all of them.
-                var frame = new QueuedFrame
+            try
+            {
+                // Go through each RTSP connection and output the RTP on the Session
+                foreach (RTSPConnection connection in connections)
                 {
-                    StreamType = streamType,
-                    RtpTimestamp = rtpTimestamp,
-                    PreserveSourceHeaders = preserveSourceHeaders,
+                    // No lock here, deliberately. The lock that orders writes to a connection is held
+                    // by its writer for as long as a write takes, and a write to a client that has
+                    // stopped reading takes until TCP gives up - so waiting for it here would put the
+                    // producer back exactly where this queue is meant to take it out of. Whether the
+                    // connection is playing is set by PLAY before it writes its reply, so a frame
+                    // produced the instant that reply arrived is queued behind it rather than dropped.
+                    //
+                    // Note: 'continue', not 'return' - one connection that is paused or not fully set
+                    // up must not stop the data going to every other connection on this stream.
+                    if (!connection.Play)
+                        continue;
 
-                    // The RTP keeps the source's SSRC, so the sender reports have to name it too - a
-                    // receiver ties the two together by SSRC and ignores one that does not match.
-                    SourceSsrc = preserveSourceHeaders ? track.SSRC : 0u,
-                };
-                frame.Take(rtpPackets);
+                    RTPStream stream = connection.Streams[streamType];
+                    OutboundQueue outbound = connection.Outbound;
 
-                outbound.Enqueue(frame);
+                    if (stream.RtpChannel == null || outbound == null)
+                        continue;
+
+                    // Handed to the connection rather than written here. Writing took as long as the
+                    // client took to read, and every client on the stream waited its turn on this one
+                    // thread, so one that stopped reading held up the media for all of them.
+                    frame.AddRef();
+                    outbound.Enqueue(frame);
+                }
+            }
+            finally
+            {
+                // the producer's own share, now that every connection has been offered the frame
+                frame.Release();
             }
 
             // Dropping a session needs the list lock, and taking that while holding a send lock is

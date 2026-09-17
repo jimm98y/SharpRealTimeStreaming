@@ -41,6 +41,43 @@ namespace SharpRTSPServer
         public abstract (List<Memory<byte>>, List<IMemoryOwner<byte>>) CreateRtpPackets(List<ReadOnlyMemory<byte>> samples, uint rtpTimestamp);
 
 
+        /// <summary>
+        /// The samples with anything empty taken out, or the list itself when there is nothing to take.
+        /// </summary>
+        private static List<ReadOnlyMemory<byte>> WithoutEmptySamples(List<ReadOnlyMemory<byte>> samples)
+        {
+            if (samples == null)
+            {
+                return new List<ReadOnlyMemory<byte>>();
+            }
+
+            bool anyEmpty = false;
+            foreach (ReadOnlyMemory<byte> sample in samples)
+            {
+                if (sample.Length == 0)
+                {
+                    anyEmpty = true;
+                    break;
+                }
+            }
+
+            if (!anyEmpty)
+            {
+                return samples;
+            }
+
+            var kept = new List<ReadOnlyMemory<byte>>(samples.Count);
+            foreach (ReadOnlyMemory<byte> sample in samples)
+            {
+                if (sample.Length > 0)
+                {
+                    kept.Add(sample);
+                }
+            }
+
+            return kept;
+        }
+
         public virtual void FeedInRawSamples(uint rtpTimestamp, List<ReadOnlyMemory<byte>> samples)
         {
             var sink = Sink;
@@ -57,6 +94,14 @@ namespace SharpRTSPServer
 
             if (ID != (int)TrackType.Video && ID != (int)TrackType.Audio)
                 throw new ArgumentOutOfRangeException("ID must be 0 for video or 1 for audio");
+
+            // A sample with nothing in it would go out as an RTP packet with no payload, for the
+            // receiver to make sense of. Some tracks dropped these and some did not; now none of them
+            // see one. It also puts the marker bit on the last sample that is actually sent, rather
+            // than on an empty one that ends the list.
+            samples = WithoutEmptySamples(samples);
+            if (samples.Count == 0)
+                return;
 
             (List<Memory<byte>> rtpPackets, List<IMemoryOwner<byte>> memoryOwners) = CreateRtpPackets(samples, rtpTimestamp);
 

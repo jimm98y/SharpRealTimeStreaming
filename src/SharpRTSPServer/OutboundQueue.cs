@@ -7,15 +7,26 @@ using System.Threading;
 namespace SharpRTSPServer
 {
     /// <summary>
-    /// One frame's worth of RTP waiting to go out on a connection.
+    /// One frame's worth of RTP, waiting to go out on however many connections want it.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// It owns copies of the packets. The buffers the producer hands to
     /// <see cref="IRtpSender.FeedInRawRTP"/> are released as soon as that call returns, so anything
     /// written later has to have its own.
+    /// </para>
+    /// <para>
+    /// One copy, shared by every connection the frame is queued on, counted so that the buffers go
+    /// back to the pool when the last of them has finished with it. A copy each meant a frame was
+    /// copied as many times as there were clients watching, which is the one cost that grows with
+    /// the audience.
+    /// </para>
     /// </remarks>
     internal sealed class QueuedFrame
     {
+        /// <summary>The producer's own, given up once the frame has been offered to every connection.</summary>
+        private int _references = 1;
+
         public int StreamType { get; set; }
 
         public uint RtpTimestamp { get; set; }
@@ -48,8 +59,25 @@ namespace SharpRTSPServer
             }
         }
 
+        /// <summary>
+        /// Claims a share of this frame. Balanced by a <see cref="Release"/> once it has been written
+        /// or dropped.
+        /// </summary>
+        public void AddRef()
+        {
+            Interlocked.Increment(ref _references);
+        }
+
+        /// <summary>
+        /// Gives up a share of this frame, handing the buffers back once nobody holds one.
+        /// </summary>
         public void Release()
         {
+            if (Interlocked.Decrement(ref _references) > 0)
+            {
+                return;
+            }
+
             foreach (byte[] buffer in Packets)
             {
                 ArrayPool<byte>.Shared.Return(buffer);
@@ -124,6 +152,8 @@ namespace SharpRTSPServer
                 while (_frames.Count > 0 && (_frames.Count >= _maxFrames || _queuedBytes + frame.Bytes > _maxBytes))
                 {
                     QueuedFrame oldest = _frames.Dequeue();
+
+                    // the size first: the frame reports nothing once the last share of it is gone
                     _queuedBytes -= oldest.Bytes;
                     oldest.Release();
                     _dropped++;
