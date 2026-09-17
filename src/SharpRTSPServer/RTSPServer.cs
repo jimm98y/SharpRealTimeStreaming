@@ -81,6 +81,17 @@ namespace SharpRTSPServer
         private const int MAX_PENDING_HANDSHAKES = 64;
 
         /// <summary>
+        /// How long an RTCP packet waits for its turn on a connection before being given up on.
+        /// </summary>
+        private static readonly TimeSpan RTCP_SEND_LOCK_TIMEOUT = TimeSpan.FromSeconds(2);
+
+        /// <summary>
+        /// Default value of <see cref="MaxQueuedFramesPerConnection"/>. At twenty five frames a
+        /// second this is a couple of seconds of video.
+        /// </summary>
+        public const int DEFAULT_MAX_QUEUED_FRAMES = 64;
+
+        /// <summary>
         /// How long the accept loop waits after a failure before trying again.
         /// </summary>
         private static readonly TimeSpan ACCEPT_RETRY_DELAY = TimeSpan.FromMilliseconds(50);
@@ -275,6 +286,19 @@ namespace SharpRTSPServer
         /// the library reads inside the accept.
         /// </remarks>
         public TimeSpan HandshakeTimeout { get; set; } = DEFAULT_HANDSHAKE_TIMEOUT;
+
+        /// <summary>
+        /// How many frames may be waiting to go out on one connection before the oldest are dropped.
+        /// <see cref="DEFAULT_MAX_QUEUED_FRAMES"/> by default.
+        /// </summary>
+        /// <remarks>
+        /// A client that stops reading cannot be allowed to grow a queue without bound, and it is
+        /// live media, so a client that has fallen behind is better served by what is happening now
+        /// than by working through what it missed. Frames are dropped whole, so a client never
+        /// receives half of one. Raise it for a client that is expected to stall briefly and catch
+        /// up; lower it to keep the delay to a struggling client shorter.
+        /// </remarks>
+        public int MaxQueuedFramesPerConnection { get; set; } = DEFAULT_MAX_QUEUED_FRAMES;
 
         /// <summary>
         /// The streams this server offers. Guarded by the connection list lock.
@@ -789,6 +813,24 @@ namespace SharpRTSPServer
             RtspListener newListener = new RtspListener(rtspSocket, _loggerFactory.CreateLogger<RtspListener>());
             newListener.MessageReceived += RTSPMessageReceived;
 
+            // Built before the lock is taken. The accept loop is single threaded, so every moment
+            // spent holding this lock is a moment the next connection waits to be counted - and the
+            // limit is only as accurate as that counting is prompt.
+            var candidate = new RTSPConnection()
+            {
+                Listener = newListener,
+                Transport = rtspSocket
+            };
+
+            // Made with the connection rather than on its first frame, so that a producer only ever
+            // has to read it - making one would need a lock, and the producer is the one thread that
+            // must not wait for anything here.
+            candidate.Outbound = new OutboundQueue(
+                MaxQueuedFramesPerConnection,
+                frame => WriteQueuedFrame(candidate, frame),
+                TryGetRemoteEndPoint(rtspSocket),
+                _logger);
+
             // Add the RtspListener to the RTSPConnections List
             bool accepted;
             lock (_connectionList)
@@ -800,13 +842,13 @@ namespace SharpRTSPServer
                 accepted = MaxConnections <= 0 || _connectionList.Count < MaxConnections;
                 if (accepted)
                 {
-                    RTSPConnection newConnection = new RTSPConnection()
-                    {
-                        Listener = newListener,
-                        Transport = rtspSocket
-                    };
-                    _connectionList.Add(newConnection);
+                    _connectionList.Add(candidate);
                 }
+            }
+
+            if (!accepted)
+            {
+                candidate.Outbound.Dispose();
             }
 
             if (!accepted)
@@ -1793,6 +1835,65 @@ namespace SharpRTSPServer
         }
 
         /// <summary>
+        /// Writes one queued frame. Runs on that connection's own writer thread.
+        /// </summary>
+        /// <remarks>
+        /// The sequence numbers and the sender report are produced here rather than when the frame
+        /// was queued, so that they describe what is actually going out and in what order - a frame
+        /// dropped while waiting must not leave a gap in the numbering the client is given.
+        /// </remarks>
+        private void WriteQueuedFrame(RTSPConnection connection, QueuedFrame frame)
+        {
+            bool dropConnection = false;
+
+            lock (connection.SendLock)
+            {
+                if (!connection.Play)
+                {
+                    return;
+                }
+
+                RTPStream stream = connection.Streams[frame.StreamType];
+                if (stream.RtpChannel == null)
+                {
+                    return;
+                }
+
+                if (frame.PreserveSourceHeaders)
+                {
+                    stream.SSRC = frame.SourceSsrc;
+                }
+
+                _logger.LogDebug("Sending RTP session {sessionId} {TransportLogName} RTP timestamp={rtpTimestamp}. Sequence={sequenceNumber}",
+                    connection.SessionId, TransportLogName(stream.RtpChannel), frame.RtpTimestamp, stream.SequenceNumber);
+
+                if (frame.SendSenderReportFirst && !SendRTCPSenderReport(frame.RtpTimestamp, connection, stream))
+                {
+                    dropConnection = true;
+                }
+                else
+                {
+                    var packets = new List<Memory<byte>>(frame.Packets.Count);
+                    for (int i = 0; i < frame.Packets.Count; i++)
+                    {
+                        packets.Add(frame.Packets[i].AsMemory(0, frame.Lengths[i]));
+                    }
+
+                    dropConnection = !TrySendRawRTP(connection, stream, packets, frame.PreserveSourceHeaders);
+                }
+            }
+
+            // outside the send lock: see RTSPConnection.SendLock for why that order matters
+            if (dropConnection)
+            {
+                lock (_connectionList)
+                {
+                    RemoveSession(connection);
+                }
+            }
+        }
+
+        /// <summary>
         /// Writes RTP to one connection, reporting whether it got there rather than acting on it.
         /// </summary>
         /// <returns>False if the connection could not be written to and should be dropped.</returns>
@@ -1916,8 +2017,19 @@ namespace SharpRTSPServer
             if (!CanSend(stream, "RTCP"))
                 return false;
 
-            // The same lock the RTP takes, so a report keeps its place among the packets it reports on
-            lock (connection.SendLock)
+            // The same lock the RTP takes, so a report keeps its place among the packets it reports
+            // on. Only for as long as it is worth waiting, though: a writer stuck sending to a client
+            // that has stopped reading holds this until TCP gives up on it, which is a minute or so,
+            // and a courtesy report is not worth delaying a teardown by that. Where the caller
+            // already holds the lock - the normal path, reporting on a frame it is about to send -
+            // this is taken again straight away.
+            if (!Monitor.TryEnter(connection.SendLock, RTCP_SEND_LOCK_TIMEOUT))
+            {
+                _logger.LogDebug("Skipping RTCP for session {sessionId}, it is busy writing", connection.SessionId);
+                return false;
+            }
+
+            try
             {
             try
             {
@@ -1943,6 +2055,10 @@ namespace SharpRTSPServer
             }
             return true;
             }
+            finally
+            {
+                Monitor.Exit(connection.SendLock);
+            }
         }
 
         /// <summary>
@@ -1956,24 +2072,98 @@ namespace SharpRTSPServer
         /// </remarks>
         private void RemoveSession(RTSPConnection connection)
         {
+            List<IRtpTransport> interleaved = null;
+            RtspListener listener;
+
             lock (_connectionList)
-            lock (connection.SendLock) // so nothing is part way through writing to what we are disposing
             {
+                // Deliberately not under the connection's send lock. The writer holds that while it
+                // is in a write, and a write to a client that has stopped reading does not come back
+                // until the socket is closed - which is what this method is on its way to doing. So
+                // waiting for the lock here would wait for the very thing this is here to end.
+                if (!_connectionList.Contains(connection))
+                {
+                    // already gone, and a second disposal of its transports is not wanted
+                    return;
+                }
+
                 connection.Play = false; // stop sending data
+
+                // stops the writer taking any more work, and hands back what it was still holding
+                connection.Outbound?.Dispose();
+                connection.Outbound = null;
 
                 foreach (var stream in connection.Streams)
                 {
-                    ReleaseTransport(stream.RtpChannel);
+                    if (stream.RtpChannel is UDPSocket || stream.RtpChannel is MulticastUDPSocket)
+                    {
+                        // A UDP socket closes at once, and there are only so many ports, so these are
+                        // given back here rather than whenever a background thread gets to them.
+                        ReleaseTransport(stream.RtpChannel);
+                    }
+                    else if (stream.RtpChannel != null)
+                    {
+                        (interleaved = interleaved ?? new List<IRtpTransport>()).Add(stream.RtpChannel);
+                    }
+
                     stream.RtpChannel = null;
                 }
 
-                connection.Listener.Dispose();
+                listener = connection.Listener;
+
                 _connectionList.Remove(connection);
                 foreach (var streamSource in StreamSources)
                 {
                     streamSource.ConnectionList.Remove(connection);
                 }
             }
+
+            CloseConnection(connection, interleaved, listener);
+        }
+
+        /// <summary>
+        /// Shuts the socket and everything on it down, away from the connection list lock.
+        /// </summary>
+        /// <remarks>
+        /// Closing an interleaved transport, or the listener itself, can wait on a write already in
+        /// progress - and a write to a client that has stopped reading does not come back until TCP
+        /// gives up on it, which is a minute or so. Doing that while holding the connection list
+        /// would stall every other connection, every request and every other stream for that minute,
+        /// which is the stall the outbound queue exists to prevent in the first place.
+        /// </remarks>
+        private void CloseConnection(RTSPConnection connection, List<IRtpTransport> interleaved, RtspListener listener)
+        {
+            Action close = () =>
+            {
+                // first, because it is what fails a write that is stuck and so unblocks the rest
+                TryCloseTransport(connection.Transport);
+
+                if (interleaved != null)
+                {
+                    foreach (IRtpTransport transport in interleaved)
+                    {
+                        ReleaseTransport(transport);
+                    }
+                }
+
+                try
+                {
+                    listener?.Dispose();
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Error disposing an RTSP listener");
+                }
+            };
+
+            if (interleaved == null)
+            {
+                // nothing here can block, so there is no reason to hand it to another thread
+                close();
+                return;
+            }
+
+            Task.Run(close);
         }
 
         /// <summary>
@@ -2278,41 +2468,43 @@ namespace SharpRTSPServer
                 // here. PLAY answers the client and marks the session as playing under that same
                 // lock, so a packet produced the instant the response went out waits for it and then
                 // goes, instead of being read as not playing yet and dropped.
-                lock (connection.SendLock)
+                // No lock here, deliberately. The lock that orders writes to a connection is held
+                // by its writer for as long as a write takes, and a write to a client that has
+                // stopped reading takes until TCP gives up - so waiting for it here would put the
+                // producer back exactly where this queue is meant to take it out of.
+                //
+                // Note: 'continue', not 'return' - one connection that is paused or not fully set up
+                // must not stop the data going to every other connection on this stream.
+                if (!connection.Play)
+                    continue;
+
+                RTPStream stream = connection.Streams[streamType];
+                OutboundQueue outbound = connection.Outbound;
+
+                if (stream.RtpChannel == null || outbound == null)
+                    continue;
+
+                // Handed to the connection rather than written here. Writing took as long as the
+                // client took to read, and every client on the stream waited its turn on this one
+                // thread, so one that stopped reading held up the media for all of them.
+                var frame = new QueuedFrame
                 {
-                    // Note: 'continue', not 'return' - one connection that is paused or not fully set
-                    // up must not stop the data going to every other connection on this stream.
-                    if (!connection.Play)
-                        continue;
+                    StreamType = streamType,
+                    RtpTimestamp = rtpTimestamp,
+                    PreserveSourceHeaders = preserveSourceHeaders,
 
-                    var stream = connection.Streams[streamType];
+                    // The RTP keeps the source's SSRC, so the sender reports have to name it too - a
+                    // receiver ties the two together by SSRC and ignores one that does not match.
+                    SourceSsrc = preserveSourceHeaders ? track.SSRC : 0u,
+                    SendSenderReportFirst = stream.MustSendRtcpPacket,
+                };
+                frame.Take(rtpPackets);
 
-                    if (stream.RtpChannel == null)
-                        continue;
-
-                    // The RTP keeps the source's SSRC, so the sender reports have to name it too -
-                    // a receiver ties the two together by SSRC and ignores a report that does not match.
-                    if (preserveSourceHeaders)
-                        stream.SSRC = track.SSRC;
-
-                    _logger.LogDebug("Sending RTP session {sessionId} {TransportLogName} RTP timestamp={rtpTimestamp}. Sequence={sequenceNumber}",
-                        connection.SessionId, TransportLogName(stream.RtpChannel), rtpTimestamp, stream.SequenceNumber);
-
-                    if (stream.MustSendRtcpPacket && !SendRTCPSenderReport(rtpTimestamp, connection, stream))
-                    {
-                        (failed = failed ?? new List<RTSPConnection>()).Add(connection);
-                        continue;
-                    }
-
-                    if (!TrySendRawRTP(connection, stream, rtpPackets, preserveSourceHeaders))
-                    {
-                        (failed = failed ?? new List<RTSPConnection>()).Add(connection);
-                    }
-                }
+                outbound.Enqueue(frame);
             }
 
             // Dropping a session needs the list lock, and taking that while holding a send lock is
-            // the one order that deadlocks, so it happens once the writing is done.
+            // the one order that deadlocks, so it happens once the enqueueing is done.
             if (failed != null)
             {
                 lock (_connectionList)

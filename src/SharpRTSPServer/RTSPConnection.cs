@@ -30,6 +30,12 @@ namespace SharpRTSPServer
         public object SendLock { get; } = new object();
 
         /// <summary>
+        /// The media waiting to go out on this connection, and the thread that writes it. Created on
+        /// the first frame and let go when the session is removed.
+        /// </summary>
+        internal OutboundQueue Outbound { get; set; }
+
+        /// <summary>
         /// The transport the listener sits on. Kept so the server can notice that a client has gone
         /// away without tearing its session down, and release its RTP ports straight away.
         /// </summary>
@@ -56,10 +62,22 @@ namespace SharpRTSPServer
         // Time since last RTSP message received - used to spot dead UDP clients
         public DateTime TimeSinceLastRtspKeepAlive { get; private set; } = DateTime.UtcNow;
 
+        private volatile bool _play;
+
         /// <summary>
         /// Set to true when Session is in Play mode.
         /// </summary>
-        public bool Play { get; set; }
+        /// <remarks>
+        /// Volatile because the thread producing media reads it without taking any lock - taking one
+        /// is what it must not do, since the lock it would want is held across writes to this client.
+        /// PLAY sets it before it writes its reply, so a producer that sees it set has its media
+        /// queued behind that reply rather than ahead of it.
+        /// </remarks>
+        public bool Play
+        {
+            get { return _play; }
+            set { _play = value; }
+        }
 
         /// <summary>
         /// SSRC of whichever track was set up last on this connection.
