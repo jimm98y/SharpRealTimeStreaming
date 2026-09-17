@@ -126,6 +126,16 @@ namespace SharpRTSPServer
                         return;
                     }
 
+                    // Nothing being written and nothing waiting to be, so there is nothing that
+                    // could be stuck. It stands down rather than waking twenty times a second for
+                    // the life of a server that may have no clients at all; the next connection with
+                    // something to send starts it again.
+                    if (_runnable.Count == 0 && _busy == 0)
+                    {
+                        _watching = false;
+                        return;
+                    }
+
                     if (WantsAnotherThread())
                     {
                         StartThread();
