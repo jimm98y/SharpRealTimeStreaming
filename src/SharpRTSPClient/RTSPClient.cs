@@ -1607,6 +1607,10 @@ namespace SharpRTSPClient
                             }
 
                             VideoContext = PrepareSrtpContext(media);
+                            if (!HasTheKeyItNeeds(media, VideoContext, "video"))
+                            {
+                                return;
+                            }
 
                             NewVideoStream?.Invoke(this, new NewStreamEventArgs(media.PayloadType, payloadName, streamConfigurationData));
                         }
@@ -1719,6 +1723,11 @@ namespace SharpRTSPClient
                             }
 
                             AudioContext = PrepareSrtpContext(media);
+                            if (!HasTheKeyItNeeds(media, AudioContext, "audio"))
+                            {
+                                return;
+                            }
+
 
                             NewAudioStream?.Invoke(this, new NewStreamEventArgs(media.PayloadType, _audioCodec, streamConfigurationData));
                         }
@@ -1749,9 +1758,18 @@ namespace SharpRTSPClient
             _rtspClient?.SendMessage(firstSetup);
         }
 
+        /// <summary>
+        /// Whether a media section says its RTP is encrypted.
+        /// </summary>
+        internal static bool RequiresSrtp(Media media)
+        {
+            return media?.RtpType != null
+                && (media.RtpType.EndsWith("/SAVP") || media.RtpType.EndsWith("/SAVPF"));
+        }
+
         public virtual SrtpSessionContext PrepareSrtpContext(Media media)
         {
-            if (media.RtpType != null && (media.RtpType.EndsWith("/SAVP") || media.RtpType.EndsWith("/SAVPF")))
+            if (RequiresSrtp(media))
             {
                 var crypto = media.Attributs.FirstOrDefault(x => x.Key == "crypto");
                 if (crypto != null)
@@ -1792,8 +1810,21 @@ namespace SharpRTSPClient
                                 }
                             }
 
-                            SrtpKeys keys = SrtpProtocol.CreateMasterKeys(cryptoSuite, MKI, masterKeySalt);
-                            return SrtpProtocol.CreateSrtpSessionContext(keys);
+                            try
+                            {
+                                SrtpKeys keys = SrtpProtocol.CreateMasterKeys(cryptoSuite, MKI, masterKeySalt);
+                                return SrtpProtocol.CreateSrtpSessionContext(keys);
+                            }
+                            catch (Exception ex)
+                            {
+                                // A key of the wrong length, or a suite we do not implement. Both used
+                                // to travel up to the catch-all and reach the caller as a bare protocol
+                                // error, with nothing pointing at the crypto attribute that caused it.
+                                _logger.LogError(ex,
+                                    "Cannot use the SDP crypto attribute: suite {cryptoSuite}, {keyLength} byte key",
+                                    cryptoSuite, masterKeySalt.Length);
+                                return null;
+                            }
                         }
                     }
                 }
@@ -1811,6 +1842,32 @@ namespace SharpRTSPClient
         /// Parses the "&lt;mki&gt;:&lt;length&gt;" part of an SDP crypto attribute.
         /// The value comes straight from the server, so every field is validated before it is used.
         /// </summary>
+        /// <summary>
+        /// Checks that a stream describing itself as encrypted came with a key we can use, and stops
+        /// the client if it did not.
+        /// </summary>
+        /// <remarks>
+        /// Without this the context stays null, and a null context means the receive path never
+        /// attempts to decrypt - so the client played a stream that was supposed to be encrypted as
+        /// though it were plain RTP, and said nothing. Anyone able to alter the SDP could arrange
+        /// that by deleting one line of it.
+        /// </remarks>
+        private bool HasTheKeyItNeeds(Media media, SrtpSessionContext context, string what)
+        {
+            if (!RequiresSrtp(media) || context != null)
+            {
+                return true;
+            }
+
+            _logger.LogError(
+                "The {what} stream is {rtpType} but the SDP gave no usable key for it, so it will not be played",
+                what, media.RtpType);
+
+            StopClient();
+            Stopped?.Invoke(this, new StoppedEventArgs(StoppedReason.EncryptionUnavailable));
+            return false;
+        }
+
         internal byte[] ParseMKI(string sdpMki)
         {
             string[] mkiParts = sdpMki.Split(':');
@@ -2051,6 +2108,12 @@ namespace SharpRTSPClient
         /// The RTSP dialog failed unexpectedly. The exception is written to the log.
         /// </summary>
         ProtocolError,
+
+        /// <summary>
+        /// The server described the media as encrypted but did not provide a key this client can
+        /// use, so it stopped rather than carry on and accept the media unencrypted.
+        /// </summary>
+        EncryptionUnavailable,
     }
 
     public class StoppedEventArgs : EventArgs
