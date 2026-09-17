@@ -28,13 +28,13 @@ namespace SharpRTSPServer
         /// </summary>
         public uint SourceSsrc { get; set; }
 
-        /// <summary>Send a sender report before this frame. Built at write time, from counts that are only right then.</summary>
-        public bool SendSenderReportFirst { get; set; }
-
         /// <summary>Rented buffers, each holding one RTP packet in its first <see cref="Lengths"/> bytes.</summary>
         public List<byte[]> Packets { get; } = new List<byte[]>();
 
         public List<int> Lengths { get; } = new List<int>();
+
+        /// <summary>How much of the queue's budget this frame takes up.</summary>
+        public int Bytes { get; private set; }
 
         public void Take(IReadOnlyList<Memory<byte>> packets)
         {
@@ -44,6 +44,7 @@ namespace SharpRTSPServer
                 packet.Span.CopyTo(buffer);
                 Packets.Add(buffer);
                 Lengths.Add(packet.Length);
+                Bytes += packet.Length;
             }
         }
 
@@ -56,6 +57,7 @@ namespace SharpRTSPServer
 
             Packets.Clear();
             Lengths.Clear();
+            Bytes = 0;
         }
     }
 
@@ -83,6 +85,7 @@ namespace SharpRTSPServer
         private readonly object _gate = new object();
         private readonly ILogger _logger;
         private readonly int _maxFrames;
+        private readonly long _maxBytes;
         private readonly Action<QueuedFrame> _write;
         private readonly string _describedAs;
 
@@ -90,19 +93,15 @@ namespace SharpRTSPServer
         private bool _stopping;
         private long _dropped;
         private long _reportedDrops;
+        private long _queuedBytes;
 
-        public OutboundQueue(int maxFrames, Action<QueuedFrame> write, string describedAs, ILogger logger)
+        public OutboundQueue(int maxFrames, long maxBytes, Action<QueuedFrame> write, string describedAs, ILogger logger)
         {
             _maxFrames = maxFrames < 1 ? 1 : maxFrames;
+            _maxBytes = maxBytes < 1 ? 1 : maxBytes;
             _write = write;
             _describedAs = describedAs;
             _logger = logger;
-        }
-
-        /// <summary>How many frames have been dropped because this connection could not keep up.</summary>
-        public long Dropped
-        {
-            get { lock (_gate) { return _dropped; } }
         }
 
         /// <summary>
@@ -118,14 +117,20 @@ namespace SharpRTSPServer
                     return;
                 }
 
-                while (_frames.Count >= _maxFrames)
+                // Bounded by both, because the two say different things: a frame count is a bound on
+                // how far behind a client may fall, and a byte count is a bound on what that costs.
+                // Sixty four frames of audio and sixty four of high bitrate video are not remotely
+                // the same amount of memory.
+                while (_frames.Count > 0 && (_frames.Count >= _maxFrames || _queuedBytes + frame.Bytes > _maxBytes))
                 {
                     QueuedFrame oldest = _frames.Dequeue();
+                    _queuedBytes -= oldest.Bytes;
                     oldest.Release();
                     _dropped++;
                 }
 
                 _frames.Enqueue(frame);
+                _queuedBytes += frame.Bytes;
                 Monitor.Pulse(_gate);
 
                 EnsureWriterStarted();
@@ -154,6 +159,8 @@ namespace SharpRTSPServer
         private void ReportDrops()
         {
             long dropped;
+            long reportedBefore;
+
             lock (_gate)
             {
                 if (_dropped == _reportedDrops)
@@ -162,12 +169,14 @@ namespace SharpRTSPServer
                 }
 
                 dropped = _dropped;
+                reportedBefore = _reportedDrops;
                 _reportedDrops = _dropped;
             }
 
-            // said at intervals rather than per frame, since a client that has stopped reading
-            // drops one for every frame produced from then on
-            if (dropped == 1 || dropped % 100 == 0)
+            // Said at intervals rather than per frame, since a client that has stopped reading drops
+            // one for every frame produced from then on. Crossing a hundred counts, rather than
+            // landing exactly on one - a batch that steps from 99 to 101 is still worth a line.
+            if (dropped == 1 || dropped / 100 > reportedBefore / 100)
             {
                 _logger.LogWarning("Dropped {dropped} frames for {connection}, it is not keeping up", dropped, _describedAs);
             }
@@ -192,6 +201,7 @@ namespace SharpRTSPServer
                     }
 
                     frame = _frames.Dequeue();
+                    _queuedBytes -= frame.Bytes;
                 }
 
                 try
@@ -228,6 +238,8 @@ namespace SharpRTSPServer
                 {
                     _frames.Dequeue().Release();
                 }
+
+                _queuedBytes = 0;
 
                 Monitor.PulseAll(_gate);
             }

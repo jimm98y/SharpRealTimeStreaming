@@ -42,9 +42,21 @@ namespace SharpRTSPServer
         }
 
         /// <summary>
-        /// When true will send out a RTCP packet to match Wall Clock Time to RTP Payload timestamps.
+        /// When true the next packet sent on this stream is preceded by a sender report, whatever the
+        /// interval says. Set when the stream starts playing, so a client is told the mapping between
+        /// wall clock and RTP timestamps straight away rather than at the end of the first interval.
         /// </summary>
         public bool MustSendRtcpPacket { get; set; } = false;
+
+        /// <summary>
+        /// When the last sender report went out on this stream.
+        /// </summary>
+        /// <remarks>
+        /// There used to be no such thing, because the flag above was set once and never cleared:
+        /// every single packet was preceded by a sender report. RFC 3550 puts RTCP at a few per cent
+        /// of what the session sends, not one for one with it.
+        /// </remarks>
+        public DateTime LastSenderReportUtc { get; set; } = DateTime.MinValue;
 
         /// <summary>
         /// True when the track this stream carries asked for SAVP, so everything sent on it has to be

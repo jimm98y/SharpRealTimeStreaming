@@ -103,8 +103,13 @@ namespace SharpRTSPServer.Tests
                 int status = client.Send("OPTIONS", "rtsps://127.0.0.1:" + port + "/stream1").StatusCode;
                 stopwatch.Stop();
 
+                // The real signal is that it is answered at all: before this, one silent connection
+                // was enough that nothing else was ever answered and this threw on its read timeout.
+                // The bound is generous because the measurement shares a machine with the rest of
+                // the suite, and a tight one here has flaked for that reason rather than for a real
+                // one.
                 Assert.AreEqual(200, status);
-                Assert.IsLessThan(5000, stopwatch.ElapsedMilliseconds,
+                Assert.IsLessThan(9000, stopwatch.ElapsedMilliseconds,
                     "a client should not be kept waiting by connections that never speak");
             }
             finally

@@ -52,7 +52,10 @@ namespace SharpRTSPServer.Tests
                     {
                         var accepted = new TcpClient("127.0.0.1", port);
                         sockets.Add(accepted);
-                        WaitForServerToAccept();
+
+                        // wait for it to be counted, not for a fixed time - the limit can only be
+                        // enforced against connections the server has got to yet
+                        WaitForConnectionCount(server, i + 1);
                         Assert.IsTrue(ConnectionIsAccepted(accepted), $"connection {i} should have been accepted");
                     }
 
@@ -102,6 +105,27 @@ namespace SharpRTSPServer.Tests
         /// The accept loop runs on its own thread, so give it a moment to take the connection.
         /// </summary>
         private static void WaitForServerToAccept() => System.Threading.Thread.Sleep(150);
+
+        /// <summary>
+        /// Waits until the server has actually taken the connections on, rather than for a fixed
+        /// time that a loaded machine can outrun.
+        /// </summary>
+        private static void WaitForConnectionCount(RTSPServer server, int expected)
+        {
+            var deadline = DateTime.UtcNow.AddSeconds(10);
+
+            while (DateTime.UtcNow < deadline)
+            {
+                if (server.ConnectionCount >= expected)
+                {
+                    return;
+                }
+
+                System.Threading.Thread.Sleep(10);
+            }
+
+            Assert.Fail($"the server did not take on {expected} connections");
+        }
 
         [TestMethod]
         public void DisposingTheServerClosesClientConnections()

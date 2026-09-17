@@ -92,6 +92,16 @@ namespace SharpRTSPServer
         public const int DEFAULT_MAX_QUEUED_FRAMES = 64;
 
         /// <summary>
+        /// Default value of <see cref="MaxQueuedBytesPerConnection"/>.
+        /// </summary>
+        public const long DEFAULT_MAX_QUEUED_BYTES = 4L * 1024 * 1024;
+
+        /// <summary>
+        /// Default value of <see cref="RtcpSenderReportInterval"/>.
+        /// </summary>
+        public static readonly TimeSpan DEFAULT_RTCP_INTERVAL = TimeSpan.FromSeconds(5);
+
+        /// <summary>
         /// How long the accept loop waits after a failure before trying again.
         /// </summary>
         private static readonly TimeSpan ACCEPT_RETRY_DELAY = TimeSpan.FromMilliseconds(50);
@@ -175,6 +185,20 @@ namespace SharpRTSPServer
         /// up all of the server's memory and UDP ports. Set to zero for no limit.
         /// </summary>
         public int MaxConnections { get; set; } = DEFAULT_MAX_CONNECTIONS;
+
+        /// <summary>
+        /// How many client connections the server is holding, counted against
+        /// <see cref="MaxConnections"/>.
+        /// </summary>
+        /// <remarks>
+        /// Includes connections that have been accepted but have not sent a request yet, which is
+        /// what the limit counts too - so this is the number the limit is actually applied to,
+        /// rather than the number that have got as far as asking for a stream.
+        /// </remarks>
+        public int ConnectionCount
+        {
+            get { lock (_connectionList) { return _connectionList.Count; } }
+        }
 
         /// <summary>
         /// First port of the range a UDP SETUP allocates its RTP/RTCP pair from.
@@ -299,6 +323,31 @@ namespace SharpRTSPServer
         /// up; lower it to keep the delay to a struggling client shorter.
         /// </remarks>
         public int MaxQueuedFramesPerConnection { get; set; } = DEFAULT_MAX_QUEUED_FRAMES;
+
+        /// <summary>
+        /// How many bytes of media may be waiting to go out on one connection before the oldest are
+        /// dropped. <see cref="DEFAULT_MAX_QUEUED_BYTES"/> by default.
+        /// </summary>
+        /// <remarks>
+        /// Alongside <see cref="MaxQueuedFramesPerConnection"/>, because the two bound different
+        /// things: a frame count bounds how far behind a client may fall, a byte count bounds what
+        /// that costs. Sixty four frames of audio and sixty four of high bitrate video are not
+        /// remotely the same amount of memory.
+        /// </remarks>
+        public long MaxQueuedBytesPerConnection { get; set; } = DEFAULT_MAX_QUEUED_BYTES;
+
+        /// <summary>
+        /// How often a sender report goes out on a playing stream.
+        /// <see cref="DEFAULT_RTCP_INTERVAL"/> by default.
+        /// </summary>
+        /// <remarks>
+        /// A sender report carries the mapping between wall clock and RTP timestamps, which is what
+        /// lets a receiver line up audio against video. One is sent as soon as a stream starts
+        /// playing, and then at this interval. It used to be one before every single packet, which is
+        /// not what RFC 3550 has in mind - RTCP is meant to be a few per cent of what the session
+        /// sends, not half of it.
+        /// </remarks>
+        public TimeSpan RtcpSenderReportInterval { get; set; } = DEFAULT_RTCP_INTERVAL;
 
         /// <summary>
         /// The streams this server offers. Guarded by the connection list lock.
@@ -827,6 +876,7 @@ namespace SharpRTSPServer
             // must not wait for anything here.
             candidate.Outbound = new OutboundQueue(
                 MaxQueuedFramesPerConnection,
+                MaxQueuedBytesPerConnection,
                 frame => WriteQueuedFrame(candidate, frame),
                 TryGetRemoteEndPoint(rtspSocket),
                 _logger);
@@ -1867,20 +1917,25 @@ namespace SharpRTSPServer
                 _logger.LogDebug("Sending RTP session {sessionId} {TransportLogName} RTP timestamp={rtpTimestamp}. Sequence={sequenceNumber}",
                     connection.SessionId, TransportLogName(stream.RtpChannel), frame.RtpTimestamp, stream.SequenceNumber);
 
-                if (frame.SendSenderReportFirst && !SendRTCPSenderReport(frame.RtpTimestamp, connection, stream))
+                // Decided here rather than when the frame was queued, so the report describes what is
+                // actually going out and when. A report that fails is not on its own a reason to drop
+                // the connection - the packet that follows it will say so more reliably.
+                if (IsSenderReportDue(stream))
                 {
-                    dropConnection = true;
-                }
-                else
-                {
-                    var packets = new List<Memory<byte>>(frame.Packets.Count);
-                    for (int i = 0; i < frame.Packets.Count; i++)
+                    if (SendRTCPSenderReport(frame.RtpTimestamp, connection, stream))
                     {
-                        packets.Add(frame.Packets[i].AsMemory(0, frame.Lengths[i]));
+                        stream.MustSendRtcpPacket = false;
+                        stream.LastSenderReportUtc = DateTime.UtcNow;
                     }
-
-                    dropConnection = !TrySendRawRTP(connection, stream, packets, frame.PreserveSourceHeaders);
                 }
+
+                var packets = new List<Memory<byte>>(frame.Packets.Count);
+                for (int i = 0; i < frame.Packets.Count; i++)
+                {
+                    packets.Add(frame.Packets[i].AsMemory(0, frame.Lengths[i]));
+                }
+
+                dropConnection = !TrySendRawRTP(connection, stream, packets, frame.PreserveSourceHeaders);
             }
 
             // outside the send lock: see RTSPConnection.SendLock for why that order matters
@@ -1891,6 +1946,29 @@ namespace SharpRTSPServer
                     RemoveSession(connection);
                 }
             }
+        }
+
+        /// <summary>
+        /// Whether this stream owes its client a sender report.
+        /// </summary>
+        /// <remarks>
+        /// One as soon as the stream starts playing, so the client gets the mapping between wall
+        /// clock and RTP timestamps straight away, and then one per interval.
+        /// </remarks>
+        private bool IsSenderReportDue(RTPStream stream)
+        {
+            if (stream.MustSendRtcpPacket)
+            {
+                return true;
+            }
+
+            TimeSpan interval = RtcpSenderReportInterval;
+            if (interval <= TimeSpan.Zero)
+            {
+                return false;
+            }
+
+            return DateTime.UtcNow - stream.LastSenderReportUtc >= interval;
         }
 
         /// <summary>
@@ -2420,12 +2498,29 @@ namespace SharpRTSPServer
 
         public bool CanAcceptNewSamples(string streamID)
         {
-            CheckTimeouts(streamID, out _, out int currentRtspPlayCount);
+            // Deliberately not CheckTimeouts. This is asked for every frame of every stream, and that
+            // sweeps every connection on the server looking for ones to drop - work with a timer of
+            // its own, and done again on every accept. All this needs to know is whether anyone is
+            // listening, so that a producer can skip packetizing into the void.
+            lock (_connectionList)
+            {
+                RTSPStreamSource streamSource = GetStreamSource(streamID);
 
-            if (currentRtspPlayCount == 0)
+                if (streamSource == null)
+                {
+                    return false;
+                }
+
+                foreach (RTSPConnection connection in streamSource.ConnectionList)
+                {
+                    if (connection.Play)
+                    {
+                        return true;
+                    }
+                }
+
                 return false;
-
-            return true;
+            }
         }
 
         public void FeedInRawRTP(string streamID, int streamType, uint rtpTimestamp, List<Memory<byte>> rtpPackets)
@@ -2496,7 +2591,6 @@ namespace SharpRTSPServer
                     // The RTP keeps the source's SSRC, so the sender reports have to name it too - a
                     // receiver ties the two together by SSRC and ignores one that does not match.
                     SourceSsrc = preserveSourceHeaders ? track.SSRC : 0u,
-                    SendSenderReportFirst = stream.MustSendRtcpPacket,
                 };
                 frame.Take(rtpPackets);
 
