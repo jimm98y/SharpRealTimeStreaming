@@ -1,4 +1,4 @@
-using Microsoft.Extensions.Configuration;
+﻿using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using SharpISOBMFF;
@@ -70,6 +70,48 @@ namespace SrtpServerSample
         private List<MediaFileReader> _mediaFileStreamReaders = new List<MediaFileReader>();
 
         private readonly object _syncRoot = new object();
+
+        /// <summary>
+        /// The timescale the container counts a track presentation times in, which is what
+        /// sample.PTS is expressed in - not the same thing as the track object timescale.
+        /// </summary>
+        private static uint GetMediaTimescale(Container container, uint trackID)
+        {
+            foreach (var moov in container.Children.OfType<MovieBox>())
+            {
+                foreach (var trak in moov.Children.OfType<TrackBox>())
+                {
+                    var tkhd = trak.Children.OfType<TrackHeaderBox>().FirstOrDefault();
+                    if (tkhd == null || tkhd.TrackID != trackID)
+                        continue;
+
+                    var mdhd = trak.Children.OfType<MediaBox>().Single()
+                        .Children.OfType<MediaHeaderBox>().Single();
+                    return mdhd.Timescale;
+                }
+            }
+
+            throw new InvalidOperationException($"Could not find media timescale for track {trackID}.");
+        }
+
+        /// <summary>
+        /// The clock an audio track's RTP timestamps are counted in, which for these codecs is the
+        /// sampling rate.
+        /// </summary>
+        private static int AudioRtpClockOf(ITrack audioTrack)
+        {
+            switch (audioTrack)
+            {
+                case SharpRTSPServer.AACTrack aac:
+                    return aac.SamplingRate;
+
+                case SharpRTSPServer.OpusTrack _:
+                    return 48000; // Opus is always carried at 48 kHz, whatever it was encoded at
+
+                default:
+                    return 90000;
+            }
+        }
 
         /// <summary>
         /// Basic sends the password in a reversible form, so it stays off unless the config asks for it.
@@ -200,6 +242,14 @@ namespace SrtpServerSample
                             }
 
                             mediaFileReader.VideoRtpBaseTime = Random.Shared.Next();
+
+                            // The file counts time in its own units and RTP counts it in the clock
+                            // the SDP declares, so the presentation times have to be converted from
+                            // one to the other. Handing the file's own numbers to RTP made the
+                            // stream claim to run at whatever rate the file happened to use.
+                            uint sourceVideoTimescale = GetMediaTimescale(fmp4, inputTrack.TrackID);
+                            int videoRtpClock = SharpRTSPServer.H264Track.DEFAULT_CLOCK;
+
                             mediaFileReader.VideoTimer = new Timer(inputTrack.DefaultSampleDuration * 1000d / inputTrack.Timescale);
                             mediaFileReader.VideoTimer.Elapsed += (s, e) =>
                             {
@@ -228,7 +278,8 @@ namespace SrtpServerSample
                                     }
 
                                     IEnumerable<byte[]> units = inputReader.ParseSample(inputTrack.TrackID, sample.Data);
-                                    rtspVideoTrack.FeedInRawSamples((uint)unchecked(mediaFileReader.VideoRtpBaseTime + sample.PTS), units.Select(u => (ReadOnlyMemory<byte>)u).ToList());
+                                    long videoPts = (long)sample.PTS * videoRtpClock / sourceVideoTimescale;
+                                    rtspVideoTrack.FeedInRawSamples((uint)unchecked(mediaFileReader.VideoRtpBaseTime + videoPts), units.Select(u => (ReadOnlyMemory<byte>)u).ToList());
                                 }
                             };
 
@@ -254,6 +305,13 @@ namespace SrtpServerSample
                             }
 
                             mediaFileReader.AudioRtpBaseTime = Random.Shared.Next();
+
+                            // An audio file usually counts time in samples, which is the clock the
+                            // SDP declares as well, so this is often one to one - but only usually,
+                            // and a file that does otherwise should still play.
+                            uint sourceAudioTimescale = GetMediaTimescale(fmp4, inputTrack.TrackID);
+                            int audioRtpClock = AudioRtpClockOf(rtspAudioTrack);
+
                             mediaFileReader.AudioTimer = new Timer(inputTrack.DefaultSampleDuration * 1000d / inputTrack.Timescale);
                             mediaFileReader.AudioTimer.Elapsed += (s, e) =>
                             {
@@ -282,7 +340,8 @@ namespace SrtpServerSample
                                     }
 
                                     IEnumerable<byte[]> units = inputReader.ParseSample(inputTrack.TrackID, sample.Data);
-                                    rtspAudioTrack.FeedInRawSamples((uint)unchecked(mediaFileReader.AudioRtpBaseTime + sample.PTS), units.Select(u => (ReadOnlyMemory<byte>)u).ToList());
+                                    long audioPts = (long)sample.PTS * audioRtpClock / sourceAudioTimescale;
+                                    rtspAudioTrack.FeedInRawSamples((uint)unchecked(mediaFileReader.AudioRtpBaseTime + audioPts), units.Select(u => (ReadOnlyMemory<byte>)u).ToList());
                                 }
                             };
 

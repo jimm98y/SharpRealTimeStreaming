@@ -1,4 +1,4 @@
-using Microsoft.Extensions.Configuration;
+﻿using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using SharpISOBMFF;
@@ -250,6 +250,10 @@ internal class RTSPServerWorker : BackgroundService
                         }
 
                         mediaFileReader.AudioRtpBaseTime = Random.Shared.Next();
+
+                        uint sourceAudioTimescale = GetMediaTimescale(fmp4, inputTrack.TrackID);
+                        int audioRtpClock = AudioRtpClockOf(rtspAudioTrack);
+
                         mediaFileReader.AudioTimer = new Timer(inputTrack.DefaultSampleDuration * 1000d / inputTrack.Timescale);
                         mediaFileReader.AudioTimer.Elapsed += (s, e) =>
                         {
@@ -278,7 +282,11 @@ internal class RTSPServerWorker : BackgroundService
                                 }
 
                                 IEnumerable<byte[]> units = inputReader.ParseSample(inputTrack.TrackID, sample.Data);
-                                rtspAudioTrack.FeedInRawSamples((uint)unchecked(mediaFileReader.AudioRtpBaseTime + sample.PTS), units.Select(u => (ReadOnlyMemory<byte>)u).ToList());
+                                // As the video above: the file's units are not the clock the SDP
+                                // declares. For audio the two usually agree, which is why this went
+                                // unnoticed, but a file that counts otherwise should still play.
+                                long audioPts = (long)sample.PTS * audioRtpClock / sourceAudioTimescale;
+                                rtspAudioTrack.FeedInRawSamples((uint)unchecked(mediaFileReader.AudioRtpBaseTime + audioPts), units.Select(u => (ReadOnlyMemory<byte>)u).ToList());
                             }
                         };
 
@@ -330,6 +338,25 @@ internal class RTSPServerWorker : BackgroundService
 
     // Returns the media (mdhd) timescale for the given track. This is the clock the sample PTS/DTS values are
     //  expressed in, which (for fragmented MP4) is not necessarily the same as ITrack.Timescale.
+    /// <summary>
+    /// The clock an audio track RTP timestamps are counted in, which for these codecs is the
+    /// sampling rate.
+    /// </summary>
+    private static int AudioRtpClockOf(ITrack audioTrack)
+    {
+        switch (audioTrack)
+        {
+            case SharpRTSPServer.AACTrack aac:
+                return aac.SamplingRate;
+
+            case SharpRTSPServer.OpusTrack _:
+                return 48000; // Opus is always carried at 48 kHz, whatever it was encoded at
+
+            default:
+                return 90000;
+        }
+    }
+
     private static uint GetMediaTimescale(Container container, uint trackID)
     {
         foreach (var moov in container.Children.OfType<MovieBox>())
