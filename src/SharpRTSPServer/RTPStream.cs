@@ -42,6 +42,19 @@ namespace SharpRTSPServer
         }
 
         /// <summary>
+        /// Forgets the keys, so that the next request for them derives fresh ones.
+        /// </summary>
+        /// <remarks>
+        /// Only safe where nobody holds the old ones: a receiver still decrypting under them would
+        /// be left with keys that no longer read anything, and nothing to say so.
+        /// </remarks>
+        internal void ResetSrtpContext()
+        {
+            Context = null;
+            _masterKeySalt = null;
+        }
+
+        /// <summary>
         /// When true the next packet sent on this stream is preceded by a sender report, whatever the
         /// interval says. Set when the stream starts playing, so a client is told the mapping between
         /// wall clock and RTP timestamps straight away rather than at the end of the first interval.

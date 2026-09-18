@@ -2735,6 +2735,14 @@ namespace SharpRTSPServer
                 foreach (var streamSource in StreamSources)
                 {
                     streamSource.ConnectionList.Remove(connection);
+
+                    // The last one out takes the key with them. Nobody is holding it, so replacing it
+                    // breaks nothing - and it is what gives the stream its SSRCs back, since what
+                    // must not repeat is an SSRC under the key it was used with.
+                    if (streamSource.SharedSrtpKey && streamSource.ConnectionList.Count == 0)
+                    {
+                        streamSource.ReleaseSharedSrtpKey();
+                    }
                 }
             }
 

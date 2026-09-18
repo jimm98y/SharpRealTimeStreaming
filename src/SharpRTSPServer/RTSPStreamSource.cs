@@ -75,21 +75,38 @@ namespace SharpRTSPServer
         internal RTPStream[] GroupKeys { get; } = { new RTPStream(), new RTPStream() };
 
         /// <summary>
-        /// Every SSRC this stream has sent under since its key was derived.
+        /// The next SSRC to hand a sender, and how many have been handed out under this key.
         /// </summary>
         /// <remarks>
-        /// Not the ones in use - the ones ever used. Under a shared key, what must never repeat is
-        /// the pair of SSRC and packet number: each sender numbers from the start of its own session,
-        /// so handing a finished session's SSRC to a new one would send different media under the
-        /// same keystream. They are therefore retired rather than returned. One entry costs four
-        /// bytes and a session, which is not a rate anything grows at.
+        /// <para>
+        /// Counted up rather than drawn at random and remembered. Under one key what must never
+        /// repeat is the pair of SSRC and packet number, and each sender numbers from the start of
+        /// its own session - so an SSRC cannot be given out twice while the key stands, including to
+        /// a session that begins after an earlier one has ended. Keeping every value ever used would
+        /// say that correctly and grow without limit on a server that does not restart; counting says
+        /// the same thing in four bytes, because everything before the counter has been used and
+        /// everything from it has not.
+        /// </para>
+        /// <para>
+        /// The count is what the key can cover. It resets when the key does, which is whenever the
+        /// stream is left with nobody on it - see <see cref="ReleaseSharedSrtpKey"/>.
+        /// </para>
         /// </remarks>
-        private readonly HashSet<uint> _ssrcsUsed = new HashSet<uint>();
+        private uint _nextSsrc;
+
+        private long _ssrcsIssued;
+
+        private bool _ssrcsSeeded;
 
         private readonly object _ssrcLock = new object();
 
         /// <summary>
-        /// An SSRC no sender on this stream has used before.
+        /// SSRCs that are spoken for and must not be handed to anyone: the tracks' own.
+        /// </summary>
+        private readonly HashSet<uint> _ssrcsSpokenFor = new HashSet<uint>();
+
+        /// <summary>
+        /// An SSRC no sender on this stream is using or has used under the key it holds now.
         /// </summary>
         /// <remarks>
         /// What makes one key safe for several senders. SRTP works its keystream out from the key,
@@ -100,14 +117,34 @@ namespace SharpRTSPServer
         {
             lock (_ssrcLock)
             {
+                if (!_ssrcsSeeded)
+                {
+                    // Started somewhere unguessable rather than at zero, since these go out on the
+                    // wire and there is no reason to say how long this stream has been up.
+                    _nextSsrc = RandomGenerator.NextUInt32();
+                    _ssrcsSeeded = true;
+                }
+
+                // Every value the counter can take, less the handful the tracks have. Reaching this
+                // needs four thousand million senders on one stream without it once being left
+                // empty, and the honest answer at that point is to stop rather than to repeat one.
+                if (_ssrcsIssued >= uint.MaxValue - _ssrcsSpokenFor.Count)
+                {
+                    throw new InvalidOperationException(
+                        "This stream has no SSRC left to give out under the key it is using. It is " +
+                        "re-keyed whenever no client is on it, so this means it has never been left " +
+                        "empty for four thousand million sessions.");
+                }
+
                 while (true)
                 {
-                    uint candidate = RandomGenerator.NextUInt32();
+                    uint candidate = _nextSsrc++;
 
-                    // Zero is not used, so that it can go on meaning "none" where a stream has not
-                    // been set up.
-                    if (candidate != 0 && _ssrcsUsed.Add(candidate))
+                    // Zero goes on meaning "none", and a track's own belongs to whatever sends under
+                    // it - the group, or a stream forwarding what it was given.
+                    if (candidate != 0 && !_ssrcsSpokenFor.Contains(candidate))
                     {
+                        _ssrcsIssued++;
                         return candidate;
                     }
                 }
@@ -115,13 +152,40 @@ namespace SharpRTSPServer
         }
 
         /// <summary>
-        /// Puts an SSRC beyond use on this stream, for one this stream did not choose.
+        /// Keeps an SSRC out of the hands of everything else on this stream.
         /// </summary>
         internal void ReserveSsrc(uint ssrc)
         {
             lock (_ssrcLock)
             {
-                _ssrcsUsed.Add(ssrc);
+                _ssrcsSpokenFor.Add(ssrc);
+            }
+        }
+
+        /// <summary>
+        /// Gives up the key this stream shares, and with it every SSRC handed out under it.
+        /// </summary>
+        /// <remarks>
+        /// Called when the last client on the stream has gone. Nobody holds the key at that moment,
+        /// so nothing is broken by replacing it - and once it is replaced, the SSRCs used under it
+        /// mean nothing, because the keystream is worked out from the key as well. That is what stops
+        /// a server that runs for years from slowly running out of them.
+        /// <para>
+        /// It is also the better thing to do with a key: it lasts as long as somebody is listening
+        /// and no longer, rather than for the life of the process.
+        /// </para>
+        /// </remarks>
+        internal void ReleaseSharedSrtpKey()
+        {
+            lock (_ssrcLock)
+            {
+                foreach (RTPStream key in GroupKeys)
+                {
+                    key.ResetSrtpContext();
+                }
+
+                _ssrcsSeeded = false;
+                _ssrcsIssued = 0;
             }
         }
 
