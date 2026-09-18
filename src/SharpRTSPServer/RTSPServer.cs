@@ -2751,10 +2751,19 @@ namespace SharpRTSPServer
                 return false;
             }
 
-            if (asked.IsNow || playback == null || !playback.CanSeek)
+            if (playback == null || !playback.CanSeek)
             {
-                if (!asked.IsNow)
+                // "npt=0-" is what almost every client sends on every PLAY, this one included, and
+                // it means the beginning of whatever the server has. On a live stream that is now.
+                // Reading it as a seek and refusing it turns away every client there is - which is
+                // exactly what it did.
+                bool asksForWhateverThereIs = asked.IsNow
+                    || (asked.Start.HasValue && asked.Start.Value == TimeSpan.Zero);
+
+                if (!asksForWhateverThereIs)
                 {
+                    // A point that is actually somewhere, on a stream that cannot go there. Saying so
+                    // is better than playing from now and reporting success.
                     Refuse(listener, playMessage, 456, "this stream is live, so there is no '{range}' to play from", requestedRange);
                     return false;
                 }

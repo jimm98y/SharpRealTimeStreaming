@@ -202,6 +202,75 @@ namespace SharpRTSPServer.Tests
         }
 
         [TestMethod]
+        [DataRow("Range: npt=0.000-")]
+        [DataRow("range: npt=0.000-")]
+        [DataRow("Range: npt=0-")]
+        [DataRow("Range: npt=now-")]
+        public void ALiveStreamPlaysTheRangeEveryClientActuallySends(string header)
+        {
+            // This is what our own client sends on every PLAY, and what VLC and ffmpeg send. It
+            // means the beginning of whatever the server has, which on a live stream is now - not a
+            // seek. Reading it as one and refusing turned away every client there is.
+            int port = TestPorts.FindFree();
+            using var server = new RTSPServer(port, "admin", "password");
+            server.AddStreamSource(new RTSPStreamSource("stream1", new H264Track(Sps, Pps), null));
+            server.StartListen();
+
+            string baseUri = $"rtsp://127.0.0.1:{port}/stream1";
+
+            using var client = new RtspTestClient(port, "admin", "password");
+            client.Send("OPTIONS", baseUri);
+            client.Send("DESCRIBE", baseUri, "Accept: application/sdp");
+            var setup = client.Send("SETUP", baseUri + "/trackID=0",
+                "Transport: RTP/AVP/TCP;unicast;interleaved=0-1");
+
+            var play = client.Send("PLAY", baseUri, "Session: " + setup.Session, header);
+
+            Assert.AreEqual(200, play.StatusCode, header + " should play");
+        }
+
+        [TestMethod]
+        public void ALiveStreamActuallySendsMediaAfterThatPlay()
+        {
+            // Answering 200 is not enough: the point of PLAY is what follows it.
+            int port = TestPorts.FindFree();
+            using var server = new RTSPServer(port, "admin", "password");
+            var video = new H264Track(Sps, Pps);
+            server.AddStreamSource(new RTSPStreamSource("stream1", video, null));
+            server.StartListen();
+
+            string baseUri = $"rtsp://127.0.0.1:{port}/stream1";
+
+            using var client = new RtspTestClient(port, "admin", "password");
+            client.Send("OPTIONS", baseUri);
+            client.Send("DESCRIBE", baseUri, "Accept: application/sdp");
+            var setup = client.Send("SETUP", baseUri + "/trackID=0",
+                "Transport: RTP/AVP/TCP;unicast;interleaved=0-1");
+
+            Assert.AreEqual(200, client.Send("PLAY", baseUri,
+                "Session: " + setup.Session, "range: npt=0.000-").StatusCode);
+
+            byte[] arrived = null;
+
+            for (int i = 0; i < 12 && arrived == null; i++)
+            {
+                video.FeedInRawSamples((uint)((i + 1) * 3000), new List<ReadOnlyMemory<byte>>
+                {
+                    new ReadOnlyMemory<byte>(new byte[] { 0x65, 0x11, 0x22, 0x33 }),
+                });
+
+                var frame = client.ReadInterleaved();
+
+                if (frame.Channel == 0)
+                {
+                    arrived = frame.Payload;
+                }
+            }
+
+            Assert.IsNotNull(arrived, "media should follow a PLAY that was answered 200");
+        }
+
+        [TestMethod]
         public void ALiveStreamStillPlaysFromNow()
         {
             int port = TestPorts.FindFree();
