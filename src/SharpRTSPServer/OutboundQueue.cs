@@ -201,6 +201,24 @@ namespace SharpRTSPServer
         /// Told when this connection has nothing to show and a keyframe would end the wait.
         /// </summary>
         internal Action NeedsKeyFrame { get; set; }
+
+        /// <summary>
+        /// Whether this connection is ready to be written to, or is still being set up.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// A client that has said SETUP but not yet PLAY is a few milliseconds from being ready, and
+        /// media produced in that window used to be taken off the queue and thrown away - which for
+        /// a producer that starts its stream when the first client asks for it meant throwing away
+        /// the keyframe, the one frame that client could not do without.
+        /// </para>
+        /// <para>
+        /// So it waits on the queue instead, where the ordinary bound decides how much of it may.
+        /// Nothing is held indefinitely: a client that sets up and never plays simply fills its
+        /// queue, and the queue is as bounded as anyone else's.
+        /// </para>
+        /// </remarks>
+        internal Func<bool> IsReady { get; set; }
         private readonly string _describedAs;
         private readonly RtpWriterPool _pool;
 
@@ -299,28 +317,27 @@ namespace SharpRTSPServer
         }
 
         /// <summary>
-        /// Puts a whole group of frames in, with nothing able to get between them.
+        /// Says that this connection is ready after all, and asks for whatever has been waiting.
         /// </summary>
-        /// <remarks>
-        /// For the pictures handed to a client that has just started watching. They only make sense
-        /// together and in order - each is described in terms of the one before - so a live frame
-        /// arriving in the middle of them would be decoded against pictures that had not arrived
-        /// yet. One turn of the lock puts the lot in.
-        /// </remarks>
-        internal void EnqueueAll(IReadOnlyList<QueuedFrame> frames)
+        internal void Resume()
         {
-            bool ask = false;
-            bool askForKeyFrame = false;
+            bool ask;
 
             lock (_gate)
             {
-                for (int i = 0; i < frames.Count; i++)
+                if (_stopping || _frames.Count == 0 || _scheduled)
                 {
-                    ask |= Put(frames[i], ref askForKeyFrame);
+                    return;
                 }
+
+                ask = true;
+                _scheduled = true;
             }
 
-            AfterPutting(ask, askForKeyFrame);
+            if (ask)
+            {
+                _pool.Schedule(this);
+            }
         }
 
         /// <summary>
@@ -347,7 +364,8 @@ namespace SharpRTSPServer
             // how far behind a client may fall, and a byte count is a bound on what that costs.
             // Sixty four frames of audio and sixty four of high bitrate video are not remotely
             // the same amount of memory.
-            while (_frames.Count > 0 && (_frames.Count >= _maxFrames || _queuedBytes + frame.Bytes > _maxBytes))
+            while (_frames.Count > 0
+                && (_frames.Count >= _maxFrames || _queuedBytes + frame.Bytes > _maxBytes))
             {
                 DropOneToMakeRoom();
             }
@@ -441,13 +459,62 @@ namespace SharpRTSPServer
             if (!_gaveUpWaiting)
             {
                 _gaveUpWaiting = true;
+
+                // The payload bytes go in it because this is the one message that says a track could
+                // not tell a keyframe from anything else, and what it was reading is the only thing
+                // worth knowing at that point. For H264 the first byte of the payload is the NAL
+                // header, so 0x65 is the keyframe this was waiting for, 0x41 a predicted picture,
+                // 0x7C a fragment of one - and 0x00 means the samples arrived with start codes still
+                // on them, which no track here reads.
                 _logger.LogWarning(
-                    "No decodable starting point for {connection} in {seconds:F0}s, sending the picture anyway",
-                    _describedAs, _keyFrameWait.TotalSeconds);
+                    "No decodable starting point for {connection} in {seconds:F0}s, sending the picture anyway. "
+                    + "Its payload starts {payload} - if that does not look like the start of a frame, "
+                    + "the samples are not in the shape this track reads",
+                    _describedAs, _keyFrameWait.TotalSeconds, FirstPayloadBytes(frame));
             }
 
             _midGroup = false;
             return true;
+        }
+
+        /// <summary>
+        /// The first few bytes of a frame's payload, past the RTP header, as hex.
+        /// </summary>
+        /// <remarks>
+        /// For the one message where what the bytes look like is the whole question. Twelve bytes in
+        /// is the payload for every packet these tracks build, none of which use CSRCs or extensions.
+        /// </remarks>
+        private static string FirstPayloadBytes(QueuedFrame frame)
+        {
+            const int RtpHeader = 12;
+            const int Wanted = 4;
+
+            if (frame.Packets == null || frame.Packets.Count == 0)
+            {
+                return "(nothing)";
+            }
+
+            ReadOnlySpan<byte> packet = frame.Packets[0].Span;
+
+            if (packet.Length <= RtpHeader)
+            {
+                return "(no payload)";
+            }
+
+            int count = Math.Min(Wanted, packet.Length - RtpHeader);
+            var hex = new System.Text.StringBuilder(count * 3);
+
+            for (int i = 0; i < count; i++)
+            {
+                if (i > 0)
+                {
+                    hex.Append(' ');
+                }
+
+                hex.Append(packet[RtpHeader + i].ToString("X2"));
+            }
+
+            return hex.ToString();
         }
 
         /// <summary>
@@ -584,6 +651,14 @@ namespace SharpRTSPServer
                 lock (_gate)
                 {
                     if (_stopping || _frames.Count == 0)
+                    {
+                        _scheduled = false;
+                        return;
+                    }
+
+                    // Left where it is rather than taken and dropped. Whoever makes this connection
+                    // ready asks for the queue again.
+                    if (IsReady != null && !IsReady())
                     {
                         _scheduled = false;
                         return;

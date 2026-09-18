@@ -188,9 +188,6 @@ namespace SharpRTSPServer.Tests
             var video = new H264Track(Sps, Pps);
             var source = new RTSPStreamSource("stream1", video, null);
 
-            // Nothing is kept, so the only thing that can make this work is the timing.
-            source.ReplayLastGroupOfPictures = false;
-
             server.AddStreamSource(source);
 
             server.ReceivedRtspMessage += (s, e) =>
@@ -243,6 +240,10 @@ namespace SharpRTSPServer.Tests
         {
             int port = TestPorts.FindFree();
             using var server = new RTSPServer(port, "admin", "password");
+
+            // Longer than this test can take, so that the wait ending of its own accord - after
+            // which there is nothing to ask for - cannot decide the result on a loaded machine.
+            server.KeyFrameWait = TimeSpan.FromMinutes(5);
 
             var video = new H264Track(Sps, Pps);
             server.AddStreamSource(new RTSPStreamSource("stream1", video, null));

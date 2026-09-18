@@ -31,6 +31,18 @@ namespace SharpRTSPServer
         public object SendLock { get; } = new object();
 
         /// <summary>
+        /// Whether this connection has ever been playing, as opposed to not playing yet.
+        /// </summary>
+        /// <remarks>
+        /// The two look the same from <see cref="Play"/> and mean opposite things. A connection
+        /// still setting up is about to want everything produced from now on - including, for a
+        /// producer that starts its stream when the first client asks for it, the keyframe it
+        /// cannot start without. A connection that has been paused wants nothing until it asks
+        /// again, and would not thank anyone for the media it missed.
+        /// </remarks>
+        public bool HasEverPlayed { get; internal set; }
+
+        /// <summary>
         /// The media waiting to go out on this connection, and the thread that writes it. Created on
         /// the first frame and let go when the session is removed.
         /// </summary>

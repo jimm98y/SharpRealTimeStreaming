@@ -157,33 +157,6 @@ namespace SharpRTSPServer
         public string Sdp { get; private set; } = null;
 
         public HashSet<RTSPConnection> ConnectionList { get; } = new HashSet<RTSPConnection>(); // list of RTSP Listeners
-
-        /// <summary>
-        /// Whether a client that starts watching is given the pictures it needs in order to decode
-        /// the one it is about to receive.
-        /// </summary>
-        /// <remarks>
-        /// <para>
-        /// On by default. Without it a client has nothing it can show until the next keyframe comes
-        /// round - up to a whole group of pictures, which is a second or two of sound playing
-        /// against nothing, and a stream that starts that far out of step. It also covers the case
-        /// where a producer starts its stream when the first client asks for it and hands over the
-        /// keyframe before that client has finished saying PLAY: the keyframe is kept, and the
-        /// client gets it.
-        /// </para>
-        /// <para>
-        /// The cost is memory - one group of pictures for the stream, however many clients are
-        /// watching - and that a client begins a group behind the live edge rather than at it. Turn
-        /// it off for a stream where that last bit of delay matters more than starting cleanly.
-        /// </para>
-        /// </remarks>
-        public bool ReplayLastGroupOfPictures { get; set; } = true;
-
-        /// <summary>
-        /// The pictures kept for a client that has just started watching.
-        /// </summary>
-        internal GroupOfPicturesCache RecentPictures { get; set; }
-
         /// <summary>
         /// Where a track has got to on its own RTP clock, if it has had anything to send.
         /// </summary>

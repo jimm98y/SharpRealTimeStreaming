@@ -1033,6 +1033,7 @@ namespace SharpRTSPServer
                 KeyFrameWait);
 
             candidate.Outbound.NeedsKeyFrame = () => OnKeyFrameNeeded(candidate);
+            candidate.Outbound.IsReady = () => candidate.Play;
 
             // Add the RtspListener to the RTSPConnections List
             bool accepted;
@@ -1561,15 +1562,15 @@ namespace SharpRTSPServer
                             // the reply and fed a sample, and the sample was turned away for a
                             // session that was not marked as playing yet.
                             connection.Play = true;
+                            connection.HasEverPlayed = true;
 
                             listener.SendMessage(playResponse);
                         }
 
-                        // After the reply and the flag, so the media cannot overtake the response,
-                        // and in one go so that a live frame cannot land in the middle of a group
-                        // whose pictures only make sense in order. Without this the client has
-                        // nothing it can decode until the next keyframe.
-                        streamSource.RecentPictures?.ReplayInto(connection.Outbound);
+                        // Whatever was produced while this client was still setting up has been
+                        // waiting on its queue rather than being thrown away. It can go now, after
+                        // the reply and the flag so that it cannot overtake the response.
+                        connection.Outbound.Resume();
 
                         // Outside the connection's lock, because the group is not this connection and
                         // taking one lock while holding another is how the two orders meet.
@@ -3833,12 +3834,10 @@ namespace SharpRTSPServer
                     return false;
                 }
 
-                // Anyone attached, not just anyone playing. A producer that starts its stream when
+                // Anyone attached, not just anyone playing: a producer that starts its stream when
                 // the first client asks for it hands over the keyframe while that client is still
-                // saying SETUP and PLAY - and turning it away then meant the one frame the client
-                // actually needed was the one frame never made. Everything after it refers to it,
-                // so the client decoded rubbish until the next keyframe came round, a group of
-                // pictures later, with the sound playing on without it all the while.
+                // saying SETUP and PLAY, and turning it away then meant the one frame the client
+                // actually needed was the one frame never made.
                 return streamSource.ConnectionList.Count > 0;
             }
         }
@@ -3949,19 +3948,6 @@ namespace SharpRTSPServer
                 // what it would be throwing: sound and pictures are not equal claims on one budget.
                 frame.Kind = track.Kind;
 
-                // Kept for whoever starts watching next, before it goes anywhere - including when
-                // nobody is playing yet, which is exactly when the keyframe of a stream that starts
-                // on demand goes past.
-                if (streamSource.ReplayLastGroupOfPictures)
-                {
-                    if (streamSource.RecentPictures == null)
-                    {
-                        streamSource.RecentPictures = new GroupOfPicturesCache(_logger);
-                    }
-
-                    streamSource.RecentPictures.Note(frame);
-                }
-
                 // A copy, so the list itself can change while we write - into a borrowed array rather
                 // than a new one, since this is every frame of every stream and the copy is thrown
                 // away at the end of the method. Borrowed and given back on this thread, which is
@@ -3994,12 +3980,20 @@ namespace SharpRTSPServer
                 // connection is playing is set by PLAY before it writes its reply, so a frame
                 // produced the instant that reply arrived is queued behind it rather than dropped.
                 //
-                // Note: 'continue', not 'return' - one connection that is paused or not fully set
-                // up must not stop the data going to every other connection on this stream.
-                if (!connection.Play)
+                // Note: 'continue', not 'return' - one connection that is paused must not stop the
+                // data going to every other connection on this stream.
+                //
+                // A connection still setting up is queued to rather than skipped. It is milliseconds
+                // from wanting this, and for a producer that starts its stream when the first client
+                // asks for it, what falls in that window is the beginning of the stream - the
+                // keyframe that client cannot start without. Its queue holds what it is given until
+                // PLAY, and is as bounded as anyone else's. One that has been paused is skipped as
+                // before: it asked for nothing, and stale media on resuming is not an answer.
+                if (!connection.Play && connection.HasEverPlayed)
                     continue;
 
                 RTPStream stream = connection.StreamOrNull(streamType);
+
                 OutboundQueue outbound = connection.Outbound;
 
                 if (stream == null || stream.RtpChannel == null || outbound == null)
