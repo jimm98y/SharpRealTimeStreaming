@@ -17,6 +17,10 @@
 
   <ItemGroup>
     <ProjectReference Include="..\SharpRTSPClient\SharpRTSPClient.csproj" />
+
+    <!-- So the client can be tested against the server it is meant to talk to, rather than only
+         against a hand-written fake that agrees with whatever the client already does. -->
+    <ProjectReference Include="..\SharpRTSPServer\SharpRTSPServer.csproj" />
   </ItemGroup>
 
 </Project>

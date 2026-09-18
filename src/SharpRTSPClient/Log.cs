@@ -16,7 +16,16 @@ namespace SharpRTSPClient
             SinkError(message, ex);
         }
 
-        public static bool TraceEnabled { get; set; } = true;
+        /// <summary>
+        /// Whether to log a line for every packet. Off, unlike the rest.
+        /// </summary>
+        /// <remarks>
+        /// Trace is what the payload parsers write at, once per RTP packet - "Single NAL",
+        /// "Fragmentation Unit", and so on. Left on, formatting and writing those lines cost around
+        /// five hundred bytes a packet, measured, which was half of everything the client allocated
+        /// receiving a stream. Turn it on to follow packets, not to run a client.
+        /// </remarks>
+        public static bool TraceEnabled { get; set; } = false;
         public static void Trace(string message, Exception ex = null)
         {
             SinkTrace(message, ex);
