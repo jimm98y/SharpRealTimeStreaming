@@ -13,6 +13,10 @@ namespace SharpRTSPServer
 
         private byte[] _masterKeySalt;
 
+        private byte[] _mki;
+
+        private string _cryptoSuite;
+
         /// <summary>
         /// Derives this stream's SRTP keys, or hands back the ones already derived.
         /// </summary>
@@ -36,9 +40,40 @@ namespace SharpRTSPServer
 
             SrtpKeys keys = SrtpProtocol.CreateMasterKeys(cryptoSuite, MKI);
             Context = SrtpProtocol.CreateSrtpSessionContext(keys);
+
             _masterKeySalt = keys.MasterKeySalt.ToArray();
+            _mki = MKI;
+            _cryptoSuite = cryptoSuite;
 
             return (byte[])_masterKeySalt.Clone();
+        }
+
+        /// <summary>
+        /// A context of its own, under the keys this stream already holds.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// The same keys, and nothing else shared. An SRTP context carries the state of one sender -
+        /// where it has got to in the packet numbering, and the roll over that goes with it - and the
+        /// keystream protecting a packet is worked out from that state. Two senders using one context
+        /// advance it past each other, and each protects its packets with a keystream the receiver
+        /// cannot reproduce.
+        /// </para>
+        /// <para>
+        /// So a stream whose key belongs to the whole stream still gets a context to itself. Which is
+        /// the same reasoning as the SSRCs: shared key, separate everything else.
+        /// </para>
+        /// </remarks>
+        internal SrtpSessionContext CreateSeparateContext()
+        {
+            if (_masterKeySalt == null || _cryptoSuite == null)
+            {
+                return null;
+            }
+
+            SrtpKeys keys = SrtpProtocol.CreateMasterKeys(_cryptoSuite, _mki, _masterKeySalt);
+
+            return SrtpProtocol.CreateSrtpSessionContext(keys);
         }
 
         /// <summary>
@@ -52,6 +87,8 @@ namespace SharpRTSPServer
         {
             Context = null;
             _masterKeySalt = null;
+            _mki = null;
+            _cryptoSuite = null;
         }
 
         /// <summary>

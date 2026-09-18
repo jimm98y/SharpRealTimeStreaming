@@ -171,6 +171,16 @@ namespace SharpRTSPServer
         internal MulticastDelivery Multicast { get; set; }
 
         /// <summary>
+        /// What moves this stream about in time, where anything can.
+        /// </summary>
+        /// <remarks>
+        /// Set by whoever owns the media, since only they know where it comes from. Left null for a
+        /// live stream: it plays from wherever it is, a client asking for anywhere else is told it
+        /// cannot have it, and pausing stops the sending without stopping the world.
+        /// </remarks>
+        public IPlaybackControl PlaybackControl { get; set; }
+
+        /// <summary>
         /// Whether this stream's SRTP keys belong to the stream rather than to each client.
         /// </summary>
         /// <remarks>

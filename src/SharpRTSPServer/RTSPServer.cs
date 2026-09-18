@@ -1477,8 +1477,12 @@ namespace SharpRTSPServer
             {
                 case RtspRequestPlay playMessage:
                     {
-                        // Search for the Session in the Sessions List. Change the state to "PLAY"
-                        const string range = "npt=0-"; // Playing the 'video' from 0 seconds until the end
+                        // Where the client asked to play from, and how fast. A live stream can do
+                        // neither, and says so rather than starting from the beginning and hoping.
+                        if (!TryStartPlaying(listener, playMessage, streamSource, out string range, out string scale))
+                        {
+                            return;
+                        }
 
                         // 'RTP-Info: url=rtsp://192.168.1.195:8557/h264/track1;seq=33026;rtptime=3014957579,url=rtsp://192.168.1.195:8557/h264/track2;seq=42116;rtptime=3335975101'
                         // One entry per stream that was actually set up, naming that track's control
@@ -1519,6 +1523,12 @@ namespace SharpRTSPServer
                         // Send the reply
                         RtspResponse playResponse = message.CreateResponse();
                         playResponse.AddHeader("Range: " + range);
+
+                        if (scale != null)
+                        {
+                            playResponse.AddHeader("Scale: " + scale);
+                        }
+
                         if (!string.IsNullOrEmpty(rtpInfo))
                         {
                             playResponse.AddHeader("RTP-Info: " + rtpInfo);
@@ -1562,7 +1572,30 @@ namespace SharpRTSPServer
                 case RtspRequestPause pauseMessage:
                     {
                         connection.Play = false;
+
                         RtspResponse pauseResponse = message.CreateResponse();
+
+                        // A stream that can be moved about is stopped where it is, so that playing
+                        // again carries on from there rather than from wherever it would have reached
+                        // had it been left running. A live one is not stopped: the world goes on.
+                        IPlaybackControl playback = streamSource.PlaybackControl;
+
+                        if (playback != null && NobodyElseIsPlaying(streamSource, connection))
+                        {
+                            try
+                            {
+                                playback.Pause();
+
+                                // where it stopped, which is what a client needs in order to know
+                                // what it has and has not seen
+                                pauseResponse.AddHeader("Range: " + NptRange.Format(playback.Position, null));
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogWarning(ex, "Error pausing {streamID}", streamSource.StreamID);
+                            }
+                        }
+
                         listener.SendMessage(pauseResponse);
                         RaiseReceivedRtspMessage(sender, new RtspMessageEventArgs(message, connection));
                     }
@@ -2084,7 +2117,9 @@ namespace SharpRTSPServer
 
             if (!ReferenceEquals(keyHolder, stream))
             {
-                stream.Context = keyHolder.Context;
+                // The keys, not the context. Every sender on a stream that shares a key still needs
+                // its own crypto state, or the two advance it past each other and neither can be read.
+                stream.Context = keyHolder.CreateSeparateContext();
             }
 
             var mki = keyHolder.Context.EncodeRtpContext.Mki;
@@ -2250,6 +2285,16 @@ namespace SharpRTSPServer
             sdp.Append("o=user 123 0 IN IP4 0.0.0.0\r\n");
             sdp.Append($"s={SessionName}\r\n");
             sdp.Append("c=IN IP4 0.0.0.0\r\n");
+
+            // How long the media runs, where it has an end. This is what says a stream can be moved
+            // about at all: a client with no range in the description has no reason to think there
+            // is anything to seek to, and will not offer it.
+            TimeSpan? duration = streamSource.PlaybackControl?.Duration;
+
+            if (duration.HasValue)
+            {
+                sdp.Append("a=range:").Append(NptRange.Format(TimeSpan.Zero, duration.Value)).Append(SDP_LINE_ENDING);
+            }
 
             // Every track the stream carries, in the order it holds them - which is the order a
             // client will read them in, and the order the media sections have to be in for anything
@@ -2631,6 +2676,158 @@ namespace SharpRTSPServer
         }
 
         /// <summary>
+        /// Works out what a PLAY is asking for, does it, and says what to report back.
+        /// </summary>
+        /// <returns>
+        /// False when the request could not be honoured, in which case the client has already been
+        /// answered and the caller should stop.
+        /// </returns>
+        private bool TryStartPlaying(RtspListener listener, RtspRequest playMessage,
+            RTSPStreamSource streamSource, out string range, out string scale)
+        {
+            range = null;
+            scale = null;
+
+            IPlaybackControl playback = streamSource.PlaybackControl;
+
+            string requestedRange = HeaderOrNull(playMessage, "Range");
+            string requestedScale = HeaderOrNull(playMessage, "Scale");
+
+            // ---- how fast ----
+            if (requestedScale != null)
+            {
+                if (!double.TryParse(requestedScale.Trim(), System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out double wanted)
+                    || wanted == 0)
+                {
+                    Refuse(listener, playMessage, 400, "a scale of '{scale}' is not a rate", requestedScale);
+                    return false;
+                }
+
+                if (playback == null || !playback.TrySetScale(wanted))
+                {
+                    // RFC 2326 asks for the nearest rate that can be managed rather than a refusal,
+                    // and for the reply to say which - so a client is never left believing it got
+                    // something it did not.
+                    scale = "1";
+                }
+                else
+                {
+                    scale = playback.Scale.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
+                }
+            }
+
+            // ---- from where ----
+            if (requestedRange == null)
+            {
+                // Nothing asked for, so carry on from wherever this is. For a stream that was paused
+                // that is where it was paused; for a live one it is now.
+                if (playback != null)
+                {
+                    try
+                    {
+                        playback.Resume();
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Error resuming {streamID}", streamSource.StreamID);
+                    }
+
+                    range = NptRange.Format(playback.Position, null);
+                }
+                else
+                {
+                    range = NptRange.FormatLive();
+                }
+
+                return true;
+            }
+
+            if (!NptRange.TryParse(requestedRange, out NptRange asked))
+            {
+                // Either nonsense, or a unit this server does not measure in. Guessing at what was
+                // meant would play something other than what was asked for and say it had complied.
+                Refuse(listener, playMessage, 456, "the range '{range}' is not one this stream understands", requestedRange);
+                return false;
+            }
+
+            if (asked.IsNow || playback == null || !playback.CanSeek)
+            {
+                if (!asked.IsNow)
+                {
+                    Refuse(listener, playMessage, 456, "this stream is live, so there is no '{range}' to play from", requestedRange);
+                    return false;
+                }
+
+                range = playback == null ? NptRange.FormatLive() : NptRange.Format(playback.Position, null);
+                return true;
+            }
+
+            TimeSpan? duration = playback.Duration;
+
+            if (duration.HasValue && asked.Start.Value > duration.Value)
+            {
+                Refuse(listener, playMessage, 457, "this stream has nothing at '{range}'", requestedRange);
+                return false;
+            }
+
+            try
+            {
+                playback.SeekTo(asked.Start.Value);
+                playback.Resume();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Error seeking {streamID} to {position}", streamSource.StreamID, asked.Start);
+                Refuse(listener, playMessage, 457, "this stream could not be played from '{range}'", requestedRange);
+                return false;
+            }
+
+            // Where it actually went, which need not be where it was asked to go - a video usually
+            // has to start at a key frame.
+            range = NptRange.Format(playback.Position, asked.End);
+            return true;
+        }
+
+        /// <summary>
+        /// Whether this is the last client playing a stream, and so whether pausing means anything.
+        /// </summary>
+        /// <remarks>
+        /// One client pausing must not stop the media for the others. A stream is only really paused
+        /// when nobody is left watching it.
+        /// </remarks>
+        private bool NobodyElseIsPlaying(RTSPStreamSource streamSource, RTSPConnection except)
+        {
+            lock (_connectionList)
+            {
+                foreach (RTSPConnection connection in streamSource.ConnectionList)
+                {
+                    if (!ReferenceEquals(connection, except) && connection.Play)
+                    {
+                        return false;
+                    }
+                }
+
+                return true;
+            }
+        }
+
+        private static string HeaderOrNull(RtspRequest message, string name)
+        {
+            return message.Headers.TryGetValue(name, out string value) ? value : null;
+        }
+
+        private void Refuse(RtspListener listener, RtspRequest request, int code, string why, string detail)
+        {
+            _logger.LogWarning("Refusing PLAY from {remoteEndPoint}: " + why.Replace("{range}", "{detail}").Replace("{scale}", "{detail}"),
+                listener.RemoteEndPoint, detail);
+
+            RtspResponse response = request.CreateResponse();
+            response.ReturnCode = code;
+            listener.SendMessage(response);
+        }
+
+        /// <summary>
         /// Whether this stream owes its client a sender report.
         /// </summary>
         /// <remarks>
@@ -3008,7 +3205,7 @@ namespace SharpRTSPServer
                     // Under the key the SDP announced to everybody, which is what makes what the
                     // group sends readable by all of them and by nobody else.
                     stream.Context = streamSource.SharedSrtpKey
-                        ? streamSource.GroupKey(trackId).Context
+                        ? streamSource.GroupKey(trackId).CreateSeparateContext()
                         : null;
                     stream.SSRC = track.SSRC;
 
