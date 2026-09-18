@@ -118,9 +118,24 @@ namespace SharpRTSPServer
             return kept;
         }
 
+        /// <summary>
+        /// The RTP timestamp of the last sample handed to this track, or null if it has had none.
+        /// </summary>
+        /// <remarks>
+        /// Where the track has got to, which is what the RTP-Info of a PLAY reports so that a client
+        /// can put the media on a timeline before any RTCP has arrived. Noted as the sample arrives
+        /// rather than as it is sent, because a source keeps running while nobody is watching and its
+        /// clock keeps advancing - a client that arrives then still needs to be told where it is.
+        /// </remarks>
+        internal uint? LastRtpTimestamp { get; private set; }
+
         public virtual void FeedInRawSamples(uint rtpTimestamp, List<ReadOnlyMemory<byte>> samples)
         {
             var sink = Sink;
+
+            // Before any of the reasons this sample might go no further. Every one of them is about
+            // whether it is worth sending, and none of them changes where the source has got to.
+            LastRtpTimestamp = rtpTimestamp;
 
             // No sink means the track is not attached to a server right now: it has not been added
             // yet, or its stream source was removed while a producer thread was still feeding. Both

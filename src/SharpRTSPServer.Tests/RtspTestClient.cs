@@ -26,10 +26,17 @@ namespace SharpRTSPServer.Tests
 
         /// <param name="useTls">Wrap the connection in TLS, for talking to an RTSPS server.</param>
         public RtspTestClient(int port, string userName, string password, bool useTls = false)
+            : this("127.0.0.1", port, userName, password, useTls)
+        {
+        }
+
+        /// <param name="host">Which address to reach the server on, for the tests that care.</param>
+        /// <param name="useTls">Wrap the connection in TLS, for talking to an RTSPS server.</param>
+        public RtspTestClient(string host, int port, string userName, string password, bool useTls = false)
         {
             _userName = userName;
             _password = password;
-            _tcp = new TcpClient("127.0.0.1", port) { ReceiveTimeout = 10_000, SendTimeout = 10_000 };
+            _tcp = new TcpClient(host, port) { ReceiveTimeout = 10_000, SendTimeout = 10_000 };
 
             if (useTls)
             {

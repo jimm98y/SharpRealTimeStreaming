@@ -85,6 +85,43 @@ namespace SharpRTSPServer
         /// </summary>
         private static readonly TimeSpan RTCP_SEND_LOCK_TIMEOUT = TimeSpan.FromSeconds(2);
 
+        private const string PUBLIC_HEADER = "Public";
+
+        /// <summary>
+        /// The methods this server answers, as reported to a client that asks with OPTIONS.
+        /// </summary>
+        /// <remarks>
+        /// Every one of these is handled; anything not on it is refused with 501. Keep the two in
+        /// step - a client is entitled to believe this and to send nothing else.
+        /// </remarks>
+        public const string SupportedMethods =
+            "OPTIONS, DESCRIBE, SETUP, PLAY, PAUSE, GET_PARAMETER, SET_PARAMETER, TEARDOWN";
+
+        /// <summary>
+        /// Whether this server implements the method a request asks for.
+        /// </summary>
+        /// <remarks>
+        /// The counterpart of <see cref="SupportedMethods"/>, which is what clients are told. A
+        /// method belongs in both or neither.
+        /// </remarks>
+        private static bool IsImplemented(RtspRequest message)
+        {
+            switch (message)
+            {
+                case RtspRequestOptions _:
+                case RtspRequestDescribe _:
+                case RtspRequestSetup _:
+                case RtspRequestPlay _:
+                case RtspRequestPause _:
+                case RtspRequestGetParameter _:
+                case RtspRequestSetParameter _:
+                case RtspRequestTeardown _:
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
         /// <summary>
         /// How long closing a connection waits for its writer to leave the transport before giving up
         /// on disposing it. The socket is already closed by then, so a write in progress has failed.
@@ -506,7 +543,7 @@ namespace SharpRTSPServer
 
             RegisterRtspUriScheme();
 
-            var tcpListener = new TcpListener(IPAddress.Any, portNumber);
+            var tcpListener = CreateListener(portNumber);
             _tcpListener = tcpListener;
             _userCertificateValidationCallback = userCertificateValidationCallback;
             _serverListener = useHttpTunnel switch
@@ -1013,6 +1050,85 @@ namespace SharpRTSPServer
         }
 
         /// <summary>
+        /// Listens on every address of the machine, over IPv6 as well as IPv4 where it can.
+        /// </summary>
+        /// <remarks>
+        /// A dual mode socket takes both, and hands an IPv4 client back as an address mapped into
+        /// IPv6 - which is why anywhere that reads a client address puts it back through
+        /// <see cref="MediaDestination"/> before using it. A machine with IPv6 turned off falls back
+        /// to IPv4 rather than failing to start.
+        /// </remarks>
+        private static TcpListener CreateListener(int portNumber)
+        {
+            if (Socket.OSSupportsIPv6)
+            {
+                try
+                {
+                    var dualStack = new TcpListener(IPAddress.IPv6Any, portNumber);
+                    dualStack.Server.DualMode = true;
+                    return dualStack;
+                }
+                catch (Exception)
+                {
+                    // the machine will not have it, so ask for what it will
+                }
+            }
+
+            return new TcpListener(IPAddress.Any, portNumber);
+        }
+
+        /// <summary>
+        /// The address to send this client's media to, as a socket API will accept it.
+        /// </summary>
+        /// <remarks>
+        /// Two things have to come off. An IPv4 client arriving on a dual mode socket is reported as
+        /// an IPv4 address mapped into IPv6, and sending to it in that form asks for an IPv6 socket
+        /// where an IPv4 one is wanted. A link local IPv6 address carries a scope, which means
+        /// something only on the machine that wrote it down.
+        /// <para>
+        /// This used to be the address with everything after the first colon cut off, which does
+        /// nothing at all to an IPv4 address - there is no port on it to remove - and reduces an IPv6
+        /// address to nothing, so the media went nowhere.
+        /// </para>
+        /// </remarks>
+        internal static string MediaDestination(IPAddress address)
+        {
+            if (address == null)
+            {
+                return null;
+            }
+
+            if (address.IsIPv4MappedToIPv6)
+            {
+                address = address.MapToIPv4();
+            }
+            else if (address.AddressFamily == AddressFamily.InterNetworkV6 && address.ScopeId != 0)
+            {
+                address = new IPAddress(address.GetAddressBytes());
+            }
+
+            return address.ToString();
+        }
+
+        /// <summary>
+        /// Whether media can be sent over UDP to a client at this address.
+        /// </summary>
+        /// <remarks>
+        /// The sockets underneath are IPv4, so an address that is not one - and is not an IPv4
+        /// address wearing an IPv6 shape, which a dual mode listener reports for every IPv4 client -
+        /// cannot be reached from them.
+        /// </remarks>
+        internal static bool CanSendUdpTo(IPAddress address)
+        {
+            if (address == null)
+            {
+                return false;
+            }
+
+            return address.AddressFamily == AddressFamily.InterNetwork || address.IsIPv4MappedToIPv6;
+        }
+
+        /// <summary>
         /// Stops the server listener.
         /// </summary>
         public void StopListen()
@@ -1215,8 +1331,29 @@ namespace SharpRTSPServer
             // health checks send it to the base URL, which used to be answered 404.
             if (message is RtspRequestOptions)
             {
-                listener.SendMessage(message.CreateResponse());
+                RtspResponse optionsResponse = message.CreateResponse();
+
+                // What this server actually answers, rather than the list the transport fills in by
+                // default. That one named ANNOUNCE, SET_PARAMETER and REDIRECT, and a client that
+                // took it at its word got no reply at all.
+                optionsResponse.Headers[PUBLIC_HEADER] = SupportedMethods;
+
+                listener.SendMessage(optionsResponse);
                 RaiseReceivedRtspMessage(sender, new RtspMessageEventArgs(message));
+                return;
+            }
+
+            // Before the URI or the session are looked at, because neither is the client's mistake:
+            // a method this server does not implement should be told so, not given a complaint about
+            // a session it was never going to have.
+            if (!IsImplemented(message))
+            {
+                _logger.LogDebug("Refusing {method} from {remoteEndPoint}, this server does not implement it",
+                    message.RequestTyped, listener.RemoteEndPoint);
+
+                RtspResponse notImplemented = message.CreateResponse();
+                notImplemented.ReturnCode = 501; // Not Implemented
+                listener.SendMessage(notImplemented);
                 return;
             }
 
@@ -1284,12 +1421,28 @@ namespace SharpRTSPServer
                         // URL. Both entries used to be sent whatever the source held, so a video only
                         // stream announced an audio track that had never been set up and never would
                         // send, under the session URL rather than either track's own.
-                        // TODO Add rtptime +";rtptime="+session.rtpInitialTimestamp;
+                        // The rtptime is what pairs a track's RTP clock with the start of the range
+                        // above, and without it a receiver has nothing to line the tracks up by until
+                        // the first sender report arrives. It is the timestamp of the last frame this
+                        // track produced: the first frame this client receives is the next one, so
+                        // the pairing is out by at most a frame, and it is what a live source can
+                        // honestly say. A track that has produced nothing yet says nothing, rather
+                        // than naming a time that means nothing.
                         string rtpInfo = string.Join(",",
                             connection.Streams
                                 .Select((stream, trackId) => new { stream, trackId })
                                 .Where(x => x.stream.RtpChannel != null)
-                                .Select(x => $"url={TrackControlUri(message.RtspUri, streamSource.GetTrackControl((TrackType)x.trackId))};seq={x.stream.SequenceNumber}"));
+                                .Select(x =>
+                                {
+                                    string entry = $"url={TrackControlUri(message.RtspUri, streamSource.GetTrackControl((TrackType)x.trackId))};seq={x.stream.SequenceNumber}";
+
+                                    if (streamSource.TryGetLastRtpTimestamp(x.trackId, out uint rtpTimestamp))
+                                    {
+                                        entry += $";rtptime={rtpTimestamp}";
+                                    }
+
+                                    return entry;
+                                }));
 
                         // Send the reply
                         RtspResponse playResponse = message.CreateResponse();
@@ -1346,6 +1499,22 @@ namespace SharpRTSPServer
                         RaiseReceivedRtspMessage(sender, new RtspMessageEventArgs(message, connection));
                     }
                     return;
+                case RtspRequestSetParameter setParameterMessage:
+                    {
+                        // With no body this is the keepalive that ONVIF clients send, and answering
+                        // it is all that is wanted. With a body it is asking to set something, and
+                        // this server has no parameters to set - so say that rather than pretend.
+                        RtspResponse setParameterResponse = message.CreateResponse();
+
+                        if (setParameterMessage.Data.Length > 0)
+                        {
+                            setParameterResponse.ReturnCode = 451; // Parameter Not Understood
+                        }
+
+                        listener.SendMessage(setParameterResponse);
+                        RaiseReceivedRtspMessage(sender, new RtspMessageEventArgs(message, connection));
+                    }
+                    return;
                 case RtspRequestTeardown teardownMessage:
                     {
                         // Acknowledge before dropping the connection. RFC 2326 requires a response to
@@ -1357,6 +1526,16 @@ namespace SharpRTSPServer
                             RemoveSession(connection);
                         }
                         RaiseReceivedRtspMessage(sender, new RtspMessageEventArgs(message, connection));
+                    }
+                    return;
+                default:
+                    {
+                        // Not reached while this and IsImplemented agree, and here so that they
+                        // cannot quietly stop agreeing: a method added to one and not the other is
+                        // answered rather than dropped.
+                        RtspResponse unhandled = message.CreateResponse();
+                        unhandled.ReturnCode = 501; // Not Implemented
+                        listener.SendMessage(unhandled);
                     }
                     return;
             }
@@ -1481,6 +1660,19 @@ namespace SharpRTSPServer
                     return;
                 }
 
+                // A client that reached us over IPv6 can talk RTSP but cannot be sent UDP media: the
+                // pair of sockets the transport gives us is bound to an IPv4 address and has nothing
+                // to reach an IPv6 one with. Say so, so the client falls back to interleaving the
+                // media over the connection it already has, which works over either.
+                if (!CanSendUdpTo(listener.RemoteEndPoint.Address))
+                {
+                    _logger.LogWarning(
+                        "Refusing a UDP SETUP from {remoteEndPoint}: media over UDP needs an IPv4 client, interleaved over the RTSP connection works for both",
+                        listener.RemoteEndPoint);
+                    SendUnsupportedTransport(listener, setupMessage);
+                    return;
+                }
+
                 // RTP over UDP mode
                 // Create a pair of UDP sockets - One is for the Data (eg Video/Audio), one is for the RTCP
                 UDPSocket udpPair;
@@ -1500,8 +1692,9 @@ namespace SharpRTSPServer
                     SendUnsupportedTransport(listener, setupMessage);
                     return;
                 }
-                udpPair.SetDataDestination(listener.RemoteEndPoint.Address.ToString().Split(':')[0], transport.ClientPort.First);
-                udpPair.SetControlDestination(listener.RemoteEndPoint.Address.ToString().Split(':')[0], transport.ClientPort.Second);
+                string destination = MediaDestination(listener.RemoteEndPoint.Address);
+                udpPair.SetDataDestination(destination, transport.ClientPort.First);
+                udpPair.SetControlDestination(destination, transport.ClientPort.Second);
                 udpPair.ControlReceived += (localSender, localE) =>
                 {
                     // This runs on the library's receive thread, so anything that escapes is an

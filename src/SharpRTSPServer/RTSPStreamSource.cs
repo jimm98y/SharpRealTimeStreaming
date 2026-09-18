@@ -29,6 +29,33 @@ namespace SharpRTSPServer
 
         public HashSet<RTSPConnection> ConnectionList { get; } = new HashSet<RTSPConnection>(); // list of RTSP Listeners
 
+        /// <summary>
+        /// Where a track has got to on its own RTP clock, if it has had anything to send.
+        /// </summary>
+        /// <remarks>
+        /// Read from the track rather than kept here, so that it is the same number whether the
+        /// media is being sent or merely produced.
+        /// </remarks>
+        internal bool TryGetLastRtpTimestamp(int streamType, out uint rtpTimestamp)
+        {
+            rtpTimestamp = 0;
+
+            ITrack track =
+                streamType == (int)TrackType.Video ? VideoTrack :
+                streamType == (int)TrackType.Audio ? AudioTrack :
+                null;
+
+            // A track of someone else's making need not be one of ours, and then there is nowhere to
+            // have read this from - which is a reason to say nothing, not to guess.
+            if (!(track is TrackBase known) || !known.LastRtpTimestamp.HasValue)
+            {
+                return false;
+            }
+
+            rtpTimestamp = known.LastRtpTimestamp.Value;
+            return true;
+        }
+
         public RTSPStreamSource(string streamID, ITrack rtspVideoTrack, ITrack rtspAudioTrack)
         {
             if (string.IsNullOrWhiteSpace(streamID))
