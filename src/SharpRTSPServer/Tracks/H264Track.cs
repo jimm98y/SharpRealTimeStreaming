@@ -163,6 +163,8 @@ namespace SharpRTSPServer
         /// <param name="packets">Where to build them, and what holds them afterwards.</param>
         public override void CreateRtpPackets(List<ReadOnlyMemory<byte>> samples, uint rtpTimestamp, RtpPackets packets)
         {
+            packets.IsKeyFrame = CanStartOn(samples);
+
             for (int x = 0; x < samples.Count; x++)
             {
                 var rawNal = samples[x];
@@ -273,6 +275,42 @@ namespace SharpRTSPServer
 
                 }
             }
+        }
+
+        /// <summary>IDR - a picture coded without reference to any other.</summary>
+        private const int NAL_IDR = 5;
+
+        /// <summary>Sequence parameter set, which an IDR is normally sent with.</summary>
+        private const int NAL_SPS = 7;
+
+        /// <summary>
+        /// Whether a decoder seeing these NALs and nothing before them could start here.
+        /// </summary>
+        /// <remarks>
+        /// An IDR is the one picture in H264 that refers to nothing earlier. Everything else is
+        /// described in terms of pictures that came before it, so a decoder handed one of those
+        /// first - or handed one whose references were dropped on the way - produces rubbish until
+        /// the next IDR arrives. A parameter set counts too, because an encoder sends those
+        /// immediately before the IDR they describe.
+        /// </remarks>
+        private static bool CanStartOn(List<ReadOnlyMemory<byte>> samples)
+        {
+            for (int i = 0; i < samples.Count; i++)
+            {
+                if (samples[i].Length == 0)
+                {
+                    continue;
+                }
+
+                int nalType = samples[i].Span[0] & 0x1F;
+
+                if (nalType == NAL_IDR || nalType == NAL_SPS)
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
     }
 }

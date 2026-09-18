@@ -100,7 +100,7 @@ namespace SharpRTSPServer.Tests
             {
                 videoTrack.FeedInRawSamples((uint)(i * 3000), new List<ReadOnlyMemory<byte>>
                 {
-                    new ReadOnlyMemory<byte>(new byte[600])
+                    new ReadOnlyMemory<byte>(Idr())
                 });
                 Thread.Sleep(20);
             }
@@ -116,6 +116,17 @@ namespace SharpRTSPServer.Tests
             Assert.IsEmpty(loud,
                 "a client that closed its connection is not a fault: " +
                 string.Join(" | ", loud.Select(e => e.Level + " " + e.Message)));
+        }
+
+        /// <summary>
+        /// A picture a decoder could start on, which is what the server will now send to a client
+        /// that has only just arrived. A NAL of zeroes is not one, and is not valid H264 either.
+        /// </summary>
+        private static byte[] Idr()
+        {
+            var nal = new byte[600];
+            nal[0] = 0x65; // one NAL, IDR slice
+            return nal;
         }
 
         [TestMethod]
@@ -145,7 +156,7 @@ namespace SharpRTSPServer.Tests
             {
                 videoTrack.FeedInRawSamples((uint)(i * 3000), new List<ReadOnlyMemory<byte>>
                 {
-                    new ReadOnlyMemory<byte>(new byte[600])
+                    new ReadOnlyMemory<byte>(Idr())
                 });
                 Thread.Sleep(20);
             }

@@ -146,6 +146,8 @@ namespace SharpRTSPServer
         /// <param name="packets">Where to build them, and what holds them afterwards.</param>
         public override void CreateRtpPackets(List<ReadOnlyMemory<byte>> samples, uint rtpTimestamp, RtpPackets packets)
         {
+            packets.IsKeyFrame = CanStartOn(samples);
+
             for (int x = 0; x < samples.Count; x++)
             {
                 var rawNal = samples[x];
@@ -260,6 +262,47 @@ namespace SharpRTSPServer
 
                 }
             }
+        }
+
+        /// <summary>
+        /// The lowest and highest NAL types that a decoder may start on - BLA_W_LP through CRA_NUT,
+        /// which H265 calls an intra random access point.
+        /// </summary>
+        private const int NAL_FIRST_IRAP = 16;
+        private const int NAL_LAST_IRAP = 23;
+
+        /// <summary>Video, sequence and picture parameter sets, sent just before the picture they describe.</summary>
+        private const int NAL_FIRST_PARAMETER_SET = 32;
+        private const int NAL_LAST_PARAMETER_SET = 34;
+
+        /// <summary>
+        /// Whether a decoder seeing these NALs and nothing before them could start here.
+        /// </summary>
+        /// <remarks>
+        /// Anything that is not a random access point is described in terms of pictures that came
+        /// before it, so a decoder handed one first - or handed one whose references were dropped on
+        /// the way - produces rubbish until the next one arrives. The NAL type sits in six bits of
+        /// the first header byte here, not five as in H264.
+        /// </remarks>
+        private static bool CanStartOn(List<ReadOnlyMemory<byte>> samples)
+        {
+            for (int i = 0; i < samples.Count; i++)
+            {
+                if (samples[i].Length == 0)
+                {
+                    continue;
+                }
+
+                int nalType = (samples[i].Span[0] & 0x7E) >> 1;
+
+                if ((nalType >= NAL_FIRST_IRAP && nalType <= NAL_LAST_IRAP)
+                    || (nalType >= NAL_FIRST_PARAMETER_SET && nalType <= NAL_LAST_PARAMETER_SET))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
     }
 }

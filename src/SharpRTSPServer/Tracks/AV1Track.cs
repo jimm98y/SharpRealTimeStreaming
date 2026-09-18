@@ -85,6 +85,9 @@ namespace SharpRTSPServer
             return sdp;
         }
 
+        /// <summary>OBU_SEQUENCE_HEADER - describes the sequence that follows it.</summary>
+        private const int OBU_SEQUENCE_HEADER = 1;
+
         /// <summary>OBU_TILE_LIST - not supported over RTP, dropped when transmitting.</summary>
         private const int OBU_TILE_LIST = 2;
 
@@ -99,6 +102,8 @@ namespace SharpRTSPServer
         /// <param name="packets">Where to build them, and what holds them afterwards.</param>
         public override void CreateRtpPackets(List<ReadOnlyMemory<byte>> samples, uint rtpTimestamp, RtpPackets packets)
         {
+            packets.IsKeyFrame = CanStartOn(samples);
+
             // The marker goes on the last OBU we actually send, which is not necessarily the last
             // sample - temporal delimiters and tile lists are dropped below.
             int lastEmittedSample = LastSampleToEmit(samples);
@@ -200,7 +205,7 @@ namespace SharpRTSPServer
                     int wCount = 1;
 
                     // Specification says: MUST be set to 1 if the packet is the first packet of a coded video sequence, and MUST be set to 0 otherwise.
-                    int nBit = obuType == 1 ? 1 : 0; // OBU_SEQUENCE_HEADER
+                    int nBit = obuType == OBU_SEQUENCE_HEADER ? 1 : 0;
                     byte aggregationHeader = (byte)((zBit << 7) | (yBit << 6) | (wCount << 4) | (nBit << 3));
 
                     // aggregation header
@@ -217,6 +222,44 @@ namespace SharpRTSPServer
                 }                
             }
 
+        }
+
+        /// <summary>
+        /// Whether a decoder seeing these OBUs and nothing before them could start here.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Taken from the sequence header being present, which is the same thing the N bit in the
+        /// aggregation header below reports - AV1 calls that "the first packet of a coded video
+        /// sequence" - and the same reasoning as a parameter set in H264: an encoder sends the
+        /// sequence header immediately before a key frame, because a decoder joining there needs it.
+        /// </para>
+        /// <para>
+        /// Saying so exactly would mean reading frame_type out of the uncompressed header of a frame
+        /// OBU, which is a bit level parse of a header whose shape depends on the sequence header
+        /// that may not have arrived. Being wrong the cautious way costs a frame held back that
+        /// need not have been; being wrong the other way costs a group of pictures that cannot be
+        /// decoded. Where this is too cautious the wait gives up on its own.
+        /// </para>
+        /// </remarks>
+        private static bool CanStartOn(List<ReadOnlyMemory<byte>> samples)
+        {
+            for (int i = 0; i < samples.Count; i++)
+            {
+                if (samples[i].Length == 0)
+                {
+                    continue;
+                }
+
+                int obuType = (samples[i].Span[0] & 0x78) >> 3;
+
+                if (obuType == OBU_SEQUENCE_HEADER)
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         /// <summary>

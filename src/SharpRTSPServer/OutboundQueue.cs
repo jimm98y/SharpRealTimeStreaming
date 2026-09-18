@@ -29,6 +29,21 @@ namespace SharpRTSPServer
 
         public int StreamType { get; set; }
 
+        /// <summary>
+        /// What sort of media this frame carries.
+        /// </summary>
+        /// <remarks>
+        /// Not decoration: it decides what is thrown away when a client cannot keep up. A second of
+        /// audio is a few kilobytes and a second of video is hundreds, so treating them as equal
+        /// claims on one budget threw away most of the sound to make room for pictures.
+        /// </remarks>
+        public TrackType Kind { get; set; } = TrackType.Video;
+
+        /// <summary>
+        /// Whether a decoder could start on this frame, having seen nothing before it.
+        /// </summary>
+        public bool IsKeyFrame { get; set; } = true;
+
         public uint RtpTimestamp { get; set; }
 
         public bool PreserveSourceHeaders { get; set; }
@@ -99,6 +114,7 @@ namespace SharpRTSPServer
         public void Fill(RtpPackets packets)
         {
             Packets = packets;
+            IsKeyFrame = packets.IsKeyFrame;
             Bytes = 0;
 
             for (int i = 0; i < packets.Count; i++)
@@ -169,12 +185,22 @@ namespace SharpRTSPServer
     /// </remarks>
     internal sealed class OutboundQueue : IDisposable
     {
-        private readonly Queue<QueuedFrame> _frames = new Queue<QueuedFrame>();
+        /// <remarks>
+        /// A linked list rather than a queue, because when the queue is full the frame to throw away
+        /// is not always the one at the front - see <see cref="DropOneToMakeRoom"/>. Frames are still
+        /// added at the back and written from the front, so each track's own order is untouched.
+        /// </remarks>
+        private readonly LinkedList<QueuedFrame> _frames = new LinkedList<QueuedFrame>();
         private readonly object _gate = new object();
         private readonly ILogger _logger;
         private readonly int _maxFrames;
         private readonly long _maxBytes;
         private readonly Action<QueuedFrame> _write;
+
+        /// <summary>
+        /// Told when this connection has nothing to show and a keyframe would end the wait.
+        /// </summary>
+        internal Action NeedsKeyFrame { get; set; }
         private readonly string _describedAs;
         private readonly RtpWriterPool _pool;
 
@@ -185,6 +211,38 @@ namespace SharpRTSPServer
         private bool _scheduled;
 
         private bool _stopping;
+
+        /// <summary>
+        /// Whether the picture is mid-group as far as this connection is concerned, so that video is
+        /// worth nothing to it until a frame a decoder can start on comes along.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// True from the start, because a client joining a stream that is already running arrives in
+        /// the middle of a group: the pictures until the next keyframe refer to ones it never saw,
+        /// and a decoder given them reports what ffmpeg calls co-located POCs unavailable and shows
+        /// rubbish until the group ends. Sending them gains nothing and costs the bandwidth that the
+        /// keyframe is waiting for.
+        /// </para>
+        /// <para>
+        /// True again whenever a picture is dropped, for the same reason from the other direction:
+        /// once one is missing, the rest of the group cannot be decoded either.
+        /// </para>
+        /// </remarks>
+        private bool _midGroup = true;
+
+        /// <summary>
+        /// When this connection started waiting for a frame a decoder could start on.
+        /// </summary>
+        private DateTime _midGroupSince = DateTime.UtcNow;
+
+        /// <summary>
+        /// Whether the wait has already been given up on once, so it is reported once and not per frame.
+        /// </summary>
+        private bool _gaveUpWaiting;
+
+        /// <summary>Whether the encoder has already been asked for a keyframe for this wait.</summary>
+        private bool _askedForKeyFrame;
         private long _dropped;
         private long _reportedDrops;
         private long _queuedBytes;
@@ -196,8 +254,26 @@ namespace SharpRTSPServer
         /// </summary>
         private const int FRAMES_PER_TURN = 8;
 
+        /// <summary>
+        /// How long a connection goes without a picture while waiting for one a decoder can start on.
+        /// </summary>
+        /// <remarks>
+        /// Long enough to cover the group of pictures of anything that sends them regularly - two
+        /// seconds is several groups for a camera, which typically sends one a second or two - and
+        /// short enough that a stream nothing here can read is not blank for long.
+        /// </remarks>
+        internal static readonly TimeSpan DEFAULT_KEY_FRAME_WAIT = TimeSpan.FromSeconds(2);
+
+        private readonly TimeSpan _keyFrameWait;
+
         public OutboundQueue(RtpWriterPool pool, int maxFrames, long maxBytes, Action<QueuedFrame> write, string describedAs, ILogger logger)
+            : this(pool, maxFrames, maxBytes, write, describedAs, logger, DEFAULT_KEY_FRAME_WAIT)
         {
+        }
+
+        public OutboundQueue(RtpWriterPool pool, int maxFrames, long maxBytes, Action<QueuedFrame> write, string describedAs, ILogger logger, TimeSpan keyFrameWait)
+        {
+            _keyFrameWait = keyFrameWait;
             _pool = pool;
             _maxFrames = maxFrames < 1 ? 1 : maxFrames;
             _maxBytes = maxBytes < 1 ? 1 : maxBytes;
@@ -212,46 +288,251 @@ namespace SharpRTSPServer
         public void Enqueue(QueuedFrame frame)
         {
             bool ask;
+            bool askForKeyFrame = false;
 
             lock (_gate)
             {
-                if (_stopping)
-                {
-                    frame.Release();
-                    return;
-                }
-
-                // Bounded by both, because the two say different things: a frame count is a bound on
-                // how far behind a client may fall, and a byte count is a bound on what that costs.
-                // Sixty four frames of audio and sixty four of high bitrate video are not remotely
-                // the same amount of memory.
-                while (_frames.Count > 0 && (_frames.Count >= _maxFrames || _queuedBytes + frame.Bytes > _maxBytes))
-                {
-                    QueuedFrame oldest = _frames.Dequeue();
-
-                    // the size first: the frame reports nothing once the last share of it is gone
-                    _queuedBytes -= oldest.Bytes;
-                    oldest.Release();
-                    _dropped++;
-                }
-
-                _frames.Enqueue(frame);
-                _queuedBytes += frame.Bytes;
-
-                // Only when nobody has it. A thread that is already writing this connection will see
-                // the frame when it comes round again, and asking twice would put the connection in
-                // the queue of the pool twice and let two threads write it at once.
-                ask = !_scheduled;
-                _scheduled = true;
+                ask = Put(frame, ref askForKeyFrame);
             }
 
-            // Outside the lock, so that the lock of the pool is never taken while holding this one.
+            AfterPutting(ask, askForKeyFrame);
+        }
+
+        /// <summary>
+        /// Puts a whole group of frames in, with nothing able to get between them.
+        /// </summary>
+        /// <remarks>
+        /// For the pictures handed to a client that has just started watching. They only make sense
+        /// together and in order - each is described in terms of the one before - so a live frame
+        /// arriving in the middle of them would be decoded against pictures that had not arrived
+        /// yet. One turn of the lock puts the lot in.
+        /// </remarks>
+        internal void EnqueueAll(IReadOnlyList<QueuedFrame> frames)
+        {
+            bool ask = false;
+            bool askForKeyFrame = false;
+
+            lock (_gate)
+            {
+                for (int i = 0; i < frames.Count; i++)
+                {
+                    ask |= Put(frames[i], ref askForKeyFrame);
+                }
+            }
+
+            AfterPutting(ask, askForKeyFrame);
+        }
+
+        /// <summary>
+        /// Puts one frame in. Called with <see cref="_gate"/> held; says whether the pool needs asking.
+        /// </summary>
+        private bool Put(QueuedFrame frame, ref bool askForKeyFrame)
+        {
+            if (_stopping)
+            {
+                frame.Release();
+                return false;
+            }
+
+            if (frame.Kind == TrackType.Video && !HoldsBackPicture(frame, ref askForKeyFrame))
+            {
+                // Not dropped so much as not worth sending: nothing downstream could decode it.
+                // Counted all the same, because it is still media the client did not get.
+                frame.Release();
+                _dropped++;
+                return false;
+            }
+
+            // Bounded by both, because the two say different things: a frame count is a bound on
+            // how far behind a client may fall, and a byte count is a bound on what that costs.
+            // Sixty four frames of audio and sixty four of high bitrate video are not remotely
+            // the same amount of memory.
+            while (_frames.Count > 0 && (_frames.Count >= _maxFrames || _queuedBytes + frame.Bytes > _maxBytes))
+            {
+                DropOneToMakeRoom();
+            }
+
+            _frames.AddLast(frame);
+            _queuedBytes += frame.Bytes;
+
+            // Only when nobody has it. A thread that is already writing this connection will see
+            // the frame when it comes round again, and asking twice would put the connection in
+            // the queue of the pool twice and let two threads write it at once.
+            bool ask = !_scheduled;
+            _scheduled = true;
+            return ask;
+        }
+
+        /// <summary>
+        /// The part that must happen with <see cref="_gate"/> let go of.
+        /// </summary>
+        /// <remarks>
+        /// The pool's lock is never taken while holding this one, and the keyframe request goes to a
+        /// handler belonging to whoever produces the media - which may do anything at all, including
+        /// calling back into the server, so it must not be holding this.
+        /// </remarks>
+        private void AfterPutting(bool ask, bool askForKeyFrame)
+        {
             if (ask)
             {
                 _pool.Schedule(this);
             }
 
+            if (askForKeyFrame)
+            {
+                AskForAKeyFrame();
+            }
+
             ReportDrops();
+        }
+
+        /// <summary>
+        /// Whether this picture is worth sending, given what this connection has already had.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// False while the connection is mid-group: the pictures between a missing one and the next
+        /// keyframe refer to frames the decoder has not got, so it makes rubbish of them - what
+        /// ffmpeg reports as co-located POCs unavailable - and the bandwidth is better spent on the
+        /// keyframe that ends the wait.
+        /// </para>
+        /// <para>
+        /// But not for ever. Whether a frame can be started on is read out of the bytes, and a
+        /// producer may well hand over something these tracks cannot read that way - NALs with start
+        /// codes still on them, a codec with no reader here, an encoder that never sends a parameter
+        /// set. Withholding the picture indefinitely because nothing looked like a keyframe would
+        /// turn a stream that used to play with artefacts into one that shows nothing at all, which
+        /// is much the worse failure. So the wait gives up after <see cref="_keyFrameWait"/> and the
+        /// picture goes out as it used to.
+        /// </para>
+        /// <para>
+        /// Called with <see cref="_gate"/> held.
+        /// </para>
+        /// </remarks>
+        private bool HoldsBackPicture(QueuedFrame frame, ref bool ask)
+        {
+            if (frame.IsKeyFrame)
+            {
+                _midGroup = false;
+                _gaveUpWaiting = false;
+                _askedForKeyFrame = false;
+                return true;
+            }
+
+            if (!_midGroup)
+            {
+                return true;
+            }
+
+            if (DateTime.UtcNow - _midGroupSince < _keyFrameWait)
+            {
+                if (!_askedForKeyFrame)
+                {
+                    _askedForKeyFrame = true;
+                    ask = true;
+                }
+
+                return false;
+            }
+
+            // Nothing that looks like a keyframe has come along in all that time, so either this
+            // stream has an enormous group of pictures or nothing here can tell. Either way, sending
+            // an undecodable picture beats sending none.
+            if (!_gaveUpWaiting)
+            {
+                _gaveUpWaiting = true;
+                _logger.LogWarning(
+                    "No decodable starting point for {connection} in {seconds:F0}s, sending the picture anyway",
+                    _describedAs, _keyFrameWait.TotalSeconds);
+            }
+
+            _midGroup = false;
+            return true;
+        }
+
+        /// <summary>
+        /// Asks, once per wait, for the encoder to produce a frame a decoder can start on.
+        /// </summary>
+        /// <remarks>
+        /// Waiting for the next keyframe in the ordinary course of things means waiting up to a
+        /// whole group of pictures - two seconds at the far end of a common setting, and the client
+        /// has nothing to show for all of it while the sound plays on without it. An encoder that
+        /// can be asked for one on demand turns that wait into nothing, which is the difference
+        /// between a stream that starts and one that starts two seconds late and out of step.
+        /// </remarks>
+        private void AskForAKeyFrame()
+        {
+            Action ask = NeedsKeyFrame;
+            if (ask == null)
+            {
+                return;
+            }
+
+            // Outside nothing - this runs under the gate, and the handler belongs to whoever is
+            // producing the media, so it must not be trusted to return or to behave.
+            try
+            {
+                ask();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "A handler for a keyframe request threw, for {connection}", _describedAs);
+            }
+        }
+
+        /// <summary>
+        /// Throws away one frame, choosing the one the viewer will miss least.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// The oldest picture first, and only then anything else. Every track of a connection shares
+        /// this queue, so when it overflows the sound and the picture are competing for the same
+        /// room - and they are wildly unequal in what they cost and in what losing them does. A
+        /// second of audio is a few kilobytes; a second of video is hundreds. Taking the front of the
+        /// queue regardless threw away four fifths of the sound to make room for pictures, which is
+        /// what a listener hears as stuttering, while the pictures it made room for were themselves
+        /// mostly dropped a moment later.
+        /// </para>
+        /// <para>
+        /// Metadata is left alone for the same reason as the audio: it is small, and a gap in it is
+        /// a gap in the record of what happened rather than a moment of stale picture.
+        /// </para>
+        /// <para>
+        /// Called with <see cref="_gate"/> held.
+        /// </para>
+        /// </remarks>
+        private void DropOneToMakeRoom()
+        {
+            LinkedListNode<QueuedFrame> victim = null;
+
+            for (LinkedListNode<QueuedFrame> node = _frames.First; node != null; node = node.Next)
+            {
+                if (node.Value.Kind == TrackType.Video)
+                {
+                    victim = node;
+                    break;
+                }
+            }
+
+            // Nothing but sound and data in here, so the oldest of that goes after all - the queue
+            // has to come down somehow.
+            victim = victim ?? _frames.First;
+
+            _frames.Remove(victim);
+
+            // Once a picture is missing, the rest of its group decodes into rubbish, so there is no
+            // sense sending any of it. The next keyframe starts the picture again.
+            if (victim.Value.Kind == TrackType.Video && !_midGroup)
+            {
+                _midGroup = true;
+                _midGroupSince = DateTime.UtcNow;
+                _askedForKeyFrame = false;
+            }
+
+            // the size first: the frame reports nothing once the last share of it is gone
+            _queuedBytes -= victim.Value.Bytes;
+            victim.Value.Release();
+            _dropped++;
         }
 
         private void ReportDrops()
@@ -308,7 +589,8 @@ namespace SharpRTSPServer
                         return;
                     }
 
-                    frame = _frames.Dequeue();
+                    frame = _frames.First.Value;
+                    _frames.RemoveFirst();
                     _queuedBytes -= frame.Bytes;
                 }
 
@@ -345,7 +627,9 @@ namespace SharpRTSPServer
                 // whatever is still waiting will never be sent, so its buffers go back now
                 while (_frames.Count > 0)
                 {
-                    _frames.Dequeue().Release();
+                    QueuedFrame queued = _frames.First.Value;
+                    _frames.RemoveFirst();
+                    queued.Release();
                 }
 
                 _queuedBytes = 0;

@@ -81,6 +81,25 @@ namespace SharpRTSPServer
         internal readonly List<Memory<byte>> Items = new List<Memory<byte>>();
 
         /// <summary>
+        /// Whether a decoder could start on this frame, having seen nothing before it.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// True unless a track says otherwise, because that is the answer that never withholds
+        /// anything: sound, metadata and every format made of self contained frames are always
+        /// startable, and a video format nothing here can read is better sent than held back.
+        /// </para>
+        /// <para>
+        /// It matters when frames have to be thrown away. A picture that refers to one which was
+        /// dropped does not decode into a slightly worse picture - it decodes into rubbish, and goes
+        /// on doing so for every frame until the next one a decoder can start on. So once anything
+        /// has been dropped there is no sense sending the rest of that group, and a client joining
+        /// halfway through one has nothing to gain from its remainder either.
+        /// </para>
+        /// </remarks>
+        public bool IsKeyFrame { get; set; } = true;
+
+        /// <summary>
         /// How many packets this frame came to.
         /// </summary>
         public int Count => Items.Count;
@@ -152,6 +171,7 @@ namespace SharpRTSPServer
                 {
                     RtpPackets spare = Spare.Pop();
                     spare._released = 0;
+                    spare.IsKeyFrame = true;
                     return spare;
                 }
             }

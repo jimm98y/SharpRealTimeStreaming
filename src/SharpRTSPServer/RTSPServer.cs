@@ -1029,7 +1029,10 @@ namespace SharpRTSPServer
                 MaxQueuedBytesPerConnection,
                 frame => WriteQueuedFrame(candidate, frame),
                 TryGetRemoteEndPoint(rtspSocket),
-                _logger);
+                _logger,
+                KeyFrameWait);
+
+            candidate.Outbound.NeedsKeyFrame = () => OnKeyFrameNeeded(candidate);
 
             // Add the RtspListener to the RTSPConnections List
             bool accepted;
@@ -1561,6 +1564,12 @@ namespace SharpRTSPServer
 
                             listener.SendMessage(playResponse);
                         }
+
+                        // After the reply and the flag, so the media cannot overtake the response,
+                        // and in one go so that a live frame cannot land in the middle of a group
+                        // whose pictures only make sense in order. Without this the client has
+                        // nothing it can decode until the next keyframe.
+                        streamSource.RecentPictures?.ReplayInto(connection.Outbound);
 
                         // Outside the connection's lock, because the group is not this connection and
                         // taking one lock while holding another is how the two orders meet.
@@ -3824,16 +3833,59 @@ namespace SharpRTSPServer
                     return false;
                 }
 
-                foreach (RTSPConnection connection in streamSource.ConnectionList)
-                {
-                    if (connection.Play)
-                    {
-                        return true;
-                    }
-                }
-
-                return false;
+                // Anyone attached, not just anyone playing. A producer that starts its stream when
+                // the first client asks for it hands over the keyframe while that client is still
+                // saying SETUP and PLAY - and turning it away then meant the one frame the client
+                // actually needed was the one frame never made. Everything after it refers to it,
+                // so the client decoded rubbish until the next keyframe came round, a group of
+                // pictures later, with the sound playing on without it all the while.
+                return streamSource.ConnectionList.Count > 0;
             }
+        }
+
+        /// <summary>
+        /// Raised when a client has nothing it can show and a keyframe would let it start.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// A client joining a stream that is already running arrives in the middle of a group of
+        /// pictures. Everything until the next keyframe is described in terms of pictures it never
+        /// saw, so there is nothing for it to show until that keyframe comes round - up to a whole
+        /// group, which is a second or two of sound playing against a blank picture, and a stream
+        /// that starts that far out of step.
+        /// </para>
+        /// <para>
+        /// Most encoders can be asked for a keyframe on demand. Handling this and doing so turns
+        /// that wait into nothing. Ignoring it is safe: the wait simply runs its course.
+        /// </para>
+        /// <para>
+        /// Raised on whichever thread produced the frame that found the client waiting, once per
+        /// wait rather than once per frame. A handler that blocks holds up that producer, and one
+        /// that throws is logged and otherwise ignored.
+        /// </para>
+        /// </remarks>
+        public event EventHandler<KeyFrameNeededEventArgs> KeyFrameNeeded;
+
+        /// <summary>
+        /// How long a client goes without a picture while waiting for one it can start on, before
+        /// the server gives up waiting and sends what it has.
+        /// </summary>
+        /// <remarks>
+        /// Whether a frame can be started on is read out of the bytes, and a producer may hand over
+        /// something the tracks here cannot read that way. Waiting for ever on that would show
+        /// nothing at all, which is worse than showing something imperfect, so the wait ends.
+        /// </remarks>
+        public TimeSpan KeyFrameWait { get; set; } = OutboundQueue.DEFAULT_KEY_FRAME_WAIT;
+
+        private void OnKeyFrameNeeded(RTSPConnection connection)
+        {
+            EventHandler<KeyFrameNeededEventArgs> handler = KeyFrameNeeded;
+            if (handler == null)
+            {
+                return;
+            }
+
+            handler(this, new KeyFrameNeededEventArgs(connection.SessionId));
         }
 
         public void FeedInRawRTP(string streamID, int streamType, uint rtpTimestamp, RtpPackets rtpPackets)
@@ -3892,6 +3944,23 @@ namespace SharpRTSPServer
                 }
 
                 preserveSourceHeaders = track is ProxyTrack proxyTrack && proxyTrack.PreserveSourceHeaders;
+
+                // Carried with the frame so that a queue which has to throw something away knows
+                // what it would be throwing: sound and pictures are not equal claims on one budget.
+                frame.Kind = track.Kind;
+
+                // Kept for whoever starts watching next, before it goes anywhere - including when
+                // nobody is playing yet, which is exactly when the keyframe of a stream that starts
+                // on demand goes past.
+                if (streamSource.ReplayLastGroupOfPictures)
+                {
+                    if (streamSource.RecentPictures == null)
+                    {
+                        streamSource.RecentPictures = new GroupOfPicturesCache(_logger);
+                    }
+
+                    streamSource.RecentPictures.Note(frame);
+                }
 
                 // A copy, so the list itself can change while we write - into a borrowed array rather
                 // than a new one, since this is every frame of every stream and the copy is thrown
