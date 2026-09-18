@@ -1,0 +1,371 @@
+using System;
+using System.Collections.Generic;
+using System.Net;
+using System.Net.Sockets;
+using System.Text.RegularExpressions;
+using System.Threading;
+using SharpSRTP.SRTP;
+using SharpRTSPServer;
+
+namespace SharpRTSPServer.Tests
+{
+    /// <summary>
+    /// Media sent once, to a group, for however many clients are listening.
+    /// </summary>
+    /// <remarks>
+    /// Multicast used to be refused outright. The awkward part of it is not the sending but the
+    /// sharing: everything else here is per client - its own sockets, its own sequence numbering,
+    /// its own SSRC - and a group has one of each, for all of them.
+    /// </remarks>
+    [TestClass]
+    [DoNotParallelize] // binds real group ports, and counts what arrives on them
+    public sealed class MulticastTests
+    {
+        private static readonly byte[] Sps = { 0x67, 0x42, 0x00, 0x1E };
+        private static readonly byte[] Pps = { 0x68, 0xCE, 0x3C, 0x80 };
+
+        /// <summary>The loopback link only, so nothing under test leaves this machine.</summary>
+        private const string Group = "239.255.42.99";
+
+        private static List<ReadOnlyMemory<byte>> OneNal() => new List<ReadOnlyMemory<byte>>
+        {
+            new ReadOnlyMemory<byte>(new byte[] { 0x65, 0x11, 0x22, 0x33 }),
+        };
+
+        private static RTSPServer NewServer(int port, out H264Track videoTrack, int multicastPortStart, int ttl = 0)
+        {
+            var server = new RTSPServer(port, "admin", "password")
+            {
+                MulticastAddress = Group,
+                MulticastTimeToLive = ttl, // zero by default: this machine and no further
+            };
+
+            server.SetMulticastPortRange(multicastPortStart, multicastPortStart + 40);
+
+            videoTrack = new H264Track(Sps, Pps);
+            server.AddStreamSource(new RTSPStreamSource("stream1", videoTrack, null));
+            server.StartListen();
+            return server;
+        }
+
+        /// <summary>
+        /// Sets a client up for multicast and returns what the server said to do.
+        /// </summary>
+        private static (RtspTestClient Client, string Session, string Destination, int Port, int Ttl) Join(int port)
+        {
+            string baseUri = $"rtsp://127.0.0.1:{port}/stream1";
+
+            var client = new RtspTestClient(port, "admin", "password");
+            client.Send("OPTIONS", baseUri);
+            client.Send("DESCRIBE", baseUri, "Accept: application/sdp");
+
+            var setup = client.Send("SETUP", baseUri + "/trackID=0", "Transport: RTP/AVP;multicast");
+
+            Assert.AreEqual(200, setup.StatusCode, "a multicast SETUP should be accepted");
+
+            string transport = setup.Match(@"Transport:\s*([^\r\n]+)");
+            Assert.IsNotNull(transport, "the reply should describe the transport");
+
+            var destination = Regex.Match(transport, @"destination=([^;\s]+)");
+            var groupPort = Regex.Match(transport, @"port=(\d+)-(\d+)");
+            var ttl = Regex.Match(transport, @"ttl=(\d+)");
+
+            Assert.IsTrue(destination.Success, "the client has to be told which group: " + transport);
+            Assert.IsTrue(groupPort.Success, "and on which port: " + transport);
+
+            return (client, setup.Session, destination.Groups[1].Value,
+                int.Parse(groupPort.Groups[1].Value),
+                ttl.Success ? int.Parse(ttl.Groups[1].Value) : -1);
+        }
+
+        /// <summary>
+        /// Listens to a group the way a client told to would.
+        /// </summary>
+        private static UdpClient Listen(string group, int port)
+        {
+            var socket = new UdpClient();
+            socket.ExclusiveAddressUse = false;
+            socket.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
+            socket.Client.Bind(new IPEndPoint(IPAddress.Any, port));
+            // The default interface, not the loopback one - loopback does not carry multicast, and
+            // joining on it is refused outright. A sender on this machine still reaches this socket,
+            // because a host delivers its own multicast back to itself.
+            socket.JoinMulticastGroup(IPAddress.Parse(group));
+            socket.Client.ReceiveTimeout = 3000;
+            return socket;
+        }
+
+        [TestMethod]
+        public void TheClientIsToldWhereToListen()
+        {
+            int port = TestPorts.FindFree();
+            // a hop limit that is actually reported, since a header omits a zero
+            using var server = NewServer(port, out _, 56000, ttl: 1);
+
+            var joined = Join(port);
+
+            using (joined.Client)
+            {
+                Assert.AreEqual(Group, joined.Destination, "it should name the configured group");
+                Assert.IsGreaterThanOrEqualTo(56000, joined.Port, "and a port from the multicast range");
+                Assert.IsLessThan(56040, joined.Port);
+                Assert.AreEqual(1, joined.Ttl, "the hop limit is part of the answer");
+            }
+        }
+
+        [TestMethod]
+        public void TwoClientsAreSentToTheSameGroup()
+        {
+            int port = TestPorts.FindFree();
+            using var server = NewServer(port, out _, 56100);
+
+            var first = Join(port);
+            var second = Join(port);
+
+            using (first.Client)
+            using (second.Client)
+            {
+                // The whole point. One group and one port for both of them, and so one copy of the
+                // media rather than one each.
+                Assert.AreEqual(first.Destination, second.Destination);
+                Assert.AreEqual(first.Port, second.Port, "both should be sent to the same port");
+            }
+        }
+
+        [TestMethod]
+        public void AFrameGoesToTheGroupOnceHoweverManyAreListening()
+        {
+            int port = TestPorts.FindFree();
+            using var server = NewServer(port, out var videoTrack, 56200);
+
+            var first = Join(port);
+            var second = Join(port);
+            var third = Join(port);
+
+            using (first.Client)
+            using (second.Client)
+            using (third.Client)
+            using (var wire = Listen(first.Destination, first.Port))
+            {
+                string baseUri = $"rtsp://127.0.0.1:{port}/stream1";
+                first.Client.Send("PLAY", baseUri, "Session: " + first.Session);
+                second.Client.Send("PLAY", baseUri, "Session: " + second.Session);
+                third.Client.Send("PLAY", baseUri, "Session: " + third.Session);
+
+                Thread.Sleep(200);
+
+                // exactly one frame, of exactly one packet
+                videoTrack.FeedInRawSamples(9000, OneNal());
+
+                int arrived = 0;
+                var from = new IPEndPoint(IPAddress.Any, 0);
+
+                while (true)
+                {
+                    try
+                    {
+                        wire.Receive(ref from);
+                        arrived++;
+                    }
+                    catch (SocketException)
+                    {
+                        break; // nothing more is coming
+                    }
+                }
+
+                // Three clients, one packet. Sending it once is what makes this multicast rather
+                // than three unicast streams that happen to share an address.
+                Assert.AreEqual(1, arrived,
+                    "one frame should reach the group once, not once per client listening");
+            }
+        }
+
+        [TestMethod]
+        public void TheGroupCarriesOneSequenceOfNumbers()
+        {
+            int port = TestPorts.FindFree();
+            using var server = NewServer(port, out var videoTrack, 56300);
+
+            var first = Join(port);
+            var second = Join(port);
+
+            using (first.Client)
+            using (second.Client)
+            using (var wire = Listen(first.Destination, first.Port))
+            {
+                string baseUri = $"rtsp://127.0.0.1:{port}/stream1";
+                first.Client.Send("PLAY", baseUri, "Session: " + first.Session);
+                second.Client.Send("PLAY", baseUri, "Session: " + second.Session);
+
+                Thread.Sleep(200);
+
+                const int Frames = 8;
+                var numbers = new List<int>();
+                var from = new IPEndPoint(IPAddress.Any, 0);
+
+                for (int i = 0; i < Frames; i++)
+                {
+                    videoTrack.FeedInRawSamples((uint)((i + 1) * 3000), OneNal());
+
+                    try
+                    {
+                        byte[] packet = wire.Receive(ref from);
+                        numbers.Add((packet[2] << 8) | packet[3]);
+                    }
+                    catch (SocketException)
+                    {
+                        break;
+                    }
+                }
+
+                Assert.IsGreaterThanOrEqualTo(4, numbers.Count, "not enough arrived to say anything");
+
+                // Two clients stamping their own numbering onto one group would show up here as a
+                // number repeated or jumped.
+                for (int i = 1; i < numbers.Count; i++)
+                {
+                    Assert.AreEqual((numbers[i - 1] + 1) & 0xFFFF, numbers[i],
+                        $"the group should number its packets once: {string.Join(", ", numbers)}");
+                }
+            }
+        }
+
+        [TestMethod]
+        public void TheGroupLastsWhileAnybodyIsStillListening()
+        {
+            int port = TestPorts.FindFree();
+            using var server = NewServer(port, out var videoTrack, 56400);
+
+            var staying = Join(port);
+            var leaving = Join(port);
+
+            using (staying.Client)
+            using (var wire = Listen(staying.Destination, staying.Port))
+            {
+                string baseUri = $"rtsp://127.0.0.1:{port}/stream1";
+                staying.Client.Send("PLAY", baseUri, "Session: " + staying.Session);
+                leaving.Client.Send("PLAY", baseUri, "Session: " + leaving.Session);
+
+                Thread.Sleep(200);
+
+                // one of them goes
+                leaving.Client.Send("TEARDOWN", baseUri, "Session: " + leaving.Session);
+                leaving.Client.Dispose();
+                Thread.Sleep(300);
+
+                // and the media does not stop for the one still watching
+                var from = new IPEndPoint(IPAddress.Any, 0);
+                byte[] packet = null;
+
+                for (int i = 0; i < 10 && packet == null; i++)
+                {
+                    videoTrack.FeedInRawSamples((uint)((i + 1) * 3000), OneNal());
+
+                    try
+                    {
+                        packet = wire.Receive(ref from);
+                    }
+                    catch (SocketException)
+                    {
+                    }
+                }
+
+                Assert.IsNotNull(packet, "one client leaving should not stop the group for the others");
+            }
+        }
+
+        [TestMethod]
+        public void TheGroupStopsWhenTheLastListenerHasGone()
+        {
+            int port = TestPorts.FindFree();
+            using var server = NewServer(port, out var videoTrack, 56500);
+
+            var only = Join(port);
+            string baseUri = $"rtsp://127.0.0.1:{port}/stream1";
+
+            using (var wire = Listen(only.Destination, only.Port))
+            {
+                only.Client.Send("PLAY", baseUri, "Session: " + only.Session);
+                Thread.Sleep(200);
+
+                only.Client.Send("TEARDOWN", baseUri, "Session: " + only.Session);
+                only.Client.Dispose();
+                Thread.Sleep(400);
+
+                // drain anything already in flight, including the group saying goodbye
+                var from = new IPEndPoint(IPAddress.Any, 0);
+                wire.Client.ReceiveTimeout = 300;
+
+                while (true)
+                {
+                    try { wire.Receive(ref from); }
+                    catch (SocketException) { break; }
+                }
+
+                for (int i = 0; i < 5; i++)
+                {
+                    videoTrack.FeedInRawSamples((uint)((i + 1) * 3000), OneNal());
+                }
+
+                Thread.Sleep(200);
+
+                byte[] afterwards = null;
+
+                try { afterwards = wire.Receive(ref from); }
+                catch (SocketException) { }
+
+                Assert.IsNull(afterwards, "nothing should be sent to a group nobody is listening to");
+            }
+        }
+
+        [TestMethod]
+        public void MulticastCanBeTurnedOff()
+        {
+            int port = TestPorts.FindFree();
+            using var server = new RTSPServer(port, "admin", "password") { MulticastEnabled = false };
+            server.AddStreamSource(new RTSPStreamSource("stream1", new H264Track(Sps, Pps), null));
+            server.StartListen();
+
+            string baseUri = $"rtsp://127.0.0.1:{port}/stream1";
+
+            using var client = new RtspTestClient(port, "admin", "password");
+            client.Send("OPTIONS", baseUri);
+            client.Send("DESCRIBE", baseUri, "Accept: application/sdp");
+
+            var setup = client.Send("SETUP", baseUri + "/trackID=0", "Transport: RTP/AVP;multicast");
+
+            Assert.AreEqual(461, setup.StatusCode,
+                "a refused transport sends the client to one that works");
+        }
+
+        [TestMethod]
+        public void AProtectedTrackIsNotSentToAGroup()
+        {
+            int port = TestPorts.FindFree();
+
+            using var server = new RTSPServer(port, "admin", "password", false, null,
+                SrtpCryptoSuites.AES_CM_128_HMAC_SHA1_80, null)
+            {
+                MulticastAddress = Group,
+                MulticastTimeToLive = 0,
+            };
+
+            server.AddStreamSource(new RTSPStreamSource("stream1",
+                new H264Track(Sps, Pps) { RtpProfile = RtpProfiles.SAVP }, null));
+            server.StartListen();
+
+            string baseUri = $"rtsp://127.0.0.1:{port}/stream1";
+
+            using var client = new RtspTestClient(port, "admin", "password");
+            client.Send("OPTIONS", baseUri);
+            client.Send("DESCRIBE", baseUri, "Accept: application/sdp");
+
+            var setup = client.Send("SETUP", baseUri + "/trackID=0", "Transport: RTP/AVP;multicast");
+
+            // Every client is handed its own key in its own SDP, and a group has one stream for all
+            // of them - so there is no key the group could send under that they could all read.
+            Assert.AreEqual(461, setup.StatusCode,
+                "a protected track cannot be given to a group under the keys this server hands out");
+        }
+    }
+}

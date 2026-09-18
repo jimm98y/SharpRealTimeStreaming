@@ -95,6 +95,17 @@ namespace SharpRTSPServer
         /// </summary>
         public IRtpTransport RtpChannel { get; set; }
 
+        /// <summary>
+        /// Whether this client takes this track from a multicast group rather than from a stream of
+        /// its own.
+        /// </summary>
+        /// <remarks>
+        /// Such a client has no transport here: the media goes to the group once, however many are
+        /// listening, so the fan out passes over it. This says the difference between that and a
+        /// track which was never set up.
+        /// </remarks>
+        public bool IsMulticast { get; set; }
+
         // <summary>
         // Time since last RTCP message received - used to spot dead UDP clients.
         // </summary>

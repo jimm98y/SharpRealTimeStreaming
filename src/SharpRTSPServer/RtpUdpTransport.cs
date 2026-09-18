@@ -48,6 +48,15 @@ namespace SharpRTSPServer
         /// <summary>The family the sockets were opened in, and so the only one they can send to.</summary>
         public AddressFamily AddressFamily { get; }
 
+        /// <summary>
+        /// How far media sent to a multicast group is allowed to travel, in routed hops.
+        /// </summary>
+        /// <remarks>
+        /// One keeps it on the local link, which is where a group nobody has arranged routing for
+        /// belongs. Set it before the destination, since that is when it is applied.
+        /// </remarks>
+        public int MulticastTimeToLive { get; set; } = 1;
+
         public event EventHandler<RtspDataEventArgs> DataReceived;
 
         public event EventHandler<RtspDataEventArgs> ControlReceived;
@@ -116,6 +125,7 @@ namespace SharpRTSPServer
         public void SetDataDestination(string hostname, int port)
         {
             _dataEndPoint = Resolve(hostname, port);
+            ApplyMulticast(_dataSocket, _dataEndPoint);
         }
 
         /// <summary>
@@ -124,6 +134,7 @@ namespace SharpRTSPServer
         public void SetControlDestination(string hostname, int port)
         {
             _controlEndPoint = Resolve(hostname, port);
+            ApplyMulticast(_controlSocket, _controlEndPoint);
         }
 
         /// <summary>
@@ -204,6 +215,59 @@ namespace SharpRTSPServer
             return AddressFamily == AddressFamily.InterNetworkV6
                 ? address.AddressFamily == AddressFamily.InterNetwork
                 : address.IsIPv4MappedToIPv6;
+        }
+
+        /// <summary>
+        /// Whether an address names a group rather than one machine.
+        /// </summary>
+        public static bool IsMulticast(IPAddress address)
+        {
+            if (address == null)
+            {
+                return false;
+            }
+
+            if (address.AddressFamily == AddressFamily.InterNetworkV6)
+            {
+                return address.IsIPv6Multicast;
+            }
+
+            // 224.0.0.0 to 239.255.255.255
+            byte first = address.GetAddressBytes()[0];
+            return first >= 224 && first <= 239;
+        }
+
+        /// <summary>
+        /// Sets the hop limit on a socket that is about to send to a group.
+        /// </summary>
+        /// <remarks>
+        /// The default is one hop on most systems, but it is not worth relying on when the whole
+        /// point of the setting is to decide how far the media travels.
+        /// </remarks>
+        private void ApplyMulticast(UdpClient socket, IPEndPoint destination)
+        {
+            if (!IsMulticast(destination.Address))
+            {
+                return;
+            }
+
+            try
+            {
+                if (AddressFamily == AddressFamily.InterNetworkV6)
+                {
+                    socket.Client.SetSocketOption(SocketOptionLevel.IPv6, SocketOptionName.MulticastTimeToLive,
+                        MulticastTimeToLive);
+                }
+                else
+                {
+                    socket.Client.SetSocketOption(SocketOptionLevel.IP, SocketOptionName.MulticastTimeToLive,
+                        MulticastTimeToLive);
+                }
+            }
+            catch (SocketException ex)
+            {
+                _logger?.LogWarning(ex, "Could not set the multicast hop limit to {ttl}", MulticastTimeToLive);
+            }
         }
 
         public void Start()

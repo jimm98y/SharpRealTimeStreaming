@@ -183,6 +183,16 @@ namespace SharpRTSPServer
         /// <summary>
         /// Default value of <see cref="RtpPortRangeStart"/>.
         /// </summary>
+        /// <summary>
+        /// Default value of <see cref="MulticastPortRangeStart"/>.
+        /// </summary>
+        public const int DEFAULT_MULTICAST_PORT_RANGE_START = 52000;
+
+        /// <summary>
+        /// Default value of <see cref="MulticastPortRangeEnd"/>.
+        /// </summary>
+        public const int DEFAULT_MULTICAST_PORT_RANGE_END = 52500;
+
         public const int DEFAULT_RTP_PORT_RANGE_START = 50000;
 
         /// <summary>
@@ -408,6 +418,62 @@ namespace SharpRTSPServer
         /// start to wait. Set it before <see cref="StartListen"/>; it is read once.
         /// </remarks>
         public int MaxWriterThreads { get; set; } = RtpWriterPool.DEFAULT_MAX_THREADS;
+
+        /// <summary>
+        /// Whether a client may ask to be sent the media over multicast.
+        /// </summary>
+        /// <remarks>
+        /// On, because a server that refuses sends every client its own copy of the same frames. Turn
+        /// it off on a network where sending to a group is unwelcome; clients then fall back to a
+        /// transport of their own, as they did when it was not implemented.
+        /// </remarks>
+        public bool MulticastEnabled { get; set; } = true;
+
+        /// <summary>
+        /// The group the media is sent to.
+        /// </summary>
+        /// <remarks>
+        /// From the administratively scoped range, which is the part of the multicast space set aside
+        /// for use within one organisation and never routed onto the internet. Streams share the
+        /// group and are told apart by their ports, which is how a receiver filters them anyway.
+        /// </remarks>
+        public string MulticastAddress { get; set; } = "239.1.1.1";
+
+        /// <summary>
+        /// How far multicast media is allowed to travel, in routed hops.
+        /// </summary>
+        /// <remarks>
+        /// One by default, which keeps it on the local link. Anything more needs the routing between
+        /// here and there to have been arranged for it, so it is a deliberate choice rather than
+        /// something to be helpful about.
+        /// </remarks>
+        public int MulticastTimeToLive { get; set; } = 1;
+
+        /// <summary>
+        /// First port of the range multicast groups take their ports from.
+        /// </summary>
+        /// <remarks>
+        /// Its own range, separate from the one unicast sessions use. A group's ports are not a
+        /// client's: they are named in the reply to every client that joins, and stay until the last
+        /// of them has gone.
+        /// </remarks>
+        public int MulticastPortRangeStart { get; private set; } = DEFAULT_MULTICAST_PORT_RANGE_START;
+
+        /// <summary>
+        /// Last port of the range multicast groups take their ports from.
+        /// </summary>
+        public int MulticastPortRangeEnd { get; private set; } = DEFAULT_MULTICAST_PORT_RANGE_END;
+
+        /// <summary>
+        /// Sets the range of ports multicast groups take their ports from.
+        /// </summary>
+        public void SetMulticastPortRange(int firstPort, int lastPort)
+        {
+            ValidateRtpPortRange(firstPort, lastPort);
+
+            MulticastPortRangeStart = firstPort;
+            MulticastPortRangeEnd = lastPort;
+        }
 
         /// <summary>
         /// How many threads the server is currently using to write media, across all of its clients.
@@ -1428,10 +1494,18 @@ namespace SharpRTSPServer
                         // the pairing is out by at most a frame, and it is what a live source can
                         // honestly say. A track that has produced nothing yet says nothing, rather
                         // than naming a time that means nothing.
+                        // A client listening to a group has no stream of its own, so what it is told
+                        // about is the group's - which is the numbering it will actually receive.
+                        RTPStream[] playing = connection.Streams
+                            .Select((stream, trackId) => stream.IsMulticast
+                                ? streamSource.Multicast?.Sender.Streams[trackId]
+                                : stream.RtpChannel != null ? stream : null)
+                            .ToArray();
+
                         string rtpInfo = string.Join(",",
-                            connection.Streams
+                            playing
                                 .Select((stream, trackId) => new { stream, trackId })
-                                .Where(x => x.stream.RtpChannel != null)
+                                .Where(x => x.stream != null)
                                 .Select(x =>
                                 {
                                     string entry = $"url={TrackControlUri(message.RtspUri, streamSource.GetTrackControl((TrackType)x.trackId))};seq={x.stream.SequenceNumber}";
@@ -1479,6 +1553,10 @@ namespace SharpRTSPServer
 
                             listener.SendMessage(playResponse);
                         }
+
+                        // Outside the connection's lock, because the group is not this connection and
+                        // taking one lock while holding another is how the two orders meet.
+                        StartMulticastIfListening(connection, streamSource);
 
                         RaiseReceivedRtspMessage(sender, new RtspMessageEventArgs(message, connection));
                     }
@@ -1552,6 +1630,17 @@ namespace SharpRTSPServer
             RtspTransport transport;
             try
             {
+                // A SETUP that names no transport at all is not asking for a default one. The parsed
+                // form of an absent header is a transport like any other - and its multicast flag
+                // happens to be set - so without this a client that said nothing would be answered
+                // with a multicast group it never asked to join.
+                if (!setupMessage.Headers.ContainsKey(RtspHeaderNames.Transport))
+                {
+                    _logger.LogWarning("SETUP from {remoteEndPoint} named no transport", listener.RemoteEndPoint);
+                    SendUnsupportedTransport(listener, setupMessage);
+                    return;
+                }
+
                 RtspTransport[] transports = setupMessage.GetTransports();
                 transport = transports.Length > 0 ? transports[0] : null;
             }
@@ -1566,6 +1655,10 @@ namespace SharpRTSPServer
             // Construct the Transport: reply from the Server to the client
             RtspTransport transportReply = null;
             IRtpTransport rtpTransport = null;
+
+            // Set when this SETUP is for a group rather than for a stream of this client's own. The
+            // client's own stream is not reached until further down, where the session is looked up.
+            MulticastDelivery multicastDelivery = null;
 
             RTSPStreamSource streamSource = GetStreamSource(setupMessage.RtspUri);
             if (streamSource == null)
@@ -1718,9 +1811,66 @@ namespace SharpRTSPServer
             }
             else if (transport.LowerTransport == RtspTransport.LowerTransportType.UDP && transport.IsMulticast)
             {
-                // RTP over Multicast UDP is not implemented yet. Leaving transportReply null makes the
-                // client fall back to a transport we do support, via the 461 reply below.
-                _logger.LogWarning("Refusing multicast SETUP from {remoteEndPoint}, multicast is not supported", listener.RemoteEndPoint);
+                if (!MulticastEnabled)
+                {
+                    _logger.LogWarning("Refusing multicast SETUP from {remoteEndPoint}, multicast is turned off on this server",
+                        listener.RemoteEndPoint);
+                    SendUnsupportedTransport(listener, setupMessage);
+                    return;
+                }
+
+                // One group, one set of keys, and the keys are handed to each client in the SDP it
+                // asked for - so every client would be given a different key for the one stream they
+                // are all listening to. Protecting a group needs a key shared by everyone in it,
+                // which is a different arrangement from the one this server has.
+                if (setupTrack.RtpProfile == RtpProfiles.SAVP)
+                {
+                    _logger.LogWarning("Refusing multicast SETUP of the protected track {trackType} from {remoteEndPoint}",
+                        trackType, listener.RemoteEndPoint);
+                    SendUnsupportedTransport(listener, setupMessage);
+                    return;
+                }
+
+                // A group is one address, and a client can only join one of its own family. Telling
+                // an IPv6 client to listen to an IPv4 group names somewhere it cannot go.
+                if (!IPAddress.TryParse(MulticastAddress, out IPAddress group) ||
+                    group.AddressFamily != MediaFamily(listener.RemoteEndPoint.Address))
+                {
+                    _logger.LogWarning(
+                        "Refusing multicast SETUP from {remoteEndPoint}: the group {group} is not in the family this client arrived on",
+                        listener.RemoteEndPoint, MulticastAddress);
+                    SendUnsupportedTransport(listener, setupMessage);
+                    return;
+                }
+
+                MulticastDelivery delivery;
+
+                try
+                {
+                    delivery = JoinMulticastGroup(streamSource, trackType);
+                }
+                catch (Exception ex) when (ex is InvalidOperationException || ex is SocketException)
+                {
+                    _logger.LogWarning(ex, "Could not open a multicast group for {streamID} {trackType}",
+                        streamSource.StreamID, trackType);
+                    SendUnsupportedTransport(listener, setupMessage);
+                    return;
+                }
+
+                // The client is told where to listen and is then left alone. It has no transport of
+                // its own - the media goes to the group once, however many are listening - so its
+                // stream is marked rather than given a channel, and the fan out passes over it.
+                multicastDelivery = delivery;
+
+                transportReply = new RtspTransport()
+                {
+                    SSrc = delivery.Sender.Streams[(int)trackType].SSRC.ToString("X8"),
+                    LowerTransport = RtspTransport.LowerTransportType.UDP,
+                    IsMulticast = true,
+                    Destination = delivery.GroupAddress,
+                    Port = new PortCouple(delivery.RtpPort[(int)trackType], delivery.RtpPort[(int)trackType] + 1),
+                    TTL = MulticastTimeToLive,
+                };
             }
 
             if (transportReply != null)
@@ -1762,6 +1912,15 @@ namespace SharpRTSPServer
                     }
 
                     stream.RtpChannel = rtpTransport;
+
+                    // A client listening to a group is counted rather than written to, so that the
+                    // group lasts exactly as long as somebody wants it.
+                    stream.IsMulticast = multicastDelivery != null;
+
+                    if (multicastDelivery != null)
+                    {
+                        multicastDelivery.Listeners.Add(connection);
+                    }
 
                     // When there is Video and Audio there are two SETUP commands.
                     // For the first SETUP command we will generate the connection.SessionId and return a SessionID in the Reply.
@@ -2499,6 +2658,7 @@ namespace SharpRTSPServer
         private void RemoveSession(RTSPConnection connection)
         {
             RtspListener listener;
+            List<RTSPConnection> finishedGroups;
 
             lock (_connectionList)
             {
@@ -2513,6 +2673,11 @@ namespace SharpRTSPServer
                 }
 
                 connection.Play = false; // stop sending data
+
+                // Before the connection is taken off the lists, since that is where the groups it was
+                // listening to are found. What it leaves empty is shut down further down, outside
+                // this lock.
+                finishedGroups = LeaveMulticastGroups(connection);
 
                 // stops the writer taking any more work, and hands back what it was still holding
                 connection.Outbound?.Dispose();
@@ -2533,8 +2698,232 @@ namespace SharpRTSPServer
             }
 
             // Outside the list lock, so waiting for the writer cannot hold up the rest of the server.
+            ShutDownMulticastSenders(finishedGroups);
             ReleaseUdpTransports(connection);
             CloseConnection(connection, listener);
+        }
+
+        /// <summary>
+        /// Makes sure this stream has a group carrying the given track, and hands it back.
+        /// </summary>
+        /// <remarks>
+        /// Called under the connection list lock, which is what keeps two clients setting up the same
+        /// track at the same time from opening two groups for it.
+        /// </remarks>
+        private MulticastDelivery JoinMulticastGroup(RTSPStreamSource streamSource, TrackType trackType)
+        {
+            lock (_connectionList)
+            {
+                MulticastDelivery delivery = streamSource.Multicast;
+
+                if (delivery == null)
+                {
+                    delivery = new MulticastDelivery
+                    {
+                        GroupAddress = MulticastAddress,
+                        Sender = new RTSPConnection
+                        {
+                            SessionId = "multicast " + streamSource.StreamID,
+                        },
+                    };
+
+                    delivery.Sender.Outbound = new OutboundQueue(
+                        _writers,
+                        MaxQueuedFramesPerConnection,
+                        MaxQueuedBytesPerConnection,
+                        frame => WriteQueuedFrame(delivery.Sender, frame),
+                        "the " + streamSource.StreamID + " multicast group",
+                        _logger);
+
+                    streamSource.Multicast = delivery;
+
+                    // In the list frames are handed to, and only that one. It is not a client: there
+                    // is no connection to time out, no session to tear down and nobody to answer.
+                    streamSource.ConnectionList.Add(delivery.Sender);
+                }
+
+                if (!delivery.Carries(trackType))
+                {
+                    // The port the group listens on, which is a number the clients are told and not
+                    // one this server binds. Sending to a group does not mean sending from the port
+                    // it arrives on, and binding it here would be taking a port out of the hands of
+                    // anything on this machine that wanted to listen to the group.
+                    int groupPort = NextMulticastPort();
+
+                    // The sockets it is sent from are ordinary ones, out of the ordinary range, in
+                    // the family of the group they send to.
+                    RtpUdpTransport group = AllocateUdpPair(
+                        IPAddress.Parse(delivery.GroupAddress).AddressFamily);
+
+                    try
+                    {
+                        group.MulticastTimeToLive = MulticastTimeToLive;
+                        group.SetDataDestination(delivery.GroupAddress, groupPort);
+                        group.SetControlDestination(delivery.GroupAddress, groupPort + 1);
+                        group.Start();
+                    }
+                    catch (Exception)
+                    {
+                        ReleaseTransport(group);
+                        throw;
+                    }
+
+                    RTPStream stream = delivery.Sender.Streams[(int)trackType];
+                    stream.RtpChannel = group;
+                    stream.SSRC = trackType == TrackType.Video
+                        ? streamSource.VideoTrack?.SSRC ?? 0
+                        : streamSource.AudioTrack?.SSRC ?? 0;
+                    stream.MustSendRtcpPacket = true;
+
+                    delivery.RtpPort[(int)trackType] = groupPort;
+
+                    _logger.LogInformation("Sending {streamID} {trackType} to {group}:{port}, ttl {ttl}",
+                        streamSource.StreamID, trackType, delivery.GroupAddress, groupPort, MulticastTimeToLive);
+                }
+
+                return delivery;
+            }
+        }
+
+        /// <summary>
+        /// The next unused port for a group to be listened to on.
+        /// </summary>
+        /// <remarks>
+        /// Handed out rather than bound. Nothing here listens on it - it is where the receivers do -
+        /// so all this has to do is not name the same one twice while two groups are running.
+        /// Called under the connection list lock.
+        /// </remarks>
+        private int NextMulticastPort()
+        {
+            for (int port = MulticastPortRangeStart; port + 1 < MulticastPortRangeEnd; port += PORTS_PER_RTP_PAIR)
+            {
+                if (_multicastPortsInUse.Contains(port))
+                {
+                    continue;
+                }
+
+                _multicastPortsInUse.Add(port);
+                return port;
+            }
+
+            throw new InvalidOperationException(
+                $"Every multicast port between {MulticastPortRangeStart} and {MulticastPortRangeEnd} is in use.");
+        }
+
+        /// <summary>
+        /// The ports groups are currently being listened to on. Guarded by the connection list lock.
+        /// </summary>
+        private readonly HashSet<int> _multicastPortsInUse = new HashSet<int>();
+
+        /// <summary>
+        /// Starts the group for a client that has just begun playing, if it is listening to one.
+        /// </summary>
+        /// <remarks>
+        /// The group sends nothing until somebody is playing, and keeps sending while anybody still
+        /// is. It is the second of those that makes it a group: the media does not restart, pause or
+        /// stop because one of the clients did.
+        /// </remarks>
+        private void StartMulticastIfListening(RTSPConnection connection, RTSPStreamSource streamSource)
+        {
+            bool listening = false;
+
+            foreach (RTPStream stream in connection.Streams)
+            {
+                listening |= stream.IsMulticast;
+            }
+
+            if (!listening)
+            {
+                return;
+            }
+
+            lock (_connectionList)
+            {
+                MulticastDelivery delivery = streamSource.Multicast;
+
+                if (delivery == null || !delivery.Listeners.Contains(connection))
+                {
+                    return;
+                }
+
+                delivery.Sender.Play = true;
+            }
+        }
+
+        /// <summary>
+        /// Takes a client out of whatever groups it was listening to, and shuts down any that nobody
+        /// is left listening to.
+        /// </summary>
+        /// <remarks>
+        /// Called while the connection list lock is held, as the session is being removed.
+        /// </remarks>
+        private List<RTSPConnection> LeaveMulticastGroups(RTSPConnection connection)
+        {
+            List<RTSPConnection> finished = null;
+
+            foreach (RTSPStreamSource streamSource in StreamSources)
+            {
+                MulticastDelivery delivery = streamSource.Multicast;
+
+                if (delivery == null || !delivery.Listeners.Remove(connection))
+                {
+                    continue;
+                }
+
+                if (delivery.Listeners.Count > 0)
+                {
+                    continue;
+                }
+
+                // The last one has gone, so there is nobody to send to. Everything about the group
+                // goes with it, including the port it was listened to on - a group holds one for as
+                // long as it exists, which is longer than any one session.
+                _logger.LogInformation("Nobody is listening to the {streamID} multicast group any more, shutting it down",
+                    streamSource.StreamID);
+
+                streamSource.Multicast = null;
+                streamSource.ConnectionList.Remove(delivery.Sender);
+
+                foreach (int groupPort in delivery.RtpPort)
+                {
+                    _multicastPortsInUse.Remove(groupPort);
+                }
+
+                delivery.Sender.Play = false;
+                delivery.Sender.Outbound?.Dispose();
+                delivery.Sender.Outbound = null;
+
+                // Saying goodbye and handing the sockets back both wait on whatever is writing the
+                // group, so neither is done here - the list lock is held, and every other connection
+                // and request on the server is waiting behind it.
+                (finished = finished ?? new List<RTSPConnection>()).Add(delivery.Sender);
+            }
+
+            return finished;
+        }
+
+        /// <summary>
+        /// Says goodbye to a group that nobody is listening to any more, and lets its sockets go.
+        /// </summary>
+        private void ShutDownMulticastSenders(List<RTSPConnection> senders)
+        {
+            if (senders == null)
+            {
+                return;
+            }
+
+            foreach (RTSPConnection sender in senders)
+            {
+                foreach (RTPStream stream in sender.Streams)
+                {
+                    if (stream.RtpChannel != null)
+                    {
+                        SendRTCPBye(sender, stream);
+                    }
+                }
+
+                ReleaseUdpTransports(sender);
+            }
         }
 
         /// <summary>

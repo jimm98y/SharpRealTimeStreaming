@@ -36,6 +36,11 @@ namespace SharpRTSPServer
         /// Read from the track rather than kept here, so that it is the same number whether the
         /// media is being sent or merely produced.
         /// </remarks>
+        /// <summary>
+        /// The group this stream is sent to, once anybody has asked for it that way.
+        /// </summary>
+        internal MulticastDelivery Multicast { get; set; }
+
         internal bool TryGetLastRtpTimestamp(int streamType, out uint rtpTimestamp)
         {
             rtpTimestamp = 0;
