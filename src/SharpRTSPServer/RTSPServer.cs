@@ -1709,15 +1709,16 @@ namespace SharpRTSPServer
                     && transport.LowerTransport == RtspTransport.LowerTransportType.UDP
                     && transport.IsMulticast;
 
-                // The key belongs to the stream, so every client has the same one. Sending to more
-                // than one of them separately under it would have them all encrypting with the same
-                // key and the same SSRC while numbering their packets independently - the same
-                // keystream protecting two different packets, which is the one thing SRTP must never
-                // do. A group has one sender, so it has none of that.
-                if (streamSource.SharedSrtpKey && !wantsMulticast)
+                // One key and several senders is safe only where the senders differ in their SSRC,
+                // which is what the keystream is worked out from. A track that forwards what it
+                // receives keeps the SSRC and the numbering of whatever produced it, so every client
+                // would send identical packets under the one key - two plaintexts under one
+                // keystream, which anyone holding both could unwind. A group is still fine: there is
+                // one sender, whatever SSRC it uses.
+                if (streamSource.SharedSrtpKey && !wantsMulticast && PreservesSourceHeaders(setupTrack))
                 {
                     _logger.LogWarning(
-                        "Refusing a unicast SETUP of {trackType} on {streamID} from {remoteEndPoint}: its SRTP key belongs to the stream, so it goes out by multicast only",
+                        "Refusing a unicast SETUP of {trackType} on {streamID} from {remoteEndPoint}: it forwards the source's own headers, which every client would then send under the one shared key",
                         trackType, streamSource.StreamID, listener.RemoteEndPoint);
                     SendUnsupportedTransport(listener, setupMessage);
                     return;
@@ -1917,7 +1918,17 @@ namespace SharpRTSPServer
                     // The SSRC belongs to the stream this SETUP is for. Putting it on the connection
                     // meant the second SETUP overwrote the first, so both streams went out under one
                     // SSRC while each SETUP reply had announced a different one.
-                    stream.SSRC = trackSSRC;
+                    //
+                    // Where the key belongs to the stream, every client holds the same one, and what
+                    // keeps that safe is that no two senders share an SSRC - so a client sent the
+                    // media one to one is given one nothing has used before. A client listening to a
+                    // group sends nothing itself and takes the group's.
+                    stream.SSRC = streamSource.SharedSrtpKey && multicastDelivery == null
+                        ? streamSource.ReserveSsrc()
+                        : trackSSRC;
+
+                    // and the reply has to name the one it will actually hear
+                    transportReply.SSrc = stream.SSRC.ToString("X8");
                     stream.RequiresSrtp = setupTrack.RtpProfile == RtpProfiles.SAVP;
 #pragma warning disable CS0618 // kept in step for anyone still reading the obsolete connection-wide value
                     connection.SSRC = trackSSRC;
@@ -2734,6 +2745,12 @@ namespace SharpRTSPServer
         }
 
         /// <summary>
+        /// Whether a track sends on what it was given, headers and all, rather than restamping it.
+        /// </summary>
+        private static bool PreservesSourceHeaders(ITrack track) =>
+            track is ProxyTrack proxyTrack && proxyTrack.PreserveSourceHeaders;
+
+        /// <summary>
         /// Makes sure this stream has a group carrying the given track, and hands it back.
         /// </summary>
         /// <remarks>
@@ -2809,6 +2826,10 @@ namespace SharpRTSPServer
                     stream.SSRC = trackType == TrackType.Video
                         ? streamSource.VideoTrack?.SSRC ?? 0
                         : streamSource.AudioTrack?.SSRC ?? 0;
+
+                    // Put beyond use, so that no client sent the stream one to one is ever handed the
+                    // SSRC the group is already sending under.
+                    streamSource.ReserveSsrc(stream.SSRC);
                     stream.MustSendRtcpPacket = true;
 
                     delivery.RtpPort[(int)trackType] = groupPort;

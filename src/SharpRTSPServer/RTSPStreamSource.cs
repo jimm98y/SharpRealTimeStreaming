@@ -59,11 +59,12 @@ namespace SharpRTSPServer
         /// from a key that belongs to one client.
         /// </para>
         /// <para>
-        /// While it is on, the stream goes out by multicast only. One key across several unicast
-        /// clients would be worse than no encryption at all: they would all be sending under the
-        /// same key and the same SSRC while numbering their packets independently, so the same
-        /// keystream would protect two different packets, and anyone holding both could recover both
-        /// from the pair. Multicast has no such problem because there is one sender.
+        /// Clients may be sent the stream one at a time as well as by group. What makes that safe is
+        /// that each sender is given an SSRC of its own: SRTP works its keystream out from the key,
+        /// the SSRC and the packet number, so senders that differ in their SSRC never share one. Were
+        /// they all to send under the same SSRC, as they do when each holds a key of its own, two
+        /// different packets would be protected by the same keystream and anyone holding both could
+        /// recover both from the pair.
         /// </para>
         /// </remarks>
         public bool SharedSrtpKey { get; set; }
@@ -72,6 +73,57 @@ namespace SharpRTSPServer
         /// The keys the group uses, one per track, derived once and handed to everyone.
         /// </summary>
         internal RTPStream[] GroupKeys { get; } = { new RTPStream(), new RTPStream() };
+
+        /// <summary>
+        /// Every SSRC this stream has sent under since its key was derived.
+        /// </summary>
+        /// <remarks>
+        /// Not the ones in use - the ones ever used. Under a shared key, what must never repeat is
+        /// the pair of SSRC and packet number: each sender numbers from the start of its own session,
+        /// so handing a finished session's SSRC to a new one would send different media under the
+        /// same keystream. They are therefore retired rather than returned. One entry costs four
+        /// bytes and a session, which is not a rate anything grows at.
+        /// </remarks>
+        private readonly HashSet<uint> _ssrcsUsed = new HashSet<uint>();
+
+        private readonly object _ssrcLock = new object();
+
+        /// <summary>
+        /// An SSRC no sender on this stream has used before.
+        /// </summary>
+        /// <remarks>
+        /// What makes one key safe for several senders. SRTP works its keystream out from the key,
+        /// the SSRC and the packet number, so senders that differ in their SSRC never share one -
+        /// which is what lets clients that were all handed the same key be sent media separately.
+        /// </remarks>
+        internal uint ReserveSsrc()
+        {
+            lock (_ssrcLock)
+            {
+                while (true)
+                {
+                    uint candidate = RandomGenerator.NextUInt32();
+
+                    // Zero is not used, so that it can go on meaning "none" where a stream has not
+                    // been set up.
+                    if (candidate != 0 && _ssrcsUsed.Add(candidate))
+                    {
+                        return candidate;
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Puts an SSRC beyond use on this stream, for one this stream did not choose.
+        /// </summary>
+        internal void ReserveSsrc(uint ssrc)
+        {
+            lock (_ssrcLock)
+            {
+                _ssrcsUsed.Add(ssrc);
+            }
+        }
 
         internal bool TryGetLastRtpTimestamp(int streamType, out uint rtpTimestamp)
         {

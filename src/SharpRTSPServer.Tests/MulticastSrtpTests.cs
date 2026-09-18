@@ -189,27 +189,166 @@ namespace SharpRTSPServer.Tests
             }
         }
 
+        /// <summary>
+        /// Sets a client up one to one and says which SSRC it was told to expect.
+        /// </summary>
+        private static (RtspTestClient Client, string Session, uint Ssrc, byte[] Key) JoinUnicast(int port, int clientPort)
+        {
+            string baseUri = $"rtsp://127.0.0.1:{port}/stream1";
+
+            var client = new RtspTestClient(port, "admin", "password");
+            client.Send("OPTIONS", baseUri);
+
+            var describe = client.Send("DESCRIBE", baseUri, "Accept: application/sdp");
+            var crypto = Regex.Match(describe.Body ?? string.Empty, @"inline:([A-Za-z0-9+/=]+)");
+            Assert.IsTrue(crypto.Success, describe.Body);
+
+            var setup = client.Send("SETUP", baseUri + "/trackID=0",
+                $"Transport: RTP/AVP/TCP;unicast;interleaved={clientPort}-{clientPort + 1}");
+
+            Assert.AreEqual(200, setup.StatusCode, "one to one delivery of a shared key stream is allowed");
+
+            string transport = setup.Match(@"Transport:\s*([^\r\n]+)");
+            var ssrc = Regex.Match(transport, @"ssrc=([0-9A-Fa-f]+)");
+            Assert.IsTrue(ssrc.Success, "the reply should name the SSRC the client will hear: " + transport);
+
+            return (client, setup.Session,
+                uint.Parse(ssrc.Groups[1].Value, System.Globalization.NumberStyles.HexNumber),
+                Convert.FromBase64String(crypto.Groups[1].Value));
+        }
+
         [TestMethod]
-        public void AStreamWhoseKeyIsSharedDoesNotGoOutOneToOne()
+        public void ClientsSentTheStreamOneToOneEachGetTheirOwnSsrc()
         {
             int port = TestPorts.FindFree();
             using var server = NewServer(port, out _, 56800);
 
-            string baseUri = $"rtsp://127.0.0.1:{port}/stream1";
+            var first = JoinUnicast(port, 0);
+            var second = JoinUnicast(port, 0);
 
-            using var client = new RtspTestClient(port, "admin", "password");
-            client.Send("OPTIONS", baseUri);
-            client.Send("DESCRIBE", baseUri, "Accept: application/sdp");
+            using (first.Client)
+            using (second.Client)
+            {
+                // The same key, which is the point of a shared one - and different SSRCs, which is
+                // what keeps it safe. SRTP works its keystream out from the key, the SSRC and the
+                // packet number, so two senders that differ in their SSRC never share one.
+                CollectionAssert.AreEqual(first.Key, second.Key, "they hold the same key");
 
-            // Every client holds the same key here. Sending to several of them separately would have
-            // them all protecting packets with that key under the same SSRC while numbering
-            // independently, so one keystream would cover two different packets - worse than sending
-            // nothing at all.
-            var unicast = client.Send("SETUP", baseUri + "/trackID=0",
-                "Transport: RTP/AVP;unicast;client_port=41800-41801");
+                Assert.AreNotEqual(first.Ssrc, second.Ssrc,
+                    "two senders under one key must not share an SSRC");
+            }
+        }
 
-            Assert.AreEqual(461, unicast.StatusCode,
-                "a shared key and one to one delivery do not go together");
+        [TestMethod]
+        public void AClientSentTheStreamOneToOneCanReadItWithTheSharedKey()
+        {
+            int port = TestPorts.FindFree();
+            using var server = NewServer(port, out var videoTrack, 56850);
+
+            var joined = JoinUnicast(port, 0);
+
+            using (joined.Client)
+            {
+                string baseUri = $"rtsp://127.0.0.1:{port}/stream1";
+                Assert.AreEqual(200, joined.Client.Send("PLAY", baseUri, "Session: " + joined.Session).StatusCode);
+
+                SrtpKeys keys = SrtpProtocol.CreateMasterKeys(SrtpCryptoSuites.AES_CM_128_HMAC_SHA1_80,
+                    Array.Empty<byte>(), joined.Key);
+                SrtpSessionContext context = SrtpProtocol.CreateSrtpSessionContext(keys);
+
+                int read = 0;
+
+                for (int i = 0; i < 12 && read < 3; i++)
+                {
+                    videoTrack.FeedInRawSamples((uint)((i + 1) * 3000),
+                        new List<ReadOnlyMemory<byte>> { new ReadOnlyMemory<byte>(Nal) });
+
+                    var frame = joined.Client.ReadInterleaved();
+
+                    if (frame.Channel != 0)
+                    {
+                        continue;
+                    }
+
+                    byte[] packet = frame.Payload;
+
+                    int result = context.DecodeRtpContext.UnprotectRtp(packet, packet.Length, out int length);
+                    Assert.AreEqual(0, result, $"packet {read} did not authenticate under the shared key");
+
+                    var payload = new ArraySegment<byte>(packet, 12, length - 12);
+                    CollectionAssert.AreEqual(Nal, payload.ToArray(), $"packet {read} came back wrong");
+
+                    read++;
+                }
+
+                Assert.IsGreaterThanOrEqualTo(3, read, "not enough arrived to say anything");
+            }
+        }
+
+        [TestMethod]
+        public void OneStreamCanBeSentToAGroupAndOneToOneAtTheSameTime()
+        {
+            int port = TestPorts.FindFree();
+            using var server = NewServer(port, out var videoTrack, 56900);
+
+            var group = Join(port);
+            var alone = JoinUnicast(port, 0);
+
+            using (group.Client)
+            using (alone.Client)
+            using (var wire = Listen(group.Destination, group.Port))
+            {
+                string baseUri = $"rtsp://127.0.0.1:{port}/stream1";
+                group.Client.Send("PLAY", baseUri, "Session: " + group.Session);
+                alone.Client.Send("PLAY", baseUri, "Session: " + alone.Session);
+
+                Thread.Sleep(200);
+
+                // The group sends under the track's SSRC and this client under one of its own, so the
+                // two never protect a packet with the same keystream even though the key is one.
+                Assert.AreNotEqual(0u, alone.Ssrc);
+
+                SrtpKeys keys = SrtpProtocol.CreateMasterKeys(group.CryptoSuite, Array.Empty<byte>(),
+                    group.MasterKeySalt);
+                SrtpSessionContext groupContext = SrtpProtocol.CreateSrtpSessionContext(keys);
+
+                bool fromGroup = false;
+                bool fromUnicast = false;
+                var from = new IPEndPoint(IPAddress.Any, 0);
+
+                for (int i = 0; i < 15 && !(fromGroup && fromUnicast); i++)
+                {
+                    videoTrack.FeedInRawSamples((uint)((i + 1) * 3000),
+                        new List<ReadOnlyMemory<byte>> { new ReadOnlyMemory<byte>(Nal) });
+
+                    if (!fromGroup)
+                    {
+                        try
+                        {
+                            byte[] packet = wire.Receive(ref from);
+                            Assert.AreEqual(0,
+                                groupContext.DecodeRtpContext.UnprotectRtp(packet, packet.Length, out _),
+                                "the group's media should read under the key from the SDP");
+                            fromGroup = true;
+                        }
+                        catch (SocketException)
+                        {
+                        }
+                    }
+
+                    if (!fromUnicast)
+                    {
+                        var frame = alone.Client.ReadInterleaved();
+                        if (frame.Channel == 0)
+                        {
+                            fromUnicast = true;
+                        }
+                    }
+                }
+
+                Assert.IsTrue(fromGroup, "the group should still be sent the media");
+                Assert.IsTrue(fromUnicast, "and so should the client that asked for it one to one");
+            }
         }
 
         [TestMethod]
