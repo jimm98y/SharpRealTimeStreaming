@@ -2256,7 +2256,21 @@ namespace SharpRTSPServer
         {
             lock (_connectionList)
             {
-                return StreamSources.FirstOrDefault(x => x.StreamID == streamID);
+                // Written out rather than with a lambda. This is asked twice for every frame of
+                // every stream - once to find out whether anyone is listening and once to hand the
+                // frame over - and a lambda that reads streamID captures it, so each call made a
+                // closure and a delegate to throw away.
+                for (int i = 0; i < StreamSources.Count; i++)
+                {
+                    RTSPStreamSource candidate = StreamSources[i];
+
+                    if (candidate.StreamID == streamID)
+                    {
+                        return candidate;
+                    }
+                }
+
+                return null;
             }
         }
 
@@ -3866,21 +3880,24 @@ namespace SharpRTSPServer
 
             // Copied once, not once per client. Everything about the frame is the same for all of
             // them, and the copy is the one cost here that grows with the size of the audience.
-            var frame = new QueuedFrame
-            {
-                StreamType = streamType,
-                RtpTimestamp = rtpTimestamp,
-                PreserveSourceHeaders = preserveSourceHeaders,
+            //
+            // Taken from a pool rather than made: one of these and the two lists inside it, for every
+            // frame of every stream, is a steady drip of garbage for something whose whole life is a
+            // few milliseconds.
+            QueuedFrame frame = QueuedFrame.Take();
 
-                // The RTP keeps the source's SSRC, so the sender reports have to name it too - a
-                // receiver ties the two together by SSRC and ignores one that does not match.
-                SourceSsrc = preserveSourceHeaders ? track.SSRC : 0u,
-            };
+            frame.StreamType = streamType;
+            frame.RtpTimestamp = rtpTimestamp;
+            frame.PreserveSourceHeaders = preserveSourceHeaders;
+
+            // The RTP keeps the source's SSRC, so the sender reports have to name it too - a
+            // receiver ties the two together by SSRC and ignores one that does not match.
+            frame.SourceSsrc = preserveSourceHeaders ? track.SSRC : 0u;
             try
             {
                 // inside the try: renting the buffers can fail partway, and the ones already taken
                 // still have to go back
-                frame.Take(rtpPackets);
+                frame.Fill(rtpPackets);
 
                 // Go through each RTSP connection and output the RTP on the Session
                 foreach (RTSPConnection connection in connections)

@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using System;
 using System.Buffers;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Threading;
 
@@ -24,6 +25,18 @@ namespace SharpRTSPServer
     /// </remarks>
     internal sealed class QueuedFrame
     {
+        /// <summary>
+        /// Where the buffers holding a frame come from.
+        /// </summary>
+        /// <remarks>
+        /// Not the shared pool. These are rented by whichever thread produced the frame and given
+        /// back by whichever wrote it, and the shared pool keeps a small cache per thread - so a
+        /// buffer handed back by a writer never reaches the producer that wants one, and the
+        /// producer allocates instead. A pool without that cache costs a lock and returns what was
+        /// given back to it.
+        /// </remarks>
+        private static readonly ArrayPool<byte> Buffers = ArrayPool<byte>.Create();
+
         /// <summary>The producer's own, given up once the frame has been offered to every connection.</summary>
         private int _references = 1;
 
@@ -47,11 +60,44 @@ namespace SharpRTSPServer
         /// <summary>How much of the queue's budget this frame takes up.</summary>
         public int Bytes { get; private set; }
 
-        public void Take(IReadOnlyList<Memory<byte>> packets)
+        /// <summary>
+        /// Frames that have been finished with, waiting to be used again.
+        /// </summary>
+        /// <remarks>
+        /// One frame object and the two lists inside it, per frame of every stream, is a steady drip
+        /// of garbage for something that lives a few milliseconds. The buffers were already pooled;
+        /// this is what was holding them.
+        /// <para>
+        /// Bounded, because a burst must not leave a pool the size of the burst behind it for ever.
+        /// Past the bound a frame is simply made and dropped, as they all were before.
+        /// </para>
+        /// </remarks>
+        private static readonly ConcurrentBag<QueuedFrame> Spare = new ConcurrentBag<QueuedFrame>();
+
+        private static int _spareCount;
+
+        private const int MOST_SPARE = 64;
+
+        /// <summary>
+        /// A frame to fill in, reused if there is one going spare.
+        /// </summary>
+        public static QueuedFrame Take()
+        {
+            if (Spare.TryTake(out QueuedFrame frame))
+            {
+                Interlocked.Decrement(ref _spareCount);
+                frame._references = 1;
+                return frame;
+            }
+
+            return new QueuedFrame();
+        }
+
+        public void Fill(IReadOnlyList<Memory<byte>> packets)
         {
             foreach (Memory<byte> packet in packets)
             {
-                byte[] buffer = ArrayPool<byte>.Shared.Rent(packet.Length);
+                byte[] buffer = Buffers.Rent(packet.Length);
                 packet.Span.CopyTo(buffer);
                 Packets.Add(buffer);
                 Lengths.Add(packet.Length);
@@ -80,12 +126,24 @@ namespace SharpRTSPServer
 
             foreach (byte[] buffer in Packets)
             {
-                ArrayPool<byte>.Shared.Return(buffer);
+                Buffers.Return(buffer);
             }
 
             Packets.Clear();
             Lengths.Clear();
             Bytes = 0;
+
+            // Back for the next frame, unless there are already enough waiting. The lists keep
+            // whatever capacity they grew to, which is the point: the next frame of the same stream
+            // is the same shape as this one.
+            if (Interlocked.Increment(ref _spareCount) <= MOST_SPARE)
+            {
+                Spare.Add(this);
+            }
+            else
+            {
+                Interlocked.Decrement(ref _spareCount);
+            }
         }
     }
 

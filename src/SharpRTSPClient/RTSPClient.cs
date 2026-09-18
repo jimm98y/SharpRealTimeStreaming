@@ -976,7 +976,10 @@ namespace SharpRTSPClient
                     byte[] decoded = rtpData.ToArray();
                     if (track.Context.DecodeRtpContext.UnprotectRtp(decoded, decoded.Length, out var len) == 0)
                     {
-                        rtpData = decoded.Take(len).ToArray().AsMemory();
+                        // The decrypted bytes are already in this array - Take().ToArray() walked
+                        // them through an iterator into a second copy of themselves, for every
+                        // packet of a protected stream.
+                        rtpData = decoded.AsMemory(0, len);
                     }
                     else
                     {
@@ -1001,7 +1004,16 @@ namespace SharpRTSPClient
                 // and what arrived, so the report sent back says something
                 track.Rtcp.Reception.RecordPacket((ushort)rtpPacket.SequenceNumber, rtpPacket.Timestamp, track.Rtcp.ClockRate);
 
-                var raw = new RawRtpDataEventArgs(
+                EventHandler<RawRtpDataEventArgs> rawListener =
+                    track.Kind == TrackKind.Video ? ReceivedRawVideoRTP :
+                    track.Kind == TrackKind.Audio ? ReceivedRawAudioRTP :
+                    null;
+
+                // Built only where something will read it. It was made for every packet of every
+                // stream whether or not anyone had subscribed.
+                if (rawListener != null && SpeaksForItsKind(track))
+                {
+                    rawListener(this, new RawRtpDataEventArgs(
                     rtpData,
                     rtpPacket.CsrcCount,
                     rtpPacket.ExtensionHeaderId,
@@ -1014,18 +1026,7 @@ namespace SharpRTSPClient
                     rtpPacket.Ssrc,
                     rtpPacket.Timestamp,
                     rtpPacket.Version,
-                    CalculatePayloadStart(rtpPacket));
-
-                if (SpeaksForItsKind(track))
-                {
-                    if (track.Kind == TrackKind.Video)
-                    {
-                        ReceivedRawVideoRTP?.Invoke(this, raw);
-                    }
-                    else if (track.Kind == TrackKind.Audio)
-                    {
-                        ReceivedRawAudioRTP?.Invoke(this, raw);
-                    }
+                    CalculatePayloadStart(rtpPacket)));
                 }
 
                 if (!ProcessRTP)
@@ -1106,7 +1107,7 @@ namespace SharpRTSPClient
                     byte[] decoded = rtcpData.ToArray();
                     if (track.Context.DecodeRtcpContext.UnprotectRtcp(decoded, decoded.Length, out var len) == 0)
                     {
-                        rtcpData = decoded.Take(len).ToArray().AsMemory();
+                        rtcpData = decoded.AsMemory(0, len);
                     }
                     else
                     {

@@ -154,7 +154,7 @@ namespace SharpRTSPServer.Tests
         private static QueuedFrame NewFrame()
         {
             var frame = new QueuedFrame();
-            frame.Take(new List<Memory<byte>> { new Memory<byte>(new byte[64]) });
+            frame.Fill(new List<Memory<byte>> { new Memory<byte>(new byte[64]) });
             return frame;
         }
 
