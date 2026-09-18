@@ -1660,6 +1660,7 @@ namespace SharpRTSPServer
             // client's own stream is not reached until further down, where the session is looked up.
             MulticastDelivery multicastDelivery = null;
 
+
             RTSPStreamSource streamSource = GetStreamSource(setupMessage.RtspUri);
             if (streamSource == null)
             {
@@ -1906,6 +1907,25 @@ namespace SharpRTSPServer
                     {
                         // the connection was dropped (eg. timed out) between arrival and handling of this SETUP
                         ReleaseTransport(rtpTransport);
+
+                        // A group made for this client a moment ago, which it is now never going to
+                        // listen to. Left alone it would go on holding its sockets with nobody to
+                        // ever take it apart, since what takes a group apart is its last listener
+                        // leaving and it would never have had one.
+                        //
+                        // Done here rather than outside the lock, which is where a group being shut
+                        // down is normally seen to: nothing has ever been written to this one, so
+                        // there is no writer to wait for.
+                        if (multicastDelivery != null && multicastDelivery.Listeners.Count == 0)
+                        {
+                            RTSPConnection orphan = CloseMulticastGroup(streamSource);
+
+                            if (orphan != null)
+                            {
+                                ReleaseUdpTransports(orphan);
+                            }
+                        }
+
                         RtspResponse goneResponse = setupMessage.CreateResponse();
                         goneResponse.ReturnCode = 454; // Session Not Found
                         listener.SendMessage(goneResponse);
@@ -2940,31 +2960,49 @@ namespace SharpRTSPServer
                     continue;
                 }
 
-                // The last one has gone, so there is nobody to send to. Everything about the group
-                // goes with it, including the port it was listened to on - a group holds one for as
-                // long as it exists, which is longer than any one session.
+                // The last one has gone, so there is nobody to send to.
                 _logger.LogInformation("Nobody is listening to the {streamID} multicast group any more, shutting it down",
                     streamSource.StreamID);
 
-                streamSource.Multicast = null;
-                streamSource.ConnectionList.Remove(delivery.Sender);
-
-                foreach (int groupPort in delivery.RtpPort)
-                {
-                    _multicastPortsInUse.Remove(groupPort);
-                }
-
-                delivery.Sender.Play = false;
-                delivery.Sender.Outbound?.Dispose();
-                delivery.Sender.Outbound = null;
-
-                // Saying goodbye and handing the sockets back both wait on whatever is writing the
-                // group, so neither is done here - the list lock is held, and every other connection
-                // and request on the server is waiting behind it.
-                (finished = finished ?? new List<RTSPConnection>()).Add(delivery.Sender);
+                (finished = finished ?? new List<RTSPConnection>()).Add(CloseMulticastGroup(streamSource));
             }
 
             return finished;
+        }
+
+        /// <summary>
+        /// Takes a stream's group apart and hands back its sender, for the caller to finish with.
+        /// </summary>
+        /// <remarks>
+        /// Everything that can be done while the connection list is held is done here: the group is
+        /// taken off the stream, out of the list frames are handed to, and its port given back.
+        /// Saying goodbye and letting the sockets go are not, because both wait on whatever is
+        /// writing the group, and every other connection and request on the server is waiting behind
+        /// this lock. <see cref="ShutDownMulticastSenders"/> does those, outside it.
+        /// </remarks>
+        private RTSPConnection CloseMulticastGroup(RTSPStreamSource streamSource)
+        {
+            MulticastDelivery delivery = streamSource.Multicast;
+
+            if (delivery == null)
+            {
+                return null;
+            }
+
+            streamSource.Multicast = null;
+            streamSource.ConnectionList.Remove(delivery.Sender);
+            delivery.Listeners.Clear();
+
+            foreach (int groupPort in delivery.RtpPort)
+            {
+                _multicastPortsInUse.Remove(groupPort);
+            }
+
+            delivery.Sender.Play = false;
+            delivery.Sender.Outbound?.Dispose();
+            delivery.Sender.Outbound = null;
+
+            return delivery.Sender;
         }
 
         /// <summary>
@@ -2979,6 +3017,11 @@ namespace SharpRTSPServer
 
             foreach (RTSPConnection sender in senders)
             {
+                if (sender == null)
+                {
+                    continue;
+                }
+
                 foreach (RTPStream stream in sender.Streams)
                 {
                     if (stream.RtpChannel != null)
@@ -3570,6 +3613,8 @@ namespace SharpRTSPServer
             if (streamSource == null)
                 throw new ArgumentNullException(nameof(streamSource));
 
+            RTSPConnection finishedGroup;
+
             lock (_connectionList)
             {
                 if (!this.StreamSources.Contains(streamSource))
@@ -3589,6 +3634,13 @@ namespace SharpRTSPServer
 
                 foreach (RTSPConnection connection in streamSource.ConnectionList.ToArray())
                 {
+                    // Not the group's own sender: it has no session to remove and RemoveSession would
+                    // pass over it, so it is taken apart below rather than left holding its sockets.
+                    if (streamSource.Multicast != null && ReferenceEquals(connection, streamSource.Multicast.Sender))
+                    {
+                        continue;
+                    }
+
                     foreach (var stream in connection.Streams)
                     {
                         SendRTCPBye(connection, stream);
@@ -3597,8 +3649,16 @@ namespace SharpRTSPServer
                     RemoveSession(connection);
                 }
 
+                // Whatever is left of the group. Usually nothing, because the last client to be
+                // removed above took it with them - but a group outlives its listeners if a SETUP
+                // created one and then could not finish, and a stream being taken away is the end of
+                // its group whether anyone was listening or not.
+                finishedGroup = CloseMulticastGroup(streamSource);
+
                 this.StreamSources.Remove(streamSource);
             }
+
+            ShutDownMulticastSenders(new List<RTSPConnection> { finishedGroup });
         }
 
         public ReadOnlyCollection<RTSPStreamSource> GetStreamSources()

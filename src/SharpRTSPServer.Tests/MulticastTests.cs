@@ -319,6 +319,91 @@ namespace SharpRTSPServer.Tests
         }
 
         [TestMethod]
+        public void TakingTheStreamAwayTakesItsGroupWithIt()
+        {
+            int port = TestPorts.FindFree();
+            using var server = NewServer(port, out var videoTrack, 57200);
+
+            var streamSource = server.GetStreamSources()[0];
+
+            var joined = Join(port);
+
+            using (joined.Client)
+            using (var wire = Listen(joined.Destination, joined.Port))
+            {
+                string baseUri = $"rtsp://127.0.0.1:{port}/stream1";
+                joined.Client.Send("PLAY", baseUri, "Session: " + joined.Session);
+                Thread.Sleep(200);
+
+                // it is running
+                videoTrack.FeedInRawSamples(3000, OneNal());
+
+                var from = new IPEndPoint(IPAddress.Any, 0);
+                byte[] running = null;
+
+                for (int i = 0; i < 6 && running == null; i++)
+                {
+                    videoTrack.FeedInRawSamples((uint)((i + 2) * 3000), OneNal());
+
+                    try { running = wire.Receive(ref from); }
+                    catch (SocketException) { }
+                }
+
+                Assert.IsNotNull(running, "the group should be carrying the media before the stream goes");
+
+                // and then the stream it belongs to is taken away
+                server.RemoveStreamSource(streamSource);
+                Thread.Sleep(300);
+
+                while (true)
+                {
+                    try { wire.Receive(ref from); }
+                    catch (SocketException) { break; }
+                }
+
+                for (int i = 0; i < 5; i++)
+                {
+                    videoTrack.FeedInRawSamples((uint)((i + 20) * 3000), OneNal());
+                }
+
+                Thread.Sleep(200);
+
+                byte[] afterwards = null;
+                try { afterwards = wire.Receive(ref from); }
+                catch (SocketException) { }
+
+                Assert.IsNull(afterwards, "a stream that has been removed should not still be sending to a group");
+            }
+        }
+
+        [TestMethod]
+        public void AGroupGivesItsPortBackWhenItGoes()
+        {
+            int port = TestPorts.FindFree();
+            using var server = NewServer(port, out _, 57300);
+
+            string baseUri = $"rtsp://127.0.0.1:{port}/stream1";
+
+            // the first client makes the group
+            var first = Join(port);
+            int firstPort = first.Port;
+
+            first.Client.Send("TEARDOWN", baseUri, "Session: " + first.Session);
+            first.Client.Dispose();
+            Thread.Sleep(300);
+
+            // and the next one, arriving after it has gone, gets the same port back rather than
+            // running the range down one group at a time
+            var second = Join(port);
+
+            using (second.Client)
+            {
+                Assert.AreEqual(firstPort, second.Port,
+                    "the port of a group that has ended should be available again");
+            }
+        }
+
+        [TestMethod]
         public void MulticastCanBeTurnedOff()
         {
             int port = TestPorts.FindFree();
