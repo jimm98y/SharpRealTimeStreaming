@@ -30,9 +30,20 @@ using (RTSPClient client = new RTSPClient())
     client.Connect(rtspUri, RTPTransport.UDP, userName, password, MediaRequest.VIDEO_AND_AUDIO, false, OnValidateCertificate, true);
 
     Console.WriteLine("Press any key to exit");
-    while (!Console.KeyAvailable)
+    // Asking whether a key has been pressed throws outright when there is no console, or when
+    // its input comes from somewhere other than a keyboard - which is what happens when one of
+    // these is run from a script. So it waits for the end of that input instead, which arrives
+    // when whatever started it goes away.
+    if (Console.IsInputRedirected)
     {
-        System.Threading.Thread.Sleep(250);
+        Console.In.ReadToEnd();
+    }
+    else
+    {
+        while (!Console.KeyAvailable)
+        {
+            System.Threading.Thread.Sleep(250);
+        }
     }
 }
 

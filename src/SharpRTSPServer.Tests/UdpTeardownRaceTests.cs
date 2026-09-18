@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
+using SharpSRTP.SRTP;
 using SharpRTSPServer;
 
 namespace SharpRTSPServer.Tests
@@ -74,13 +75,39 @@ namespace SharpRTSPServer.Tests
         [TestMethod]
         public void SessionsEndingWhileTheyAreBeingWrittenToDoNotThrowFromInsideTheWrite()
         {
+            SessionsEndingWhileTheyAreBeingWrittenTo(protect: false);
+        }
+
+        /// <summary>
+        /// The same, with the media protected - which is how it was met.
+        /// </summary>
+        /// <remarks>
+        /// Protecting each packet is real work done inside the write, so a writer spends more of its
+        /// time in the part of it that a teardown must not interrupt. It is the same race either
+        /// way; encryption only makes it easier to lose.
+        /// </remarks>
+        [TestMethod]
+        public void ProtectedSessionsEndingWhileTheyAreBeingWrittenToDoNotThrowEither()
+        {
+            SessionsEndingWhileTheyAreBeingWrittenTo(protect: true);
+        }
+
+        private static void SessionsEndingWhileTheyAreBeingWrittenTo(bool protect)
+        {
             var logs = new CapturingLoggerFactory();
 
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, "admin", "password", false, null, logs);
+
+            using var server = protect
+                ? new RTSPServer(port, "admin", "password", false, null,
+                    SrtpCryptoSuites.AES_CM_128_HMAC_SHA1_80, logs)
+                : new RTSPServer(port, "admin", "password", false, null, logs);
+
             server.SetRtpPortRange(53000, 53400);
 
-            var videoTrack = new H264Track(Sps, Pps);
+            var videoTrack = protect
+                ? new H264Track(Sps, Pps) { RtpProfile = RtpProfiles.SAVP }
+                : new H264Track(Sps, Pps);
             server.AddStreamSource(new RTSPStreamSource("stream1", videoTrack, null));
             server.StartListen();
 
