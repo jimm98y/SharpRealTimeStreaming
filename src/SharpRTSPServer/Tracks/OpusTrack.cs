@@ -22,6 +22,11 @@ namespace SharpRTSPServer
         public override int ID { get; set; } = 1;
 
         /// <summary>
+        /// What kind of media this track carries.
+        /// </summary>
+        public override TrackType Kind => TrackType.Audio;
+
+        /// <summary>
         /// Sampling rate. Opus always requires 48000.
         /// </summary>
         public int SamplingRate { get; set; } = 48000;

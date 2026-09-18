@@ -26,6 +26,11 @@ namespace SharpRTSPServer
         public override int ID { get; set; } = 0;
 
         /// <summary>
+        /// What kind of media this track carries.
+        /// </summary>
+        public override TrackType Kind => TrackType.Video;
+
+        /// <summary>
         /// H264 Profile IDC. Default value is 77 (Main Profile).
         /// </summary>
         public int ProfileIdc { get; set; } = 77;

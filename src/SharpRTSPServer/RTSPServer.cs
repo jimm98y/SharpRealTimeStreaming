@@ -1669,19 +1669,21 @@ namespace SharpRTSPServer
                 return;
             }
 
-            uint trackSSRC;
-            TrackType trackType;
-            if (streamSource.VideoTrack != null && AddressesTrack(setupMessage.RtspUri, streamSource.GetTrackControl(TrackType.Video)))
+            // Whichever track this URL names, of however many the stream has and whatever kind they
+            // are. It used to be a choice between the video one and the audio one, which is a stream
+            // with exactly one of each.
+            ITrack setupTrack = null;
+
+            foreach (ITrack candidate in streamSource.Tracks)
             {
-                trackSSRC = streamSource.VideoTrack.SSRC;
-                trackType = TrackType.Video;
+                if (AddressesTrack(setupMessage.RtspUri, streamSource.GetTrackControl(candidate)))
+                {
+                    setupTrack = candidate;
+                    break;
+                }
             }
-            else if (streamSource.AudioTrack != null && AddressesTrack(setupMessage.RtspUri, streamSource.GetTrackControl(TrackType.Audio)))
-            {
-                trackSSRC = streamSource.AudioTrack.SSRC;
-                trackType = TrackType.Audio;
-            }
-            else
+
+            if (setupTrack == null)
             {
                 // track not found
                 RtspResponse setupResponse = setupMessage.CreateResponse();
@@ -1689,6 +1691,10 @@ namespace SharpRTSPServer
                 listener.SendMessage(setupResponse);
                 return;
             }
+
+            uint trackSSRC = setupTrack.SSRC;
+            int trackId = setupTrack.ID;
+            TrackType trackType = setupTrack.Kind;
 
             if (transport == null)
             {
@@ -1701,7 +1707,6 @@ namespace SharpRTSPServer
             // SDP. A SETUP that skipped DESCRIBE has no key, so there is nothing we could send that
             // it could read - and sending it unprotected instead would quietly undo the encryption
             // the server was configured for, which is what used to happen.
-            ITrack setupTrack = trackType == TrackType.Video ? streamSource.VideoTrack : streamSource.AudioTrack;
             if (setupTrack.RtpProfile == RtpProfiles.SAVP)
             {
                 bool wantsMulticast = transport != null
@@ -1724,7 +1729,7 @@ namespace SharpRTSPServer
                 }
 
                 RTSPConnection existingConnection = ConnectionByListener(listener);
-                if (existingConnection == null || existingConnection.Streams[(int)trackType].Context == null)
+                if (existingConnection == null || existingConnection.StreamFor(trackId).Context == null)
                 {
                     _logger.LogWarning(
                         "Refusing SETUP of the SAVP track {trackType} from {remoteEndPoint}: there are no SRTP keys for it, the client did not DESCRIBE first",
@@ -1865,7 +1870,7 @@ namespace SharpRTSPServer
 
                 try
                 {
-                    delivery = JoinMulticastGroup(streamSource, trackType);
+                    delivery = JoinMulticastGroup(streamSource, setupTrack);
                 }
                 catch (Exception ex) when (ex is InvalidOperationException || ex is SocketException)
                 {
@@ -1882,11 +1887,11 @@ namespace SharpRTSPServer
 
                 transportReply = new RtspTransport()
                 {
-                    SSrc = delivery.Sender.Streams[(int)trackType].SSRC.ToString("X8"),
+                    SSrc = delivery.Sender.StreamFor(trackId).SSRC.ToString("X8"),
                     LowerTransport = RtspTransport.LowerTransportType.UDP,
                     IsMulticast = true,
                     Destination = delivery.GroupAddress,
-                    Port = new PortCouple(delivery.RtpPort[(int)trackType], delivery.RtpPort[(int)trackType] + 1),
+                    Port = new PortCouple(delivery.PortOf(trackId), delivery.PortOf(trackId) + 1),
                     TTL = MulticastTimeToLive,
                 };
             }
@@ -1931,7 +1936,7 @@ namespace SharpRTSPServer
                     }
 
                     // In the SDP the H264/H265 video track is TrackID 0 and the Audio Track is TrackID 1
-                    RTPStream stream = connection.Streams[(int)trackType];
+                    RTPStream stream = connection.StreamFor(trackId);
 
                     // The SSRC belongs to the stream this SETUP is for. Putting it on the connection
                     // meant the second SETUP overwrote the first, so both streams went out under one
@@ -2017,7 +2022,7 @@ namespace SharpRTSPServer
             var StreamSource = GetStreamSource(message.RtspUri);
 
             // if the SPS and PPS are not defined yet, we have to return an error
-            if (StreamSource.VideoTrack == null || !StreamSource.VideoTrack.IsReady || (StreamSource.AudioTrack != null && !StreamSource.AudioTrack.IsReady))
+            if (!StreamSource.Tracks.Any() || StreamSource.Tracks.Any(track => !track.IsReady))
             {
                 RtspResponse describeResponse2 = message.CreateResponse();
                 describeResponse2.ReturnCode = 400; // 400 Bad Request
@@ -2055,7 +2060,7 @@ namespace SharpRTSPServer
         /// The key lives in the SDP, which is why it is made here: a client that never receives the
         /// SDP has no way to read anything the server would send it.
         /// </remarks>
-        private string BuildCryptoAttribute(RTSPStreamSource streamSource, RTPStream stream, TrackType trackType)
+        private string BuildCryptoAttribute(RTSPStreamSource streamSource, RTPStream stream, int trackId)
         {
             if (string.IsNullOrEmpty(SrtpCryptoSuite))
             {
@@ -2068,7 +2073,7 @@ namespace SharpRTSPServer
             // everybody, which is the only way a group can read what is sent to it. The client's own
             // stream is given the same keys, so that the SETUP which follows can tell this client has
             // been told them.
-            RTPStream keyHolder = streamSource.SharedSrtpKey ? streamSource.GroupKeys[(int)trackType] : stream;
+            RTPStream keyHolder = streamSource.SharedSrtpKey ? streamSource.GroupKey(trackId) : stream;
 
             byte[] masterKeySalt = keyHolder.PrepareSrtpContext(SrtpCryptoSuite);
 
@@ -2102,8 +2107,7 @@ namespace SharpRTSPServer
         /// </remarks>
         private string AddMissingCryptoAttributes(string sdp, RTSPStreamSource streamSource, RTSPConnection connection)
         {
-            if ((streamSource.VideoTrack == null || streamSource.VideoTrack.RtpProfile != RtpProfiles.SAVP)
-                && (streamSource.AudioTrack == null || streamSource.AudioTrack.RtpProfile != RtpProfiles.SAVP))
+            if (!streamSource.Tracks.Any(track => track.RtpProfile == RtpProfiles.SAVP))
             {
                 // nothing to add, so hand back exactly what we were given rather than reformatting it
                 return sdp;
@@ -2123,6 +2127,7 @@ namespace SharpRTSPServer
             // lists audio before video used to get each track's keys written into the other one's
             // section, so the client decrypted with the wrong key and simply saw nothing.
             List<RTSPStreamSource.MediaSection> sections = RTSPStreamSource.ParseMediaSections(sdp);
+            List<ITrack> describes = streamSource.TrackOfEachSection(sections);
 
             StringBuilder builder = new StringBuilder();
             int mediaSection = -1;
@@ -2143,17 +2148,12 @@ namespace SharpRTSPServer
                     continue;
                 }
 
-                TrackType? trackType = RTSPStreamSource.TrackTypeOf(sections[mediaSection]);
-                if (trackType == null)
-                {
-                    continue;
-                }
+                ITrack track = mediaSection < describes.Count ? describes[mediaSection] : null;
 
-                ITrack track = trackType == TrackType.Video ? streamSource.VideoTrack : streamSource.AudioTrack;
                 if (track != null && track.RtpProfile == RtpProfiles.SAVP)
                 {
-                    RTPStream stream = connection.Streams[(int)trackType];
-                    builder.Append(BuildCryptoAttribute(streamSource, stream, trackType.Value)).Append(SDP_LINE_ENDING);
+                    RTPStream stream = connection.StreamFor(track.ID);
+                    builder.Append(BuildCryptoAttribute(streamSource, stream, track.ID)).Append(SDP_LINE_ENDING);
                 }
             }
 
@@ -2246,25 +2246,17 @@ namespace SharpRTSPServer
             sdp.Append($"s={SessionName}\r\n");
             sdp.Append("c=IN IP4 0.0.0.0\r\n");
 
-            // VIDEO
-            if (streamSource.VideoTrack != null)
+            // Every track the stream carries, in the order it holds them - which is the order a
+            // client will read them in, and the order the media sections have to be in for anything
+            // matching them up by position to agree with this.
+            foreach (ITrack track in streamSource.Tracks)
             {
-                streamSource.VideoTrack.BuildSDP(sdp);
+                track.BuildSDP(sdp);
 
-                if (streamSource.VideoTrack.RtpProfile == RtpProfiles.SAVP)
+                if (track.RtpProfile == RtpProfiles.SAVP)
                 {
-                    sdp.Append(BuildCryptoAttribute(streamSource, connection.Video, TrackType.Video)).Append(SDP_LINE_ENDING);
-                }
-            }
-
-            // AUDIO
-            if (streamSource.AudioTrack != null)
-            {
-                streamSource.AudioTrack.BuildSDP(sdp);
-
-                if (streamSource.AudioTrack.RtpProfile == RtpProfiles.SAVP)
-                {
-                    sdp.Append(BuildCryptoAttribute(streamSource, connection.Audio, TrackType.Audio)).Append(SDP_LINE_ENDING);
+                    sdp.Append(BuildCryptoAttribute(streamSource, connection.StreamFor(track.ID), track.ID))
+                        .Append(SDP_LINE_ENDING);
                 }
             }
 
@@ -2783,8 +2775,10 @@ namespace SharpRTSPServer
         /// Called under the connection list lock, which is what keeps two clients setting up the same
         /// track at the same time from opening two groups for it.
         /// </remarks>
-        private MulticastDelivery JoinMulticastGroup(RTSPStreamSource streamSource, TrackType trackType)
+        private MulticastDelivery JoinMulticastGroup(RTSPStreamSource streamSource, ITrack track)
         {
+            int trackId = track.ID;
+
             lock (_connectionList)
             {
                 MulticastDelivery delivery = streamSource.Multicast;
@@ -2815,7 +2809,7 @@ namespace SharpRTSPServer
                     streamSource.ConnectionList.Add(delivery.Sender);
                 }
 
-                if (!delivery.Carries(trackType))
+                if (!delivery.Carries(trackId))
                 {
                     // The port the group listens on, which is a number the clients are told and not
                     // one this server binds. Sending to a group does not mean sending from the port
@@ -2841,27 +2835,25 @@ namespace SharpRTSPServer
                         throw;
                     }
 
-                    RTPStream stream = delivery.Sender.Streams[(int)trackType];
+                    RTPStream stream = delivery.Sender.StreamFor(trackId);
                     stream.RtpChannel = group;
 
                     // Under the key the SDP announced to everybody, which is what makes what the
                     // group sends readable by all of them and by nobody else.
                     stream.Context = streamSource.SharedSrtpKey
-                        ? streamSource.GroupKeys[(int)trackType].Context
+                        ? streamSource.GroupKey(trackId).Context
                         : null;
-                    stream.SSRC = trackType == TrackType.Video
-                        ? streamSource.VideoTrack?.SSRC ?? 0
-                        : streamSource.AudioTrack?.SSRC ?? 0;
+                    stream.SSRC = track.SSRC;
 
                     // Put beyond use, so that no client sent the stream one to one is ever handed the
                     // SSRC the group is already sending under.
                     streamSource.ReserveSsrc(stream.SSRC);
                     stream.MustSendRtcpPacket = true;
 
-                    delivery.RtpPort[(int)trackType] = groupPort;
+                    delivery.RtpPort[trackId] = groupPort;
 
-                    _logger.LogInformation("Sending {streamID} {trackType} to {group}:{port}, ttl {ttl}",
-                        streamSource.StreamID, trackType, delivery.GroupAddress, groupPort, MulticastTimeToLive);
+                    _logger.LogInformation("Sending {streamID} track {trackId} ({kind}) to {group}:{port}, ttl {ttl}",
+                        streamSource.StreamID, trackId, track.Kind, delivery.GroupAddress, groupPort, MulticastTimeToLive);
                 }
 
                 return delivery;
@@ -2991,7 +2983,7 @@ namespace SharpRTSPServer
             streamSource.ConnectionList.Remove(delivery.Sender);
             delivery.Listeners.Clear();
 
-            foreach (int groupPort in delivery.RtpPort)
+            foreach (int groupPort in delivery.RtpPort.Values)
             {
                 _multicastPortsInUse.Remove(groupPort);
             }
@@ -3460,8 +3452,10 @@ namespace SharpRTSPServer
 
         public void FeedInRawRTP(string streamID, int streamType, uint rtpTimestamp, List<Memory<byte>> rtpPackets)
         {
-            if (streamType != 0 && streamType != 1)
-                throw new ArgumentException("Invalid streamType! Video = 0, Audio = 1");
+            // A track ID, not a kind: a stream can carry several tracks of a kind, and this says
+            // which one of them the media is for.
+            if (streamType < 0)
+                throw new ArgumentOutOfRangeException(nameof(streamType), streamType, "A track ID is not negative.");
 
             RTSPConnection[] connections;
             ITrack track;
@@ -3482,7 +3476,15 @@ namespace SharpRTSPServer
 
                 // A track that forwards RTP from elsewhere can ask for it to go out exactly as it
                 // arrived, rather than being restamped as if this server had produced it.
-                track = streamType == (int)TrackType.Video ? streamSource.VideoTrack : streamSource.AudioTrack;
+                track = streamSource.TrackById(streamType);
+
+                if (track == null)
+                {
+                    _logger.LogWarning("Dropping RTP for track {trackId}, which {streamID} does not have",
+                        streamType, streamID);
+                    return;
+                }
+
                 preserveSourceHeaders = track is ProxyTrack proxyTrack && proxyTrack.PreserveSourceHeaders;
 
                 // ToArray makes a temp copy of the list, so the list itself can change while we write
@@ -3555,16 +3557,10 @@ namespace SharpRTSPServer
             if (streamSource == null)
                 throw new ArgumentNullException(nameof(streamSource));
 
-            if (streamSource.VideoTrack != null)
+            foreach (ITrack track in streamSource.Tracks)
             {
-                streamSource.VideoTrack.Sink = this;
-                streamSource.VideoTrack.StreamID = streamSource.StreamID;
-            }
-
-            if (streamSource.AudioTrack != null)
-            {
-                streamSource.AudioTrack.Sink = this;
-                streamSource.AudioTrack.StreamID = streamSource.StreamID;
+                track.Sink = this;
+                track.StreamID = streamSource.StreamID;
             }
 
             // the list is read by the RTSP and media threads under this lock, so it has to be taken to write it too
@@ -3597,11 +3593,10 @@ namespace SharpRTSPServer
         {
             var ssrcs = new List<uint>(2);
 
-            if (streamSource.VideoTrack != null)
-                ssrcs.Add(streamSource.VideoTrack.SSRC);
-
-            if (streamSource.AudioTrack != null)
-                ssrcs.Add(streamSource.AudioTrack.SSRC);
+            foreach (ITrack track in streamSource.Tracks)
+            {
+                ssrcs.Add(track.SSRC);
+            }
 
             return ssrcs;
         }
@@ -3620,14 +3615,9 @@ namespace SharpRTSPServer
                     return;
                 }
 
-                if (streamSource.VideoTrack != null)
+                foreach (ITrack track in streamSource.Tracks)
                 {
-                    streamSource.VideoTrack.Sink = null;
-                }
-
-                if (streamSource.AudioTrack != null)
-                {
-                    streamSource.AudioTrack.Sink = null;
+                    track.Sink = null;
                 }
 
                 foreach (RTSPConnection connection in streamSource.ConnectionList.ToArray())

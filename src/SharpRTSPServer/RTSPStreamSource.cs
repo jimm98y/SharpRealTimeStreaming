@@ -15,12 +15,141 @@ namespace SharpRTSPServer
         /// <summary>
         /// Video track. Must be set before starting the server.
         /// </summary>
-        public ITrack VideoTrack { get; set; }
+        private readonly List<ITrack> _tracks = new List<ITrack>();
+
+        /// <summary>
+        /// Every track this stream carries, in the order they were added.
+        /// </summary>
+        /// <remarks>
+        /// A stream is not one video track and one audio track. It is however many tracks it has:
+        /// two languages, two qualities, a picture and the data describing what is in it. Which
+        /// track a request is about is the track's <see cref="ITrack.ID"/>, which is what its control
+        /// URL names and what the media path indexes by; what sort of thing is in it is its
+        /// <see cref="ITrack.Kind"/>, and several tracks may share one.
+        /// </remarks>
+        public IReadOnlyList<ITrack> Tracks => _tracks;
+
+        /// <summary>
+        /// The first video track, if there is one.
+        /// </summary>
+        /// <remarks>
+        /// Here because a stream with one of each is the ordinary case and this is how it was always
+        /// reached. Where a stream carries more than one, <see cref="Tracks"/> is what sees them all.
+        /// </remarks>
+        public ITrack VideoTrack
+        {
+            get => FirstOf(TrackType.Video);
+            set => Replace(TrackType.Video, value);
+        }
 
         /// <summary>
         /// Audio track.
         /// </summary>
-        public ITrack AudioTrack { get; set; }
+        public ITrack AudioTrack
+        {
+            get => FirstOf(TrackType.Audio);
+            set => Replace(TrackType.Audio, value);
+        }
+
+        /// <summary>
+        /// The first metadata track, if there is one.
+        /// </summary>
+        public ITrack MetadataTrack
+        {
+            get => FirstOf(TrackType.Metadata);
+            set => Replace(TrackType.Metadata, value);
+        }
+
+        /// <summary>
+        /// Adds a track to this stream.
+        /// </summary>
+        /// <remarks>
+        /// The track's ID is how everything else refers to it - the control URL clients set up, and
+        /// the number the media path is fed against - so two tracks on one stream cannot share one.
+        /// </remarks>
+        public void AddTrack(ITrack track)
+        {
+            if (track == null)
+                throw new ArgumentNullException(nameof(track));
+
+            if (_tracks.Contains(track))
+                return;
+
+            ITrack clash = TrackById(track.ID);
+
+            if (clash != null)
+            {
+                throw new ArgumentException(
+                    $"This stream already has a track with ID {track.ID} ({clash.Codec}). A track's ID " +
+                    "is what its control URL names, so two tracks on one stream must not share one.",
+                    nameof(track));
+            }
+
+            _tracks.Add(track);
+        }
+
+        /// <summary>
+        /// Takes a track off this stream.
+        /// </summary>
+        public bool RemoveTrack(ITrack track) => track != null && _tracks.Remove(track);
+
+        /// <summary>
+        /// The track with this ID, or null if the stream has none.
+        /// </summary>
+        public ITrack TrackById(int id)
+        {
+            foreach (ITrack track in _tracks)
+            {
+                if (track.ID == id)
+                {
+                    return track;
+                }
+            }
+
+            return null;
+        }
+
+        private ITrack FirstOf(TrackType kind)
+        {
+            foreach (ITrack track in _tracks)
+            {
+                if (track.Kind == kind)
+                {
+                    return track;
+                }
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Puts a track in the place of the first one of its kind, for the properties that name one.
+        /// </summary>
+        private void Replace(TrackType kind, ITrack track)
+        {
+            ITrack existing = FirstOf(kind);
+
+            if (existing != null)
+            {
+                int at = _tracks.IndexOf(existing);
+
+                if (track == null)
+                {
+                    _tracks.RemoveAt(at);
+                }
+                else
+                {
+                    _tracks[at] = track;
+                }
+
+                return;
+            }
+
+            if (track != null)
+            {
+                AddTrack(track);
+            }
+        }
 
         /// <summary>
         /// SDP override.
@@ -72,7 +201,26 @@ namespace SharpRTSPServer
         /// <summary>
         /// The keys the group uses, one per track, derived once and handed to everyone.
         /// </summary>
-        internal RTPStream[] GroupKeys { get; } = { new RTPStream(), new RTPStream() };
+        private readonly Dictionary<int, RTPStream> _groupKeys = new Dictionary<int, RTPStream>();
+
+        /// <summary>
+        /// The key a track's group uses, derived once and handed to everyone listening.
+        /// </summary>
+        internal RTPStream GroupKey(int trackId)
+        {
+            lock (_groupKeyLock)
+            {
+                if (!_groupKeys.TryGetValue(trackId, out RTPStream key))
+                {
+                    key = new RTPStream();
+                    _groupKeys[trackId] = key;
+                }
+
+                return key;
+            }
+        }
+
+        private readonly object _groupKeyLock = new object();
 
         /// <summary>
         /// The next SSRC to hand a sender, and how many have been handed out under this key.
@@ -179,9 +327,12 @@ namespace SharpRTSPServer
         {
             lock (_ssrcLock)
             {
-                foreach (RTPStream key in GroupKeys)
+                lock (_groupKeyLock)
                 {
-                    key.ResetSrtpContext();
+                    foreach (RTPStream key in _groupKeys.Values)
+                    {
+                        key.ResetSrtpContext();
+                    }
                 }
 
                 _ssrcsSeeded = false;
@@ -193,10 +344,7 @@ namespace SharpRTSPServer
         {
             rtpTimestamp = 0;
 
-            ITrack track =
-                streamType == (int)TrackType.Video ? VideoTrack :
-                streamType == (int)TrackType.Audio ? AudioTrack :
-                null;
+            ITrack track = TrackById(streamType);
 
             // A track of someone else's making need not be one of ours, and then there is nowhere to
             // have read this from - which is a reason to say nothing, not to guess.
@@ -210,14 +358,38 @@ namespace SharpRTSPServer
         }
 
         public RTSPStreamSource(string streamID, ITrack rtspVideoTrack, ITrack rtspAudioTrack)
+            : this(streamID, Without(null, rtspVideoTrack, rtspAudioTrack))
+        {
+        }
+
+        /// <param name="tracks">The tracks this stream carries, in the order they belong in the SDP.</param>
+        public RTSPStreamSource(string streamID, params ITrack[] tracks)
+            : this(streamID, (IEnumerable<ITrack>)tracks)
+        {
+        }
+
+        public RTSPStreamSource(string streamID, IEnumerable<ITrack> tracks)
         {
             if (string.IsNullOrWhiteSpace(streamID))
                 throw new ArgumentNullException(nameof(streamID));
 
             StreamID = streamID;
-            VideoTrack = rtspVideoTrack;
-            AudioTrack = rtspAudioTrack;
+
+            if (tracks == null)
+            {
+                return;
+            }
+
+            foreach (ITrack track in tracks)
+            {
+                if (track != null)
+                {
+                    AddTrack(track);
+                }
+            }
         }
+
+        private static IEnumerable<ITrack> Without(ITrack _, params ITrack[] tracks) => tracks;
 
         public void OverrideSDP(string sdp, bool mungleSDP = true)
         {
@@ -312,26 +484,81 @@ namespace SharpRTSPServer
         /// the client had never used. The section is matched by its media type rather than its
         /// position, so an SDP that lists audio first is read the right way round.
         /// </remarks>
+        /// <summary>
+        /// The control URL of the first track of a kind, for streams that carry one of each.
+        /// </summary>
         public string GetTrackControl(TrackType trackType)
         {
-            ITrack track = trackType == TrackType.Video ? VideoTrack : AudioTrack;
+            ITrack track = FirstOf(trackType);
+
+            return track == null ? null : GetTrackControl(track);
+        }
+
+        /// <summary>
+        /// The control URL a client uses to set up this particular track.
+        /// </summary>
+        /// <remarks>
+        /// Taken from the description where there is one, since an overridden SDP says what the
+        /// tracks of the stream it describes are called and a client will use what it was given.
+        /// </remarks>
+        public string GetTrackControl(ITrack track)
+        {
             if (track == null)
             {
                 return null;
             }
 
-            string kind = trackType == TrackType.Video ? "video" : "audio";
+            List<MediaSection> sections = ParseMediaSections(Sdp);
+            List<ITrack> describes = TrackOfEachSection(sections);
 
-            foreach (MediaSection section in ParseMediaSections(Sdp))
+            for (int i = 0; i < sections.Count; i++)
             {
-                if (string.Equals(section.Kind, kind, StringComparison.OrdinalIgnoreCase)
-                    && !string.IsNullOrEmpty(section.Control))
+                if (ReferenceEquals(describes[i], track) && !string.IsNullOrEmpty(sections[i].Control))
                 {
-                    return section.Control;
+                    return sections[i].Control;
                 }
             }
 
             return $"trackID={track.ID}";
+        }
+
+        /// <summary>
+        /// Which track each media section of a description is about.
+        /// </summary>
+        /// <remarks>
+        /// By kind first and then by order within that kind: the second audio section describes the
+        /// second audio track. Position alone is not enough, because a description is free to put
+        /// the audio before the video and one that does would give every track the other one's
+        /// control URL and keys. Kind alone is not enough either, once a stream can carry two tracks
+        /// of one kind. A section describing something this stream has no track for maps to null.
+        /// </remarks>
+        internal List<ITrack> TrackOfEachSection(List<MediaSection> sections)
+        {
+            var taken = new HashSet<ITrack>();
+            var describes = new List<ITrack>(sections.Count);
+
+            foreach (MediaSection section in sections)
+            {
+                TrackType? kind = TrackTypeOf(section);
+                ITrack match = null;
+
+                if (kind != null)
+                {
+                    foreach (ITrack track in _tracks)
+                    {
+                        if (track.Kind == kind.Value && !taken.Contains(track))
+                        {
+                            match = track;
+                            taken.Add(track);
+                            break;
+                        }
+                    }
+                }
+
+                describes.Add(match);
+            }
+
+            return describes;
         }
 
         /// <summary>
@@ -344,6 +571,9 @@ namespace SharpRTSPServer
 
             if (string.Equals(section.Kind, "audio", StringComparison.OrdinalIgnoreCase))
                 return TrackType.Audio;
+
+            if (string.Equals(section.Kind, "application", StringComparison.OrdinalIgnoreCase))
+                return TrackType.Metadata;
 
             return null;
         }
@@ -411,17 +641,15 @@ namespace SharpRTSPServer
             {
                 if (disposing)
                 {
-                    if (VideoTrack != null && VideoTrack is IDisposable disposableVideoTrack)
+                    foreach (ITrack track in _tracks.ToArray())
                     {
-                        disposableVideoTrack.Dispose();
-                        VideoTrack = null;
+                        if (track is IDisposable disposableTrack)
+                        {
+                            disposableTrack.Dispose();
+                        }
                     }
 
-                    if (AudioTrack != null && AudioTrack is IDisposable disposableAudioTrack)
-                    {
-                        disposableAudioTrack.Dispose();
-                        AudioTrack = null;
-                    }
+                    _tracks.Clear();
                 }
 
                 _disposedValue = true;

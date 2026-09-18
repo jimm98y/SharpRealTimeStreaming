@@ -26,6 +26,11 @@ namespace SharpRTSPServer
         public override int ID { get; set; } = 0;
 
         /// <summary>
+        /// What kind of media this track carries.
+        /// </summary>
+        public override TrackType Kind => TrackType.Video;
+
+        /// <summary>
         /// Video clock rate. Default value is 90000.
         /// </summary>
         public int VideoClock { get; set; } = DEFAULT_CLOCK;

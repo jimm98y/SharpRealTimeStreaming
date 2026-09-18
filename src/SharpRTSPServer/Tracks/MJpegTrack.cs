@@ -22,6 +22,11 @@ namespace SharpRTSPServer
         /// <inheritdoc/>
         public override int ID { get; set; }
 
+        /// <summary>
+        /// What kind of media this track carries.
+        /// </summary>
+        public override TrackType Kind => TrackType.Video;
+
         /// <inheritdoc/>
         public override StringBuilder BuildSDP(StringBuilder sdp)
         {

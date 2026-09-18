@@ -12,6 +12,11 @@ namespace SharpRTSPServer
         public override int ID { get; set; }
         public override int PayloadType { get; set; }
 
+        /// <summary>
+        /// What kind of media this track forwards, as it was constructed with.
+        /// </summary>
+        public override TrackType Kind { get; }
+
         private bool _isReady = false;
         private bool _disposedValue;
 
@@ -54,6 +59,7 @@ namespace SharpRTSPServer
         public ProxyTrack(TrackType type)
         {
             this.ID = (int)type;
+            this.Kind = type;
         }
 
         /// <summary>

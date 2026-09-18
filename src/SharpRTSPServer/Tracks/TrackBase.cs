@@ -70,6 +70,17 @@ namespace SharpRTSPServer
         public abstract int ID { get; set; }
 
         /// <summary>
+        /// What kind of media this track carries.
+        /// </summary>
+        /// <remarks>
+        /// Read from the ID by default, which is what the ID meant when a stream could hold one video
+        /// track and one audio track and nothing else. Every track here says which it is instead, and
+        /// so should any written elsewhere - a stream carrying two of a kind has IDs that run past
+        /// the kinds.
+        /// </remarks>
+        public virtual TrackType Kind => (TrackType)ID;
+
+        /// <summary>
         /// Payload type. AAC uses a dynamic payload type, which by default we calculate as 96 + track ID.
         /// </summary>
         public abstract int PayloadType { get; set; }
@@ -147,8 +158,8 @@ namespace SharpRTSPServer
             if (!sink.CanAcceptNewSamples(StreamID))
                 return;
 
-            if (ID != (int)TrackType.Video && ID != (int)TrackType.Audio)
-                throw new ArgumentOutOfRangeException("ID must be 0 for video or 1 for audio");
+            if (ID < 0)
+                throw new ArgumentOutOfRangeException(nameof(ID), ID, "A track's ID is its place in the stream, so it cannot be negative.");
 
             // A sample with nothing in it would go out as an RTP packet with no payload, for the
             // receiver to make sense of. Some tracks dropped these and some did not; now none of them

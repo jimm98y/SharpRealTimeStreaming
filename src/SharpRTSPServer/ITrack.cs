@@ -29,9 +29,19 @@ namespace SharpRTSPServer
         string Codec { get; }
 
         /// <summary>
-        /// Track ID. Used to identify the track in the SDP.
+        /// Track ID. Used to identify the track in the SDP, and its place in the stream it belongs to.
         /// </summary>
         int ID { get; set; }
+
+        /// <summary>
+        /// What kind of media this track carries.
+        /// </summary>
+        /// <remarks>
+        /// Separate from <see cref="ID"/>, which says where the track sits in its stream. A stream
+        /// can carry two audio tracks, and then one of them has an ID that no longer matches the
+        /// kind - which is why the two are not the same thing.
+        /// </remarks>
+        TrackType Kind { get; }
 
         /// <summary>
         /// Payload type.

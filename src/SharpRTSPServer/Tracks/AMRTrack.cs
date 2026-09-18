@@ -49,6 +49,11 @@ namespace SharpRTSPServer
         public override int ID { get; set; } = 1;
 
         /// <summary>
+        /// What kind of media this track carries.
+        /// </summary>
+        public override TrackType Kind => TrackType.Audio;
+
+        /// <summary>
         /// Sampling rate: 8 kHz narrowband, 16 kHz wideband.
         /// </summary>
         public int SamplingRate => IsWideband ? 16000 : 8000;

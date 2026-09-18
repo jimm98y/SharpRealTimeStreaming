@@ -108,18 +108,66 @@ namespace SharpRTSPServer
         /// <summary>
         /// Video stream.
         /// </summary>
-        public RTPStream Video { get { return Streams[(int)TrackType.Video]; } }
+        public RTPStream Video { get { return StreamFor((int)TrackType.Video); } }
 
         /// <summary>
         /// Audio stream.
         /// </summary>
-        public RTPStream Audio { get { return Streams[(int)TrackType.Audio]; } }
+        public RTPStream Audio { get { return StreamFor((int)TrackType.Audio); } }
 
-        public RTPStream[] Streams { get; } = new RTPStream[]
+        private RTPStream[] _streams = new RTPStream[0];
+
+        private readonly object _streamsLock = new object();
+
+        /// <summary>
+        /// The streams this connection has set up, indexed by the ID of the track each carries.
+        /// </summary>
+        /// <remarks>
+        /// Read without locking, and grown by replacing the array rather than adding to it, so that
+        /// the media path always sees one whole version of it. A connection that set up only the
+        /// track with ID 3 has four of these, the first three unused - which costs nothing and means
+        /// the index is always the track's own ID.
+        /// </remarks>
+        public RTPStream[] Streams => _streams;
+
+        /// <summary>
+        /// This connection's stream for a track, made if this is the first time it is asked for.
+        /// </summary>
+        public RTPStream StreamFor(int trackId)
         {
-            new RTPStream(),
-            new RTPStream()
-        };
+            if (trackId < 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(trackId), trackId, "A track ID is not negative.");
+            }
+
+            lock (_streamsLock)
+            {
+                if (trackId >= _streams.Length)
+                {
+                    var grown = new RTPStream[trackId + 1];
+                    Array.Copy(_streams, grown, _streams.Length);
+
+                    for (int i = _streams.Length; i < grown.Length; i++)
+                    {
+                        grown[i] = new RTPStream();
+                    }
+
+                    _streams = grown;
+                }
+
+                return _streams[trackId];
+            }
+        }
+
+        /// <summary>
+        /// This connection's stream for a track, or null if it never set that one up.
+        /// </summary>
+        public RTPStream StreamOrNull(int trackId)
+        {
+            RTPStream[] streams = _streams;
+
+            return trackId >= 0 && trackId < streams.Length ? streams[trackId] : null;
+        }
 
         /// <summary>
         /// Update the keepalive.

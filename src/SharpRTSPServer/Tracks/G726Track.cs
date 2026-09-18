@@ -47,6 +47,11 @@ namespace SharpRTSPServer
         public override int ID { get; set; } = 1;
 
         /// <summary>
+        /// What kind of media this track carries.
+        /// </summary>
+        public override TrackType Kind => TrackType.Audio;
+
+        /// <summary>
         /// Sampling rate. G.726 is a narrowband codec and runs at 8 kHz whatever its bit rate.
         /// </summary>
         public int SamplingRate { get; } = 8000;

@@ -34,8 +34,8 @@ namespace SharpRTSPServer.Tests
             var expected = new[]
             {
                 "AACTrack", "AMRTrack", "AV1Track", "G726Track", "H264Track", "H265Track",
-                "H266Track", "MJpegTrack", "MP4VTrack", "OpusTrack", "PCMATrack", "PCMUTrack",
-                "ProxyTrack",
+                "H266Track", "MetadataTrack", "MJpegTrack", "MP4VTrack", "OpusTrack", "PCMATrack",
+                "PCMUTrack", "ProxyTrack",
             };
 
             var actual = PublicTracks().Select(t => t.Name).ToArray();
@@ -59,6 +59,7 @@ namespace SharpRTSPServer.Tests
             new object[] { new G726Track(), "G726-32" },
             new object[] { new G726Track(G726BitRate.Rate16), "G726-16" },
             new object[] { new MP4VTrack(), "MP4V-ES" },
+            new object[] { new MetadataTrack(), "vnd.onvif.metadata" },
         };
 
         [TestMethod]

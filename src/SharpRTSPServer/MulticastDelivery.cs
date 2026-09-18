@@ -40,10 +40,19 @@ namespace SharpRTSPServer
         public string GroupAddress { get; set; }
 
         /// <summary>
-        /// The RTP port of each track in the group, indexed by <see cref="TrackType"/>. RTCP is the
+        /// The RTP port each track of the group is listened to on, by the track's ID. RTCP is the
         /// port after it, as it is everywhere else.
         /// </summary>
-        public int[] RtpPort { get; } = { 0, 0 };
+        /// <remarks>
+        /// By ID rather than by kind, because a stream may carry more than one track of a kind and
+        /// each needs a port of its own.
+        /// </remarks>
+        public Dictionary<int, int> RtpPort { get; } = new Dictionary<int, int>();
+
+        /// <summary>
+        /// The port a track of this group is listened to on, or zero if it has none.
+        /// </summary>
+        public int PortOf(int trackId) => RtpPort.TryGetValue(trackId, out int port) ? port : 0;
 
         /// <summary>
         /// The clients listening to this group. They receive nothing directly; they are counted, so
@@ -54,6 +63,6 @@ namespace SharpRTSPServer
         /// <summary>
         /// Whether a track has been set up for the group yet.
         /// </summary>
-        public bool Carries(TrackType trackType) => RtpPort[(int)trackType] != 0;
+        public bool Carries(int trackId) => RtpPort.ContainsKey(trackId);
     }
 }
