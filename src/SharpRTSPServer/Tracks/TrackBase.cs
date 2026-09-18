@@ -171,12 +171,9 @@ namespace SharpRTSPServer
 
             (List<Memory<byte>> rtpPackets, List<IMemoryOwner<byte>> memoryOwners) = CreateRtpPackets(samples, rtpTimestamp);
 
-            sink.FeedInRawRTP(StreamID, ID, rtpTimestamp, rtpPackets);
-
-            foreach (var owner in memoryOwners)
-            {
-                owner.Dispose();
-            }
+            // Handed over, not lent. The sink releases them once the last client has been sent the
+            // frame, which is why it no longer has to copy every packet before letting this return.
+            sink.FeedInRawRTP(StreamID, ID, rtpTimestamp, rtpPackets, memoryOwners);
         }
     }
 }

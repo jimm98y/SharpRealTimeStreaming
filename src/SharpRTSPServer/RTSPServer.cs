@@ -2438,18 +2438,11 @@ namespace SharpRTSPServer
                     }
                 }
 
-                // Kept on the connection rather than made afresh. It is only ever touched under the
-                // send lock, which is held here, and a list per frame per client is a lot of small
-                // garbage for something whose contents are thrown away immediately.
-                List<Memory<byte>> packets = connection.PacketsToSend;
-                packets.Clear();
-
-                for (int i = 0; i < frame.Packets.Count; i++)
-                {
-                    packets.Add(frame.Packets[i].AsMemory(0, frame.Lengths[i]));
-                }
-
-                dropConnection = !TrySendRawRTP(connection, stream, packets, frame.PreserveSourceHeaders);
+                // The frame's own packets, sent as they are. They were copied into a list of this
+                // connection's own, which is nothing beside the copy of every packet that used to
+                // happen before that - and is just as unnecessary, since sending does not change
+                // them.
+                dropConnection = !TrySendRawRTP(connection, stream, frame.Packets, frame.PreserveSourceHeaders);
             }
 
             // outside the send lock: see RTSPConnection.SendLock for why that order matters
@@ -3837,7 +3830,27 @@ namespace SharpRTSPServer
             }
         }
 
-        public void FeedInRawRTP(string streamID, int streamType, uint rtpTimestamp, List<Memory<byte>> rtpPackets)
+        public void FeedInRawRTP(string streamID, int streamType, uint rtpTimestamp,
+            List<Memory<byte>> rtpPackets, List<IMemoryOwner<byte>> memoryOwners)
+        {
+            // Taken over before anything can go wrong, so that every way out of here - a stream that
+            // does not exist, a track that does not, an exception - still releases what the caller
+            // handed over. It promised not to.
+            QueuedFrame frame = QueuedFrame.Take();
+            frame.Fill(rtpPackets, memoryOwners);
+
+            try
+            {
+                FanOut(streamID, streamType, rtpTimestamp, frame);
+            }
+            finally
+            {
+                // the producer's own share, now that every connection has been offered the frame
+                frame.Release();
+            }
+        }
+
+        private void FanOut(string streamID, int streamType, uint rtpTimestamp, QueuedFrame frame)
         {
             // A track ID, not a kind: a stream can carry several tracks of a kind, and this says
             // which one of them the media is for.
@@ -3878,14 +3891,6 @@ namespace SharpRTSPServer
                 connections = streamSource.ConnectionList.ToArray();
             }
 
-            // Copied once, not once per client. Everything about the frame is the same for all of
-            // them, and the copy is the one cost here that grows with the size of the audience.
-            //
-            // Taken from a pool rather than made: one of these and the two lists inside it, for every
-            // frame of every stream, is a steady drip of garbage for something whose whole life is a
-            // few milliseconds.
-            QueuedFrame frame = QueuedFrame.Take();
-
             frame.StreamType = streamType;
             frame.RtpTimestamp = rtpTimestamp;
             frame.PreserveSourceHeaders = preserveSourceHeaders;
@@ -3893,44 +3898,34 @@ namespace SharpRTSPServer
             // The RTP keeps the source's SSRC, so the sender reports have to name it too - a
             // receiver ties the two together by SSRC and ignores one that does not match.
             frame.SourceSsrc = preserveSourceHeaders ? track.SSRC : 0u;
-            try
+
+            // One frame, offered to every connection watching. Nothing about it differs between
+            // them, which is why it is not copied for any of them.
+            foreach (RTSPConnection connection in connections)
             {
-                // inside the try: renting the buffers can fail partway, and the ones already taken
-                // still have to go back
-                frame.Fill(rtpPackets);
+                // No lock here, deliberately. The lock that orders writes to a connection is held
+                // by its writer for as long as a write takes, and a write to a client that has
+                // stopped reading takes until TCP gives up - so waiting for it here would put the
+                // producer back exactly where this queue is meant to take it out of. Whether the
+                // connection is playing is set by PLAY before it writes its reply, so a frame
+                // produced the instant that reply arrived is queued behind it rather than dropped.
+                //
+                // Note: 'continue', not 'return' - one connection that is paused or not fully set
+                // up must not stop the data going to every other connection on this stream.
+                if (!connection.Play)
+                    continue;
 
-                // Go through each RTSP connection and output the RTP on the Session
-                foreach (RTSPConnection connection in connections)
-                {
-                    // No lock here, deliberately. The lock that orders writes to a connection is held
-                    // by its writer for as long as a write takes, and a write to a client that has
-                    // stopped reading takes until TCP gives up - so waiting for it here would put the
-                    // producer back exactly where this queue is meant to take it out of. Whether the
-                    // connection is playing is set by PLAY before it writes its reply, so a frame
-                    // produced the instant that reply arrived is queued behind it rather than dropped.
-                    //
-                    // Note: 'continue', not 'return' - one connection that is paused or not fully set
-                    // up must not stop the data going to every other connection on this stream.
-                    if (!connection.Play)
-                        continue;
+                RTPStream stream = connection.StreamOrNull(streamType);
+                OutboundQueue outbound = connection.Outbound;
 
-                    RTPStream stream = connection.Streams[streamType];
-                    OutboundQueue outbound = connection.Outbound;
+                if (stream == null || stream.RtpChannel == null || outbound == null)
+                    continue;
 
-                    if (stream.RtpChannel == null || outbound == null)
-                        continue;
-
-                    // Handed to the connection rather than written here. Writing took as long as the
-                    // client took to read, and every client on the stream waited its turn on this one
-                    // thread, so one that stopped reading held up the media for all of them.
-                    frame.AddRef();
-                    outbound.Enqueue(frame);
-                }
-            }
-            finally
-            {
-                // the producer's own share, now that every connection has been offered the frame
-                frame.Release();
+                // Handed to the connection rather than written here. Writing took as long as the
+                // client took to read, and every client on the stream waited its turn on this one
+                // thread, so one that stopped reading held up the media for all of them.
+                frame.AddRef();
+                outbound.Enqueue(frame);
             }
 
             // Nothing is dropped here any more. A frame is handed to a connection rather than written

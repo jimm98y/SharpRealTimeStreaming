@@ -245,7 +245,7 @@ namespace SharpRTSPServer.Tests
 
             try
             {
-                server.FeedInRawRTP("no-such-stream", 0, 0, packets);
+                server.FeedInRawRTP("no-such-stream", 0, 0, packets, null);
             }
             catch (Exception ex)
             {

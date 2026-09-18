@@ -25,18 +25,6 @@ namespace SharpRTSPServer
     /// </remarks>
     internal sealed class QueuedFrame
     {
-        /// <summary>
-        /// Where the buffers holding a frame come from.
-        /// </summary>
-        /// <remarks>
-        /// Not the shared pool. These are rented by whichever thread produced the frame and given
-        /// back by whichever wrote it, and the shared pool keeps a small cache per thread - so a
-        /// buffer handed back by a writer never reaches the producer that wants one, and the
-        /// producer allocates instead. A pool without that cache costs a lock and returns what was
-        /// given back to it.
-        /// </remarks>
-        private static readonly ArrayPool<byte> Buffers = ArrayPool<byte>.Create();
-
         /// <summary>The producer's own, given up once the frame has been offered to every connection.</summary>
         private int _references = 1;
 
@@ -52,10 +40,13 @@ namespace SharpRTSPServer
         /// </summary>
         public uint SourceSsrc { get; set; }
 
-        /// <summary>Rented buffers, each holding one RTP packet in its first <see cref="Lengths"/> bytes.</summary>
-        public List<byte[]> Packets { get; } = new List<byte[]>();
+        /// <summary>The packets of this frame, as the track built them.</summary>
+        public List<Memory<byte>> Packets { get; } = new List<Memory<byte>>();
 
-        public List<int> Lengths { get; } = new List<int>();
+        /// <summary>
+        /// What is holding those packets, to be disposed once the last client has finished.
+        /// </summary>
+        private readonly List<IMemoryOwner<byte>> _owners = new List<IMemoryOwner<byte>>();
 
         /// <summary>How much of the queue's budget this frame takes up.</summary>
         public int Bytes { get; private set; }
@@ -93,15 +84,31 @@ namespace SharpRTSPServer
             return new QueuedFrame();
         }
 
-        public void Fill(IReadOnlyList<Memory<byte>> packets)
+        /// <summary>
+        /// Takes a frame over: the packets as they were built, and whatever holds them.
+        /// </summary>
+        /// <remarks>
+        /// Nothing is copied. Every packet used to be copied into a buffer of this frame's own,
+        /// because the track released the originals the moment it had handed them over - a copy and
+        /// a pooled buffer per packet, for a frame about to go out unchanged. The track hands over
+        /// what holds them instead, and this releases it when the last client is done.
+        /// </remarks>
+        public void Fill(IReadOnlyList<Memory<byte>> packets, IReadOnlyList<IMemoryOwner<byte>> owners)
         {
-            foreach (Memory<byte> packet in packets)
+            for (int i = 0; i < packets.Count; i++)
             {
-                byte[] buffer = Buffers.Rent(packet.Length);
-                packet.Span.CopyTo(buffer);
-                Packets.Add(buffer);
-                Lengths.Add(packet.Length);
-                Bytes += packet.Length;
+                Packets.Add(packets[i]);
+                Bytes += packets[i].Length;
+            }
+
+            if (owners == null)
+            {
+                return;
+            }
+
+            for (int i = 0; i < owners.Count; i++)
+            {
+                _owners.Add(owners[i]);
             }
         }
 
@@ -124,13 +131,13 @@ namespace SharpRTSPServer
                 return;
             }
 
-            foreach (byte[] buffer in Packets)
+            foreach (IMemoryOwner<byte> owner in _owners)
             {
-                Buffers.Return(buffer);
+                owner.Dispose();
             }
 
+            _owners.Clear();
             Packets.Clear();
-            Lengths.Clear();
             Bytes = 0;
 
             // Back for the next frame, unless there are already enough waiting. The lists keep
