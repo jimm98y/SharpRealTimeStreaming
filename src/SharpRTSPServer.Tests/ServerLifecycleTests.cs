@@ -62,8 +62,12 @@ namespace SharpRTSPServer.Tests
                     // the third one is over the limit and must be dropped rather than queued forever
                     var refused = new TcpClient("127.0.0.1", port);
                     sockets.Add(refused);
-                    WaitForServerToAccept();
-                    Assert.IsFalse(ConnectionIsAccepted(refused), "the connection over the limit should have been refused");
+
+                    // Waited for rather than slept on. A fixed pause has to be long enough for the
+                    // slowest run on the busiest machine, and a run where the server had not got to
+                    // the connection yet failed as though it had been allowed in.
+                    Assert.IsTrue(WaitForConnectionToBeDropped(refused),
+                        "the connection over the limit should have been refused");
                 }
                 finally
                 {
@@ -105,6 +109,28 @@ namespace SharpRTSPServer.Tests
         /// The accept loop runs on its own thread, so give it a moment to take the connection.
         /// </summary>
         private static void WaitForServerToAccept() => System.Threading.Thread.Sleep(150);
+
+        /// <summary>
+        /// Waits for the far end to close a connection, and says whether it did.
+        /// </summary>
+        /// <remarks>
+        /// Only takes the whole time when the answer is no, which is the run that is about to fail
+        /// anyway - a connection that is going to be dropped is dropped long before this is up.
+        /// </remarks>
+        private static bool WaitForConnectionToBeDropped(TcpClient client)
+        {
+            var until = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+
+            while (DateTime.UtcNow < until)
+            {
+                if (!ConnectionIsAccepted(client))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
 
         /// <summary>
         /// Waits until the server has actually taken the connections on, rather than for a fixed

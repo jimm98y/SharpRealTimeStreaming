@@ -92,6 +92,12 @@ namespace SharpRTSPServer
         private static readonly TimeSpan CLOSE_WAIT_FOR_WRITER = TimeSpan.FromSeconds(5);
 
         /// <summary>
+        /// How long closing a connection waits for its writer before deciding this is not the
+        /// ordinary end of a session and the socket has to be closed to break the write.
+        /// </summary>
+        private static readonly TimeSpan QUIET_CLOSE_WAIT_FOR_WRITER = TimeSpan.FromMilliseconds(250);
+
+        /// <summary>
         /// How long handing a connection's UDP ports back waits for its writer to be out of them. A
         /// UDP send waits on nothing at the far end, so this only has to cover the send itself.
         /// </summary>
@@ -2434,19 +2440,26 @@ namespace SharpRTSPServer
         {
             Action close = () =>
             {
-                // Closing the socket first is what fails a write that is stuck, and it is safe to do
-                // underneath one - it is the disposing below that is not.
-                TryCloseTransport(connection.Transport);
+                // A session that ends the ordinary way has no writer to interrupt, so the listener
+                // is asked to stop first and closes its own socket in its own time. Closing the
+                // socket underneath it instead makes the read it has outstanding fail, which is a
+                // warning and a stack trace on every clean goodbye for something that went perfectly
+                // well.
+                bool exclusive = Monitor.TryEnter(connection.SendLock, QUIET_CLOSE_WAIT_FOR_WRITER);
 
-                // Then wait for the writer to be out of the transport before anything is disposed.
-                // Disposing one while a write is in it corrupts memory: the write is still reading
-                // from buffers the dispose hands back, and the crash lands later and somewhere else,
-                // as an access violation on whoever was given them next.
-                //
-                // The wait is short because the socket is already closed, so a write that was stuck
-                // in it has failed by now. If it somehow has not, the transport is left to the
-                // finalizer rather than pulled out from under the thread using it.
-                bool exclusive = Monitor.TryEnter(connection.SendLock, CLOSE_WAIT_FOR_WRITER);
+                if (!exclusive)
+                {
+                    // Something is still writing. Closing the socket is what fails a write that is
+                    // stuck, and it is safe to do underneath one - it is the disposing that is not -
+                    // so that comes first here and the wait for the writer comes after it.
+                    TryCloseTransport(connection.Transport);
+
+                    // The wait is longer now because the socket is closed, so a write that was stuck
+                    // in it has failed. If it somehow has not, the transport is left to the finalizer
+                    // rather than pulled out from under the thread using it: disposing one while a
+                    // write is in it is the kind of fault that lands later and somewhere else.
+                    exclusive = Monitor.TryEnter(connection.SendLock, CLOSE_WAIT_FOR_WRITER);
+                }
 
                 if (!exclusive)
                 {
@@ -2464,12 +2477,16 @@ namespace SharpRTSPServer
 
                     try
                     {
+                        // Which closes the connection socket too, so nothing else has to.
                         listener?.Dispose();
                     }
                     catch (Exception ex)
                     {
                         _logger.LogDebug(ex, "Error disposing an RTSP listener");
                     }
+
+                    // In case the listener did not own it, or there never was one.
+                    TryCloseTransport(connection.Transport);
                 }
                 finally
                 {
