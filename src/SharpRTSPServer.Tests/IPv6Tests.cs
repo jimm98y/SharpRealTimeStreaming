@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Net;
 using System.Net.Sockets;
 using SharpRTSPServer;
@@ -41,7 +42,9 @@ namespace SharpRTSPServer.Tests
 
             Assert.IsTrue(mapped.IsIPv4MappedToIPv6, "the test is about the mapped form");
             Assert.AreEqual("127.0.0.1", RTSPServer.MediaDestination(mapped));
-            Assert.IsTrue(RTSPServer.CanSendUdpTo(mapped), "an IPv4 client can still be sent UDP");
+
+            // the mapping is how the listener describes it, not how the client is reached
+            Assert.AreEqual(AddressFamily.InterNetwork, RTSPServer.MediaFamily(mapped));
         }
 
         [TestMethod]
@@ -55,13 +58,10 @@ namespace SharpRTSPServer.Tests
         }
 
         [TestMethod]
-        public void UdpIsRefusedForAClientThatCannotBeReachedOverIt()
+        public void MediaGoesOutInTheFamilyTheClientArrivedOn()
         {
-            // The sockets the transport provides are IPv4, so there is nothing to reach a real IPv6
-            // client from. Saying so lets the client interleave over the connection it already has;
-            // the alternative was accepting the SETUP and sending the media nowhere.
-            Assert.IsFalse(RTSPServer.CanSendUdpTo(IPAddress.Parse("2001:db8::1")));
-            Assert.IsTrue(RTSPServer.CanSendUdpTo(IPAddress.Parse("10.0.0.5")));
+            Assert.AreEqual(AddressFamily.InterNetworkV6, RTSPServer.MediaFamily(IPAddress.Parse("2001:db8::1")));
+            Assert.AreEqual(AddressFamily.InterNetwork, RTSPServer.MediaFamily(IPAddress.Parse("10.0.0.5")));
         }
 
         [TestMethod]
@@ -98,7 +98,7 @@ namespace SharpRTSPServer.Tests
         }
 
         [TestMethod]
-        public void AnIPv6ClientAskingForUdpIsToldItCannotHaveIt()
+        public void MediaOverUdpReachesAnIPv6Client()
         {
             if (!Socket.OSSupportsIPv6)
             {
@@ -108,8 +108,16 @@ namespace SharpRTSPServer.Tests
 
             int port = TestPorts.FindFree();
             using var server = new RTSPServer(port, "admin", "password");
-            server.AddStreamSource(new RTSPStreamSource("stream1", new H264Track(Sps, Pps), null));
+            server.SetRtpPortRange(55200, 55400);
+
+            var videoTrack = new H264Track(Sps, Pps);
+            server.AddStreamSource(new RTSPStreamSource("stream1", videoTrack, null));
             server.StartListen();
+
+            // where this client wants its RTP, on the loopback of the family it connected over
+            using var rtp = new UdpClient(new IPEndPoint(IPAddress.IPv6Loopback, 0));
+            int rtpPort = ((IPEndPoint)rtp.Client.LocalEndPoint).Port;
+            using var rtcp = new UdpClient(new IPEndPoint(IPAddress.IPv6Loopback, rtpPort + 1));
 
             using var client = new RtspTestClient(IPAddress.IPv6Loopback.ToString(), port, "admin", "password");
 
@@ -118,10 +126,40 @@ namespace SharpRTSPServer.Tests
             client.Send("DESCRIBE", baseUri, "Accept: application/sdp");
 
             var setup = client.Send("SETUP", baseUri + "/trackID=0",
-                "Transport: RTP/AVP;unicast;client_port=41500-41501");
+                $"Transport: RTP/AVP;unicast;client_port={rtpPort}-{rtpPort + 1}");
 
-            Assert.AreEqual(461, setup.StatusCode,
-                "refusing it sends the client to a transport that works, rather than to media that never arrives");
+            Assert.AreEqual(200, setup.StatusCode, "a UDP SETUP from an IPv6 client should be accepted");
+            Assert.IsNotNull(setup.Match(@"server_port=(\d+)"), "the reply should name the server ports");
+
+            Assert.AreEqual(200, client.Send("PLAY", baseUri, $"Session: {setup.Session}").StatusCode);
+
+            rtp.Client.ReceiveTimeout = 5000;
+
+            // Fed until something arrives or the patience runs out, because the first frame can be
+            // produced before PLAY has finished being answered.
+            byte[] received = null;
+
+            for (int i = 0; i < 20 && received == null; i++)
+            {
+                videoTrack.FeedInRawSamples((uint)((i + 1) * 3000), new List<ReadOnlyMemory<byte>>
+                {
+                    new ReadOnlyMemory<byte>(new byte[] { 0x65, 0x11, 0x22, 0x33 }),
+                });
+
+                try
+                {
+                    var from = new IPEndPoint(IPAddress.IPv6Any, 0);
+                    received = rtp.Receive(ref from);
+                }
+                catch (SocketException)
+                {
+                    // nothing yet
+                }
+            }
+
+            Assert.IsNotNull(received, "no RTP arrived over IPv6");
+            Assert.IsGreaterThan(12, received.Length, "an RTP packet is a header and then a payload");
+            Assert.AreEqual(2, received[0] >> 6, "it should be RTP version 2");
         }
     }
 }

@@ -1111,21 +1111,21 @@ namespace SharpRTSPServer
         }
 
         /// <summary>
-        /// Whether media can be sent over UDP to a client at this address.
+        /// The address family a client's media has to be sent in.
         /// </summary>
         /// <remarks>
-        /// The sockets underneath are IPv4, so an address that is not one - and is not an IPv4
-        /// address wearing an IPv6 shape, which a dual mode listener reports for every IPv4 client -
-        /// cannot be reached from them.
+        /// An IPv4 client arriving on a dual mode listener is reported as an IPv4 address mapped into
+        /// IPv6, and is served from an IPv4 socket like any other - the mapping is how the listener
+        /// describes it, not how the client is reached.
         /// </remarks>
-        internal static bool CanSendUdpTo(IPAddress address)
+        internal static AddressFamily MediaFamily(IPAddress address)
         {
-            if (address == null)
+            if (address == null || address.IsIPv4MappedToIPv6)
             {
-                return false;
+                return AddressFamily.InterNetwork;
             }
 
-            return address.AddressFamily == AddressFamily.InterNetwork || address.IsIPv4MappedToIPv6;
+            return address.AddressFamily;
         }
 
         /// <summary>
@@ -1660,25 +1660,12 @@ namespace SharpRTSPServer
                     return;
                 }
 
-                // A client that reached us over IPv6 can talk RTSP but cannot be sent UDP media: the
-                // pair of sockets the transport gives us is bound to an IPv4 address and has nothing
-                // to reach an IPv6 one with. Say so, so the client falls back to interleaving the
-                // media over the connection it already has, which works over either.
-                if (!CanSendUdpTo(listener.RemoteEndPoint.Address))
-                {
-                    _logger.LogWarning(
-                        "Refusing a UDP SETUP from {remoteEndPoint}: media over UDP needs an IPv4 client, interleaved over the RTSP connection works for both",
-                        listener.RemoteEndPoint);
-                    SendUnsupportedTransport(listener, setupMessage);
-                    return;
-                }
-
                 // RTP over UDP mode
                 // Create a pair of UDP sockets - One is for the Data (eg Video/Audio), one is for the RTCP
-                UDPSocket udpPair;
+                RtpUdpTransport udpPair;
                 try
                 {
-                    udpPair = AllocateUdpPair();
+                    udpPair = AllocateUdpPair(MediaFamily(listener.RemoteEndPoint.Address));
                 }
                 catch (Exception ex) when (ex is InvalidOperationException || ex is SocketException)
                 {
@@ -2592,7 +2579,7 @@ namespace SharpRTSPServer
         }
 
         private static bool IsUdp(IRtpTransport transport) =>
-            transport is UDPSocket || transport is MulticastUDPSocket;
+            transport is RtpUdpTransport || transport is UDPSocket || transport is MulticastUDPSocket;
 
         /// <summary>
         /// Takes the connection's matching transports off it and releases them, in that order and
@@ -2703,7 +2690,7 @@ namespace SharpRTSPServer
         /// second SETUP on the same session reports one, a third two, and so on. Carrying a cursor
         /// past the last pair handed out means the common case binds on the first try.
         /// </remarks>
-        private UDPSocket AllocateUdpPair()
+        private RtpUdpTransport AllocateUdpPair(AddressFamily addressFamily)
         {
             int cursor;
             lock (_rtpPortCursorLock)
@@ -2711,13 +2698,13 @@ namespace SharpRTSPServer
                 cursor = _rtpPortCursor;
             }
 
-            UDPSocket udpPair = null;
+            RtpUdpTransport udpPair = null;
 
             if (cursor > RtpPortRangeStart && cursor + PORTS_PER_RTP_PAIR <= RtpPortRangeEnd)
             {
                 try
                 {
-                    udpPair = new UDPSocket(cursor, RtpPortRangeEnd);
+                    udpPair = new RtpUdpTransport(cursor, RtpPortRangeEnd, addressFamily, _logger);
                 }
                 catch (Exception ex) when (ex is InvalidOperationException || ex is SocketException)
                 {
@@ -2728,7 +2715,7 @@ namespace SharpRTSPServer
             // The first allocation, and every one after the cursor has run off the end or found the
             // tail full. A full sweep is also what tells us the range is really exhausted, so this
             // is the call whose failure the caller turns into a 461.
-            udpPair = udpPair ?? new UDPSocket(RtpPortRangeStart, RtpPortRangeEnd);
+            udpPair = udpPair ?? new RtpUdpTransport(RtpPortRangeStart, RtpPortRangeEnd, addressFamily, _logger);
 
             lock (_rtpPortCursorLock)
             {
@@ -2805,6 +2792,8 @@ namespace SharpRTSPServer
             {
                 case RtpTcpTransport _:
                     return "TCP";
+                case RtpUdpTransport _:
+                    return "UDP";
                 case MulticastUDPSocket _:
                     return "Multicast";
                 case UDPSocket _:
