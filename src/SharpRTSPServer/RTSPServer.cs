@@ -1705,6 +1705,24 @@ namespace SharpRTSPServer
             ITrack setupTrack = trackType == TrackType.Video ? streamSource.VideoTrack : streamSource.AudioTrack;
             if (setupTrack.RtpProfile == RtpProfiles.SAVP)
             {
+                bool wantsMulticast = transport != null
+                    && transport.LowerTransport == RtspTransport.LowerTransportType.UDP
+                    && transport.IsMulticast;
+
+                // The key belongs to the stream, so every client has the same one. Sending to more
+                // than one of them separately under it would have them all encrypting with the same
+                // key and the same SSRC while numbering their packets independently - the same
+                // keystream protecting two different packets, which is the one thing SRTP must never
+                // do. A group has one sender, so it has none of that.
+                if (streamSource.SharedSrtpKey && !wantsMulticast)
+                {
+                    _logger.LogWarning(
+                        "Refusing a unicast SETUP of {trackType} on {streamID} from {remoteEndPoint}: its SRTP key belongs to the stream, so it goes out by multicast only",
+                        trackType, streamSource.StreamID, listener.RemoteEndPoint);
+                    SendUnsupportedTransport(listener, setupMessage);
+                    return;
+                }
+
                 RTSPConnection existingConnection = ConnectionByListener(listener);
                 if (existingConnection == null || existingConnection.Streams[(int)trackType].Context == null)
                 {
@@ -1819,13 +1837,13 @@ namespace SharpRTSPServer
                     return;
                 }
 
-                // One group, one set of keys, and the keys are handed to each client in the SDP it
-                // asked for - so every client would be given a different key for the one stream they
-                // are all listening to. Protecting a group needs a key shared by everyone in it,
-                // which is a different arrangement from the one this server has.
-                if (setupTrack.RtpProfile == RtpProfiles.SAVP)
+                // Protecting a group needs a key everyone in it holds. Without one, each client has
+                // been handed a key of its own in its own SDP, and none of them could read a stream
+                // sent under any of the others.
+                if (setupTrack.RtpProfile == RtpProfiles.SAVP && !streamSource.SharedSrtpKey)
                 {
-                    _logger.LogWarning("Refusing multicast SETUP of the protected track {trackType} from {remoteEndPoint}",
+                    _logger.LogWarning(
+                        "Refusing multicast SETUP of the protected track {trackType} from {remoteEndPoint}: its SRTP key belongs to each client, set SharedSrtpKey on the stream for a key the group can share",
                         trackType, listener.RemoteEndPoint);
                     SendUnsupportedTransport(listener, setupMessage);
                     return;
@@ -2008,7 +2026,7 @@ namespace SharpRTSPServer
         /// The key lives in the SDP, which is why it is made here: a client that never receives the
         /// SDP has no way to read anything the server would send it.
         /// </remarks>
-        private string BuildCryptoAttribute(RTPStream stream)
+        private string BuildCryptoAttribute(RTSPStreamSource streamSource, RTPStream stream, TrackType trackType)
         {
             if (string.IsNullOrEmpty(SrtpCryptoSuite))
             {
@@ -2017,8 +2035,20 @@ namespace SharpRTSPServer
                     "Pass one to the RTSPServer constructor, or leave the track on AVP.");
             }
 
-            byte[] masterKeySalt = stream.PrepareSrtpContext(SrtpCryptoSuite);
-            var mki = stream.Context.EncodeRtpContext.Mki;
+            // A stream whose key belongs to the stream derives it once and announces the same one to
+            // everybody, which is the only way a group can read what is sent to it. The client's own
+            // stream is given the same keys, so that the SETUP which follows can tell this client has
+            // been told them.
+            RTPStream keyHolder = streamSource.SharedSrtpKey ? streamSource.GroupKeys[(int)trackType] : stream;
+
+            byte[] masterKeySalt = keyHolder.PrepareSrtpContext(SrtpCryptoSuite);
+
+            if (!ReferenceEquals(keyHolder, stream))
+            {
+                stream.Context = keyHolder.Context;
+            }
+
+            var mki = keyHolder.Context.EncodeRtpContext.Mki;
 
             string optionalMki = "";
             if (mki.Length > 0)
@@ -2094,7 +2124,7 @@ namespace SharpRTSPServer
                 if (track != null && track.RtpProfile == RtpProfiles.SAVP)
                 {
                     RTPStream stream = connection.Streams[(int)trackType];
-                    builder.Append(BuildCryptoAttribute(stream)).Append(SDP_LINE_ENDING);
+                    builder.Append(BuildCryptoAttribute(streamSource, stream, trackType.Value)).Append(SDP_LINE_ENDING);
                 }
             }
 
@@ -2194,7 +2224,7 @@ namespace SharpRTSPServer
 
                 if (streamSource.VideoTrack.RtpProfile == RtpProfiles.SAVP)
                 {
-                    sdp.Append(BuildCryptoAttribute(connection.Video)).Append(SDP_LINE_ENDING);
+                    sdp.Append(BuildCryptoAttribute(streamSource, connection.Video, TrackType.Video)).Append(SDP_LINE_ENDING);
                 }
             }
 
@@ -2205,7 +2235,7 @@ namespace SharpRTSPServer
 
                 if (streamSource.AudioTrack.RtpProfile == RtpProfiles.SAVP)
                 {
-                    sdp.Append(BuildCryptoAttribute(connection.Audio)).Append(SDP_LINE_ENDING);
+                    sdp.Append(BuildCryptoAttribute(streamSource, connection.Audio, TrackType.Audio)).Append(SDP_LINE_ENDING);
                 }
             }
 
@@ -2770,6 +2800,12 @@ namespace SharpRTSPServer
 
                     RTPStream stream = delivery.Sender.Streams[(int)trackType];
                     stream.RtpChannel = group;
+
+                    // Under the key the SDP announced to everybody, which is what makes what the
+                    // group sends readable by all of them and by nobody else.
+                    stream.Context = streamSource.SharedSrtpKey
+                        ? streamSource.GroupKeys[(int)trackType].Context
+                        : null;
                     stream.SSRC = trackType == TrackType.Video
                         ? streamSource.VideoTrack?.SSRC ?? 0
                         : streamSource.AudioTrack?.SSRC ?? 0;

@@ -41,6 +41,38 @@ namespace SharpRTSPServer
         /// </summary>
         internal MulticastDelivery Multicast { get; set; }
 
+        /// <summary>
+        /// Whether this stream's SRTP keys belong to the stream rather than to each client.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Protecting media sent to a group needs one key that every member of the group holds,
+        /// which is what RFC 4568 puts in the SDP and what RFC 3711 is built for. This server
+        /// otherwise derives a key for each client, which is better where each client has media of
+        /// its own and impossible where they are all listening to the same stream.
+        /// </para>
+        /// <para>
+        /// It is off by default and worth understanding before turning on: every client that asks
+        /// for this stream is handed the same key, so any of them can read what the others receive,
+        /// and one that keeps the key can read the stream after its session is over. That is what a
+        /// group is - the key is shared with whoever is allowed to listen - but it is a real change
+        /// from a key that belongs to one client.
+        /// </para>
+        /// <para>
+        /// While it is on, the stream goes out by multicast only. One key across several unicast
+        /// clients would be worse than no encryption at all: they would all be sending under the
+        /// same key and the same SSRC while numbering their packets independently, so the same
+        /// keystream would protect two different packets, and anyone holding both could recover both
+        /// from the pair. Multicast has no such problem because there is one sender.
+        /// </para>
+        /// </remarks>
+        public bool SharedSrtpKey { get; set; }
+
+        /// <summary>
+        /// The keys the group uses, one per track, derived once and handed to everyone.
+        /// </summary>
+        internal RTPStream[] GroupKeys { get; } = { new RTPStream(), new RTPStream() };
+
         internal bool TryGetLastRtpTimestamp(int streamType, out uint rtpTimestamp)
         {
             rtpTimestamp = 0;
