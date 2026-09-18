@@ -94,6 +94,7 @@ namespace SharpRTSPServer
         /// </summary>
         /// <param name="samples">Runs of ADPCM data, each of which becomes one packet.</param>
         /// <param name="rtpTimestamp">RTP timestamp in the timescale of the track.</param>
+        /// <param name="packets">Where to build them, and what holds them afterwards.</param>
         public override void CreateRtpPackets(List<ReadOnlyMemory<byte>> samples, uint rtpTimestamp, RtpPackets packets)
         {
             for (int i = 0; i < samples.Count; i++)

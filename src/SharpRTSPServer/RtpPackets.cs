@@ -1,6 +1,5 @@
 using System;
 using System.Buffers;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Threading;
 
@@ -34,11 +33,28 @@ namespace SharpRTSPServer
         /// buffer handed back by a writer never reaches the producer that wants one, and the producer
         /// allocates instead. A pool without that cache costs a lock and gives back what it was given.
         /// </remarks>
-        private static readonly ArrayPool<byte> Buffers = ArrayPool<byte>.Create();
+        /// <remarks>
+        /// Deeper than the default of fifty buffers a size, because the buffers of every frame still
+        /// queued for a client are out on loan at once - a client that is a little behind, times the
+        /// packets in a frame, is past fifty without trying. Past the depth the pool simply allocates,
+        /// which is what it was quietly doing.
+        /// </remarks>
+        private static readonly ArrayPool<byte> Buffers = ArrayPool<byte>.Create(MOST_BYTES, MOST_BUFFERS_OF_A_SIZE);
 
-        private static readonly ConcurrentBag<RtpPackets> Spare = new ConcurrentBag<RtpPackets>();
+        /// <summary>The largest packet worth pooling. RTP over a sane network is nowhere near this.</summary>
+        private const int MOST_BYTES = 1024 * 1024;
 
-        private static int _spareCount;
+        private const int MOST_BUFFERS_OF_A_SIZE = 1024;
+
+        /// <remarks>
+        /// A plain stack under a lock, not a concurrent bag. A bag keeps a list per thread and is at
+        /// its best when the same thread puts things in and takes them out; here one thread always
+        /// puts and another always takes, so every take was a steal from another thread's list -
+        /// which locks anyway, and allocates on the way.
+        /// </remarks>
+        private static readonly Stack<RtpPackets> Spare = new Stack<RtpPackets>();
+
+        private static readonly object SpareLock = new object();
 
         /// <summary>
         /// How many are kept for reuse. A burst must not leave a pool the size of the burst behind
@@ -130,11 +146,14 @@ namespace SharpRTSPServer
         /// </summary>
         public static RtpPackets Take()
         {
-            if (Spare.TryTake(out RtpPackets packets))
+            lock (SpareLock)
             {
-                Interlocked.Decrement(ref _spareCount);
-                packets._released = 0;
-                return packets;
+                if (Spare.Count > 0)
+                {
+                    RtpPackets spare = Spare.Pop();
+                    spare._released = 0;
+                    return spare;
+                }
             }
 
             return new RtpPackets();
@@ -163,13 +182,12 @@ namespace SharpRTSPServer
             _rented.Clear();
             Items.Clear();
 
-            if (Interlocked.Increment(ref _spareCount) <= MOST_SPARE)
+            lock (SpareLock)
             {
-                Spare.Add(this);
-            }
-            else
-            {
-                Interlocked.Decrement(ref _spareCount);
+                if (Spare.Count < MOST_SPARE)
+                {
+                    Spare.Push(this);
+                }
             }
         }
     }

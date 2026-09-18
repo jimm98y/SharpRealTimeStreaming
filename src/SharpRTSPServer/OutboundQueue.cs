@@ -1,7 +1,6 @@
 using Microsoft.Extensions.Logging;
 using System;
 using System.Buffers;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Threading;
 
@@ -58,9 +57,15 @@ namespace SharpRTSPServer
         /// Past the bound a frame is simply made and dropped, as they all were before.
         /// </para>
         /// </remarks>
-        private static readonly ConcurrentBag<QueuedFrame> Spare = new ConcurrentBag<QueuedFrame>();
+        /// <remarks>
+        /// A plain stack under a lock, not a concurrent bag. A bag keeps a list per thread and is at
+        /// its best when the same thread puts things in and takes them out; here one thread always
+        /// puts and another always takes, so every take was a steal from another thread's list -
+        /// which locks anyway, and allocates on the way.
+        /// </remarks>
+        private static readonly Stack<QueuedFrame> Spare = new Stack<QueuedFrame>();
 
-        private static int _spareCount;
+        private static readonly object SpareLock = new object();
 
         private const int MOST_SPARE = 64;
 
@@ -69,11 +74,14 @@ namespace SharpRTSPServer
         /// </summary>
         public static QueuedFrame Take()
         {
-            if (Spare.TryTake(out QueuedFrame frame))
+            lock (SpareLock)
             {
-                Interlocked.Decrement(ref _spareCount);
-                frame._references = 1;
-                return frame;
+                if (Spare.Count > 0)
+                {
+                    QueuedFrame spare = Spare.Pop();
+                    spare._references = 1;
+                    return spare;
+                }
             }
 
             return new QueuedFrame();
@@ -125,13 +133,12 @@ namespace SharpRTSPServer
             // Back for the next frame, unless there are already enough waiting. The lists keep
             // whatever capacity they grew to, which is the point: the next frame of the same stream
             // is the same shape as this one.
-            if (Interlocked.Increment(ref _spareCount) <= MOST_SPARE)
+            lock (SpareLock)
             {
-                Spare.Add(this);
-            }
-            else
-            {
-                Interlocked.Decrement(ref _spareCount);
+                if (Spare.Count < MOST_SPARE)
+                {
+                    Spare.Push(this);
+                }
             }
         }
     }
@@ -267,7 +274,11 @@ namespace SharpRTSPServer
             // Said at intervals rather than per frame, since a client that has stopped reading drops
             // one for every frame produced from then on. Crossing a hundred counts, rather than
             // landing exactly on one - a batch that steps from 99 to 101 is still worth a line.
-            if (dropped == 1 || dropped / 100 > reportedBefore / 100)
+            // Asked before the call is made, not inside it. Saying this costs a boxed number and an
+            // array to put it in, and it is said by the thread producing the media at exactly the
+            // moment a client has stopped keeping up - which is when that thread has least to spare.
+            if ((dropped == 1 || dropped / 100 > reportedBefore / 100)
+                && _logger.IsEnabled(LogLevel.Warning))
             {
                 _logger.LogWarning("Dropped {dropped} frames for {connection}, it is not keeping up", dropped, _describedAs);
             }

@@ -111,6 +111,9 @@ namespace SharpRTSPServer
         /// Passes already packetized RTP through unchanged. Every sample is forwarded - the caller may
         /// hand in more than one, and dropping the rest would silently lose media.
         /// </summary>
+        /// <param name="samples">The samples to packetise.</param>
+        /// <param name="rtpTimestamp">RTP timestamp in the timescale of the track.</param>
+        /// <param name="packets">Where to build them, and what holds them afterwards.</param>
         public override void CreateRtpPackets(List<ReadOnlyMemory<byte>> samples, uint rtpTimestamp, RtpPackets packets)
         {
             if (samples == null)

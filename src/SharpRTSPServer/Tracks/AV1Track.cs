@@ -96,7 +96,7 @@ namespace SharpRTSPServer
         /// </summary>
         /// <param name="samples">An array of AV1 OBUs.</param>
         /// <param name="rtpTimestamp">RTP timestamp in the timescale of the track.</param>
-        /// <returns>RTP packets.</returns>
+        /// <param name="packets">Where to build them, and what holds them afterwards.</param>
         public override void CreateRtpPackets(List<ReadOnlyMemory<byte>> samples, uint rtpTimestamp, RtpPackets packets)
         {
             // The marker goes on the last OBU we actually send, which is not necessarily the last

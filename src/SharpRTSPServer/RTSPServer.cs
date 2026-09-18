@@ -2417,12 +2417,16 @@ namespace SharpRTSPServer
                     stream.SSRC = frame.SourceSsrc;
                 }
 
-                // Asked first, because the call itself is not free: it gathers its arguments into an
-                // array and boxes the two numbers, once per frame and per client watching, whether
-                // or not anything is listening.
-                if (_logger.IsEnabled(LogLevel.Debug))
+                // Trace, not debug, and asked first. This is a line per frame per client watching -
+                // at twenty-five frames a second and five clients, a hundred and twenty-five lines a
+                // second, each of which gathers its arguments into an array, boxes the two numbers
+                // and builds a string. Measured, it was seven hundred bytes of garbage per frame per
+                // client and the whole of what the server still allocated while streaming; the rest
+                // of the send path came to sixty-four. Debug is for what happens once a request or
+                // once a session, which is worth having on; this is the packet firehose.
+                if (_logger.IsEnabled(LogLevel.Trace))
                 {
-                    _logger.LogDebug("Sending RTP session {sessionId} {TransportLogName} RTP timestamp={rtpTimestamp}. Sequence={sequenceNumber}",
+                    _logger.LogTrace("Sending RTP session {sessionId} {TransportLogName} RTP timestamp={rtpTimestamp}. Sequence={sequenceNumber}",
                         connection.SessionId, TransportLogName(stream.RtpChannel), frame.RtpTimestamp, stream.SequenceNumber);
                 }
 
@@ -2884,7 +2888,10 @@ namespace SharpRTSPServer
             Exception writeException = null;
             uint writtenBytes = 0;
             uint writtenPackets = 0;
-            List<byte[]> rented = null;
+
+            // The connection's, not this call's, and empty on the way in because the last frame gave
+            // everything back before letting the lock go.
+            List<byte[]> rented = connection.RentedForSend;
 
             try
             {
@@ -2906,7 +2913,6 @@ namespace SharpRTSPServer
                     // this connection's - writing them into the shared bytes meant each client
                     // stamping over the others, and whichever won was what they all received.
                     byte[] stamped = ArrayPool<byte>.Shared.Rent(rtpPacket.Length);
-                    rented = rented ?? new List<byte[]>(rtpPackets.Count);
                     rented.Add(stamped);
 
                     rtpPacket.CopyTo(stamped);
@@ -2927,7 +2933,6 @@ namespace SharpRTSPServer
                     // on the send path - and collecting it lands on these same writer threads.
                     int required = stream.Context.CalculateRequiredSrtpPayloadLength(rtpPacket.Length);
                     byte[] rtp = ArrayPool<byte>.Shared.Rent(required);
-                    rented = rented ?? new List<byte[]>(rtpPackets.Count);
                     rented.Add(rtp);
 
                     rtpPacket.CopyTo(rtp);
@@ -2975,13 +2980,14 @@ namespace SharpRTSPServer
             }
             finally
             {
-                if (rented != null)
+                for (int i = 0; i < rented.Count; i++)
                 {
-                    foreach (byte[] buffer in rented)
-                    {
-                        ArrayPool<byte>.Shared.Return(buffer);
-                    }
+                    ArrayPool<byte>.Shared.Return(rented[i]);
                 }
+
+                // Emptied here rather than on the way in, so that the list never outlives the lock
+                // holding references to buffers somebody else has since been lent.
+                rented.Clear();
             }
             }
         }
@@ -3857,6 +3863,7 @@ namespace SharpRTSPServer
                 throw new ArgumentOutOfRangeException(nameof(streamType), streamType, "A track ID is not negative.");
 
             RTSPConnection[] connections;
+            int listening;
             ITrack track;
             bool preserveSourceHeaders;
 
@@ -3886,8 +3893,13 @@ namespace SharpRTSPServer
 
                 preserveSourceHeaders = track is ProxyTrack proxyTrack && proxyTrack.PreserveSourceHeaders;
 
-                // ToArray makes a temp copy of the list, so the list itself can change while we write
-                connections = streamSource.ConnectionList.ToArray();
+                // A copy, so the list itself can change while we write - into a borrowed array rather
+                // than a new one, since this is every frame of every stream and the copy is thrown
+                // away at the end of the method. Borrowed and given back on this thread, which is
+                // where a pool with a cache per thread is at its best.
+                listening = streamSource.ConnectionList.Count;
+                connections = ArrayPool<RTSPConnection>.Shared.Rent(listening);
+                streamSource.ConnectionList.CopyTo(connections, 0);
             }
 
             frame.StreamType = streamType;
@@ -3900,8 +3912,12 @@ namespace SharpRTSPServer
 
             // One frame, offered to every connection watching. Nothing about it differs between
             // them, which is why it is not copied for any of them.
-            foreach (RTSPConnection connection in connections)
+            try
             {
+            for (int i = 0; i < listening; i++)
+            {
+                RTSPConnection connection = connections[i];
+
                 // No lock here, deliberately. The lock that orders writes to a connection is held
                 // by its writer for as long as a write takes, and a write to a client that has
                 // stopped reading takes until TCP gives up - so waiting for it here would put the
@@ -3925,6 +3941,14 @@ namespace SharpRTSPServer
                 // thread, so one that stopped reading held up the media for all of them.
                 frame.AddRef();
                 outbound.Enqueue(frame);
+            }
+            }
+            finally
+            {
+                // Cleared before it goes back: a pooled array holding connections would keep them
+                // alive for as long as the pool did.
+                Array.Clear(connections, 0, listening);
+                ArrayPool<RTSPConnection>.Shared.Return(connections);
             }
 
             // Nothing is dropped here any more. A frame is handed to a connection rather than written

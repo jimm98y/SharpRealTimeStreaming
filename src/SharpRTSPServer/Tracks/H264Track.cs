@@ -160,7 +160,7 @@ namespace SharpRTSPServer
         /// </summary>
         /// <param name="samples">An array of H264 NALUs.</param>
         /// <param name="rtpTimestamp">RTP timestamp in the timescale of the track.</param>
-        /// <returns>RTP packets.</returns>
+        /// <param name="packets">Where to build them, and what holds them afterwards.</param>
         public override void CreateRtpPackets(List<ReadOnlyMemory<byte>> samples, uint rtpTimestamp, RtpPackets packets)
         {
             for (int x = 0; x < samples.Count; x++)

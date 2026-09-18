@@ -37,13 +37,23 @@ namespace SharpRTSPServer
         internal OutboundQueue Outbound { get; set; }
 
         /// <summary>
-        /// Scratch space for the packets of the frame being written, reused between frames.
+        /// The buffers borrowed to write the frame in hand, to be given back once it has gone.
         /// </summary>
         /// <remarks>
+        /// <para>
+        /// A packet is not sent as the track built it: the sequence number and SSRC are this
+        /// connection's, and on an encrypted stream so is the ciphertext, so each goes into a
+        /// borrowed buffer of its own. This is the list of what has been borrowed, and it is the
+        /// connection's rather than the call's because otherwise it was made afresh for every frame
+        /// sent to every client - the last thing the send path still allocated.
+        /// </para>
+        /// <para>
         /// Only ever touched while <see cref="SendLock"/> is held, which is what makes reusing it
-        /// safe - one thread writes a connection at a time.
+        /// safe - one thread writes a connection at a time - and it is emptied before the lock is
+        /// let go, so it never holds a buffer that has been given back.
+        /// </para>
         /// </remarks>
-        internal List<Memory<byte>> PacketsToSend { get; } = new List<Memory<byte>>();
+        internal List<byte[]> RentedForSend { get; } = new List<byte[]>();
 
         /// <summary>
         /// The transport the listener sits on. Kept so the server can notice that a client has gone

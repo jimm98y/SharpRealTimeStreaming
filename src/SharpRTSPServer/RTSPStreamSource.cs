@@ -372,6 +372,7 @@ namespace SharpRTSPServer
         {
         }
 
+        /// <param name="streamID">What a client names this stream by in a request URI.</param>
         /// <param name="tracks">The tracks this stream carries, in the order they belong in the SDP.</param>
         public RTSPStreamSource(string streamID, params ITrack[] tracks)
             : this(streamID, (IEnumerable<ITrack>)tracks)

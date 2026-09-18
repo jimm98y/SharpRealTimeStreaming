@@ -114,6 +114,7 @@ namespace SharpRTSPServer
         /// </summary>
         /// <param name="samples">Video frames, each cut into as many packets as it needs.</param>
         /// <param name="rtpTimestamp">RTP timestamp in the timescale of the track.</param>
+        /// <param name="packets">Where to build them, and what holds them afterwards.</param>
         public override void CreateRtpPackets(List<ReadOnlyMemory<byte>> samples, uint rtpTimestamp, RtpPackets packets)
         {
             int payloadMTU = PayloadMTU();

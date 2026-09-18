@@ -123,6 +123,7 @@ namespace SharpRTSPServer
         /// down the per packet overhead of a slow codec.
         /// </param>
         /// <param name="rtpTimestamp">RTP timestamp in the timescale of the track.</param>
+        /// <param name="packets">Where to build them, and what holds them afterwards.</param>
         public override void CreateRtpPackets(List<ReadOnlyMemory<byte>> samples, uint rtpTimestamp, RtpPackets packets)
         {
             foreach (ReadOnlyMemory<byte> sample in samples)

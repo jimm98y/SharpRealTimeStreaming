@@ -17,6 +17,17 @@ namespace SharpRTSPServer.Tests
     {
         private readonly TcpClient _tcp;
         private readonly Stream _stream;
+
+        /// <summary>
+        /// Reads whatever has arrived into a buffer of the caller's, and throws it away.
+        /// </summary>
+        /// <remarks>
+        /// For tests that care what the server allocates while streaming. <see cref="ReadInterleaved"/>
+        /// makes an array for every frame it returns, which is fine when a test wants the frame and
+        /// swamps the thing being measured when it does not.
+        /// </remarks>
+        /// <returns>False once the other end has gone.</returns>
+        internal bool DrainInto(byte[] buffer) => _stream.Read(buffer, 0, buffer.Length) > 0;
         private readonly string _userName;
         private readonly string _password;
 
