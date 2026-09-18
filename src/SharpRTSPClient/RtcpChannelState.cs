@@ -41,6 +41,11 @@ namespace SharpRTSPClient
 
         private long _lastReceiverReportTicks;
 
+        /// <summary>
+        /// What has actually arrived on this channel, which is what a receiver report is about.
+        /// </summary>
+        public ReceptionStatistics Reception { get; } = new ReceptionStatistics();
+
         private readonly object _syncGate = new object();
         private bool _hasSync;
         private DateTime _syncSenderTime;
@@ -143,6 +148,8 @@ namespace SharpRTSPClient
         {
             Interlocked.Exchange(ref _remoteSsrc, Unknown);
             Interlocked.Exchange(ref _lastReceiverReportTicks, 0);
+
+            Reception.Reset();
 
             lock (_syncGate)
             {

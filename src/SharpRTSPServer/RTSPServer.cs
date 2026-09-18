@@ -1811,6 +1811,11 @@ namespace SharpRTSPServer
                             _logger.LogDebug("RTCP data received {localSender} {length}", localSender, localE.Data.Data.Length);
                             var connection = ConnectionByRtpTransport(localSender as IRtpTransport);
                             connection?.UpdateKeepAlive();
+
+                            // And read, rather than only counted as a sign of life. What a client
+                            // says about how the media is reaching it is the only account of that
+                            // there is: every packet this server sent, it sent successfully.
+                            ReadReceptionReports(connection, localE.Data.Data.Span);
                         }
                         catch (Exception ex)
                         {
@@ -2399,6 +2404,158 @@ namespace SharpRTSPServer
         }
 
         /// <summary>
+        /// Raised for each report a client sends about how the media is reaching it.
+        /// </summary>
+        /// <remarks>
+        /// The one thing a sender cannot see for itself. Every packet it sent left successfully, so
+        /// a stream that is arriving in pieces looks exactly like one that is not - until the
+        /// receiver says otherwise.
+        /// </remarks>
+        public event EventHandler<ReceptionReportEventArgs> ReceptionReportReceived;
+
+        /// <summary>
+        /// Reads the report blocks out of RTCP a client sent, and records what they say.
+        /// </summary>
+        /// <remarks>
+        /// Reports about SSRCs this connection is not sending under are passed over: a compound
+        /// packet may carry blocks about several sources, and only the ones about this server's own
+        /// streams mean anything here.
+        /// </remarks>
+        private void ReadReceptionReports(RTSPConnection connection, ReadOnlySpan<byte> rtcp)
+        {
+            if (connection == null)
+            {
+                return;
+            }
+
+            int at = 0;
+
+            // A compound packet is several RTCP packets end to end, each saying its own length.
+            while (at + RTCP_HEADER_BYTES <= rtcp.Length)
+            {
+                if ((rtcp[at] >> 6) != RTCPUtils.RTCP_VERSION)
+                {
+                    return;
+                }
+
+                int blocks = rtcp[at] & 0x1F;
+                int packetType = rtcp[at + 1];
+                int lengthInWords = (rtcp[at + 2] << 8) | rtcp[at + 3];
+                int packetBytes = (lengthInWords + 1) * 4;
+
+                if (packetBytes <= 0 || at + packetBytes > rtcp.Length)
+                {
+                    return;
+                }
+
+                // Both a receiver report and a sender report carry blocks; they differ in what comes
+                // before them, which is nothing for one and twenty bytes for the other.
+                if (packetType == RTCP_PACKET_TYPE_RECEIVER_REPORT || packetType == RTCPUtils.RTCP_PACKET_TYPE_SENDER_REPORT)
+                {
+                    int reporterSsrcAt = at + 4;
+
+                    if (reporterSsrcAt + 4 <= rtcp.Length)
+                    {
+                        uint reporter = ReadUInt32(rtcp, reporterSsrcAt);
+                        int block = at + (packetType == RTCP_PACKET_TYPE_RECEIVER_REPORT ? 8 : 28);
+
+                        for (int i = 0; i < blocks && block + RTCP_REPORT_BLOCK_BYTES <= at + packetBytes; i++)
+                        {
+                            ReadOneReport(connection, reporter, rtcp.Slice(block, RTCP_REPORT_BLOCK_BYTES));
+                            block += RTCP_REPORT_BLOCK_BYTES;
+                        }
+                    }
+                }
+
+                at += packetBytes;
+            }
+        }
+
+        private void ReadOneReport(RTSPConnection connection, uint reporter, ReadOnlySpan<byte> block)
+        {
+            uint aboutSsrc = ReadUInt32(block, 0);
+
+            RTPStream stream = null;
+            int trackId = -1;
+
+            RTPStream[] streams = connection.Streams;
+
+            for (int i = 0; i < streams.Length; i++)
+            {
+                if (streams[i] != null && streams[i].SSRC == aboutSsrc && streams[i].RtpChannel != null)
+                {
+                    stream = streams[i];
+                    trackId = i;
+                    break;
+                }
+            }
+
+            if (stream == null)
+            {
+                // about something this connection is not sending
+                return;
+            }
+
+            double fractionLost = block[4] / 256.0;
+
+            int cumulative = (block[5] << 16) | (block[6] << 8) | block[7];
+            if (cumulative >= 0x800000)
+            {
+                cumulative -= 0x1000000;
+            }
+
+            uint highest = ReadUInt32(block, 8);
+            uint jitter = ReadUInt32(block, 12);
+            uint lastSenderReport = ReadUInt32(block, 16);
+            uint delaySince = ReadUInt32(block, 20);
+
+            TimeSpan? roundTrip = null;
+
+            // Only where this answers a report we actually sent. Taking the time since the last one
+            // regardless would measure the gap between reports rather than the round trip.
+            if (lastSenderReport != 0
+                && lastSenderReport == stream.LastSenderReportMiddle32
+                && stream.LastSenderReportSentUtc != DateTime.MinValue)
+            {
+                double heldSeconds = delaySince / 65536.0;
+                TimeSpan sinceSent = DateTime.UtcNow - stream.LastSenderReportSentUtc;
+                TimeSpan trip = sinceSent - TimeSpan.FromSeconds(heldSeconds);
+
+                if (trip >= TimeSpan.Zero)
+                {
+                    roundTrip = trip;
+                }
+            }
+
+            stream.LastReportedFractionLost = fractionLost;
+            stream.LastReportedCumulativeLost = cumulative;
+            stream.LastReportedJitter = jitter;
+            stream.LastReportedRoundTrip = roundTrip;
+            stream.LastReceptionReportUtc = DateTime.UtcNow;
+
+            if (fractionLost > 0)
+            {
+                _logger.LogDebug(
+                    "Session {sessionId} track {trackId} reports {percent:F1}% of the last interval missing, {lost} altogether",
+                    connection.SessionId, trackId, fractionLost * 100.0, cumulative);
+            }
+
+            ReceptionReportReceived?.Invoke(this, new ReceptionReportEventArgs(
+                connection.SessionId, trackId, reporter, fractionLost, cumulative, highest, jitter, roundTrip));
+        }
+
+        private static uint ReadUInt32(ReadOnlySpan<byte> data, int at) =>
+            (uint)((data[at] << 24) | (data[at + 1] << 16) | (data[at + 2] << 8) | data[at + 3]);
+
+        /// <summary>Version, type, length and the reporter's SSRC.</summary>
+        private const int RTCP_HEADER_BYTES = 8;
+
+        /// <summary>One report block, as RFC 3550 section 6.4.1 lays it out.</summary>
+        private const int RTCP_REPORT_BLOCK_BYTES = 24;
+
+        private const int RTCP_PACKET_TYPE_RECEIVER_REPORT = 201;
+
+        /// <summary>
         /// Says that a write to a client failed, as loudly as the reason deserves.
         /// </summary>
         /// <remarks>
@@ -2625,7 +2782,17 @@ namespace SharpRTSPServer
                 const int reportCount = 0; // an empty report
                 int length = (rtcpSenderReport.Length / 4) - 1; // num 32 bit words minus 1
                 RTCPUtils.WriteRTCPHeader(rtcpSenderReport, RTCPUtils.RTCP_VERSION, hasPadding, reportCount, RTCPUtils.RTCP_PACKET_TYPE_SENDER_REPORT, length, stream.SSRC);
-                RTCPUtils.WriteSenderReport(rtcpSenderReport, DateTime.UtcNow, rtpTimestamp, stream.RtpPacketCount, stream.OctetCount);
+                DateTime sentAt = DateTime.UtcNow;
+                RTCPUtils.WriteSenderReport(rtcpSenderReport, sentAt, rtpTimestamp, stream.RtpPacketCount, stream.OctetCount);
+
+                // Noted before it goes, so that a report answering it can be matched to it. The
+                // middle of the timestamp is the part a receiver echoes back, and it is read out of
+                // the report just written rather than worked out again a second way.
+                stream.LastSenderReportMiddle32 =
+                    (uint)((rtcpSenderReport[10] << 24) | (rtcpSenderReport[11] << 16)
+                         | (rtcpSenderReport[12] << 8) | rtcpSenderReport[13]);
+
+                stream.LastSenderReportSentUtc = sentAt;
 
                 return SendRawRTCP(connection, stream, rtcpSenderReport);
 

@@ -872,26 +872,84 @@ namespace SharpRTSPClient
             return protectedRtcp;
         }
 
-        public byte[] BuildRtcpReceiverReport(uint ssrc)
+        /// <summary>
+        /// An empty receiver report, for a channel that has had nothing to report on.
+        /// </summary>
+        public byte[] BuildRtcpReceiverReport(uint ssrc) => BuildRtcpReceiverReport(ssrc, 0, null);
+
+        /// <summary>
+        /// A receiver report saying how the media has actually been arriving.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// This used to be an empty report - the right shape, the right length, and a report count of
+        /// nothing, so it named no source and said nothing about any of them. A sender receiving one
+        /// learns that somebody is listening and not one thing more: not what share of its packets
+        /// went missing, not how unevenly they are turning up, not how long the round trip is. All of
+        /// which is what a sender would change its behaviour on.
+        /// </para>
+        /// <para>
+        /// It carries one report block, about the source this channel is receiving from, as RFC 3550
+        /// section 6.4.2 lays it out.
+        /// </para>
+        /// </remarks>
+        internal byte[] BuildRtcpReceiverReport(uint ssrc, uint aboutSsrc, RtcpChannelState channel)
         {
-            // TODO: do not send just an empty report
-            // https://www.rfc-editor.org/rfc/rfc3550.txt
-            // https://learn.microsoft.com/en-us/openspecs/office_protocols/ms-rtp/953b588a-4e9d-4ec8-b4d1-913f9b9d04ef
-            byte[] rtcp_receiver_report = new byte[8];
-            int version = 2;
-            int paddingBit = 0;
-            int reportCount = 0; // an empty report
-            int packetType = 201; // Receiver Report
-            int length = rtcp_receiver_report.Length / 4 - 1; // num 32 bit words minus 1
-            rtcp_receiver_report[0] = (byte)((version << 6) + (paddingBit << 5) + reportCount);
-            rtcp_receiver_report[1] = (byte)packetType;
-            rtcp_receiver_report[2] = (byte)(length >> 8 & 0xFF);
-            rtcp_receiver_report[3] = (byte)(length >> 0 & 0XFF);
-            rtcp_receiver_report[4] = (byte)(ssrc >> 24 & 0xFF);
-            rtcp_receiver_report[5] = (byte)(ssrc >> 16 & 0xFF);
-            rtcp_receiver_report[6] = (byte)(ssrc >> 8 & 0xFF);
-            rtcp_receiver_report[7] = (byte)(ssrc >> 0 & 0xFF);
-            return rtcp_receiver_report;
+            ReceptionReport report = channel?.Reception.TakeReport() ?? new ReceptionReport();
+
+            if (!report.HasData || aboutSsrc == 0)
+            {
+                // Nothing has arrived to report on, so there is nothing to say about anyone. The
+                // report still goes, because it is also what says this receiver is still here.
+                byte[] empty = new byte[8];
+                WriteRtcpHeader(empty, reportCount: 0, length: 1, ssrc: ssrc);
+                return empty;
+            }
+
+            // eight bytes of header and sender, then twenty four of report block
+            byte[] rtcp = new byte[32];
+            WriteRtcpHeader(rtcp, reportCount: 1, length: 7, ssrc: ssrc);
+
+            WriteUInt32(rtcp, 8, aboutSsrc);
+
+            rtcp[12] = report.FractionLost;
+
+            // twenty four bits, signed, so a receiver that took in duplicates reports fewer than none
+            int lost = report.CumulativeLost;
+            lost = lost > 0x7FFFFF ? 0x7FFFFF : lost < -0x800000 ? -0x800000 : lost;
+
+            rtcp[13] = (byte)((lost >> 16) & 0xFF);
+            rtcp[14] = (byte)((lost >> 8) & 0xFF);
+            rtcp[15] = (byte)(lost & 0xFF);
+
+            WriteUInt32(rtcp, 16, report.ExtendedHighestSequence);
+            WriteUInt32(rtcp, 20, report.Jitter);
+            WriteUInt32(rtcp, 24, report.LastSenderReport);
+            WriteUInt32(rtcp, 28, report.DelaySinceLastSenderReport);
+
+            return rtcp;
+        }
+
+        private static void WriteRtcpHeader(byte[] rtcp, int reportCount, int length, uint ssrc)
+        {
+            const int version = 2;
+            const int paddingBit = 0;
+            const int packetType = 201; // Receiver Report
+
+            rtcp[0] = (byte)((version << 6) + (paddingBit << 5) + reportCount);
+            rtcp[1] = packetType;
+            rtcp[2] = (byte)((length >> 8) & 0xFF);
+            rtcp[3] = (byte)(length & 0xFF);
+
+            WriteUInt32(rtcp, 4, ssrc);
+        }
+
+        private static void WriteUInt32(byte[] target, int at, uint value)
+        {
+            target[at] = (byte)((value >> 24) & 0xFF);
+            target[at + 1] = (byte)((value >> 16) & 0xFF);
+            target[at + 2] = (byte)((value >> 8) & 0xFF);
+            target[at + 3] = (byte)(value & 0xFF);
         }
 
         /// <summary>
@@ -939,6 +997,9 @@ namespace SharpRTSPClient
 
                 // remember who is actually sending us media, so we can ignore RTCP BYE from anyone else
                 track.Rtcp.LearnRemoteSsrc(rtpPacket.Ssrc);
+
+                // and what arrived, so the report sent back says something
+                track.Rtcp.Reception.RecordPacket((ushort)rtpPacket.SequenceNumber, rtpPacket.Timestamp, track.Rtcp.ClockRate);
 
                 var raw = new RawRtpDataEventArgs(
                     rtpData,
@@ -1216,6 +1277,12 @@ namespace SharpRTSPClient
                         // time with the RTP timestamp of that same instant on this stream.
                         channel.RecordSenderReport(time, rtpTimestamp);
 
+                        // The middle of the timestamp is what a report echoes back, and the moment it
+                        // arrived is what says how long the answer waited here. Between them the
+                        // sender can work out the round trip, which it has no other way of knowing.
+                        uint middle32 = (ntpMswSeconds << 16) | (ntpLswFractions >> 16);
+                        channel.Reception.RecordSenderReportArrival(middle32);
+
                         _logger.LogDebug("RTCP time (UTC) for RTP timestamp {timestamp} is {time}", rtpTimestamp, time);
 
                         // Send a Receiver Report, if one is due. Answering every sender report meant
@@ -1223,7 +1290,7 @@ namespace SharpRTSPClient
                         // reports per frame is a report per frame back.
                         if (channel.ClaimReceiverReportSlot(ReceiverReportInterval))
                         {
-                            reports.Add(BuildRtcpReceiverReport(ssrc));
+                            reports.Add(BuildRtcpReceiverReport(ssrc, rtcpSsrc, channel));
                         }
                     }
                 }

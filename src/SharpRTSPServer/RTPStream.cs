@@ -133,5 +133,31 @@ namespace SharpRTSPServer
         /// Number of bytes of video that have been transmitted (for average bandwidth monitoring)
         /// </summary>
         public uint OctetCount { get; set; } = 0;
+
+        /// <summary>
+        /// The middle of the timestamp of the last sender report sent on this stream, and when it
+        /// went out.
+        /// </summary>
+        /// <remarks>
+        /// A receiver echoes the first of these back and says how long it held the report. With what
+        /// is kept here, that is enough to work out the round trip - which a sender has no other way
+        /// of measuring, since nothing it sends is answered.
+        /// </remarks>
+        public uint LastSenderReportMiddle32 { get; set; }
+
+        public DateTime LastSenderReportSentUtc { get; set; } = DateTime.MinValue;
+
+        /// <summary>
+        /// The last thing a receiver said about how this stream is reaching it.
+        /// </summary>
+        public double LastReportedFractionLost { get; set; }
+
+        public int LastReportedCumulativeLost { get; set; }
+
+        public uint LastReportedJitter { get; set; }
+
+        public TimeSpan? LastReportedRoundTrip { get; set; }
+
+        public DateTime LastReceptionReportUtc { get; set; } = DateTime.MinValue;
     }
 }
