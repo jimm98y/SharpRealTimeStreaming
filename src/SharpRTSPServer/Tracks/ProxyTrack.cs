@@ -79,9 +79,21 @@ namespace SharpRTSPServer
         /// </summary>
         private const int RTP_HEADER_LENGTH = 12;
 
+        /// <summary>
+        /// Not something a forwarding track can do.
+        /// </summary>
+        /// <remarks>
+        /// An SDP says what the media is - which codec, at what rate, with which parameters - and a
+        /// track that forwards someone else's RTP knows none of that. It has the packets and nothing
+        /// describing them. The description belongs to whatever produced the stream, so it is given
+        /// to the stream source with RTSPStreamSource.OverrideSDP rather than made up here.
+        /// </remarks>
+        /// <exception cref="InvalidOperationException">Always.</exception>
         public override StringBuilder BuildSDP(StringBuilder sdp)
         {
-            throw new NotImplementedException();
+            throw new InvalidOperationException(
+                $"A {nameof(ProxyTrack)} forwards RTP that something else described, so it cannot build an SDP. " +
+                $"Pass the description the source gave you to {nameof(RTSPStreamSource)}.OverrideSDP.");
         }
 
         public void Start()

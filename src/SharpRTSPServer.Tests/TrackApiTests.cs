@@ -33,8 +33,9 @@ namespace SharpRTSPServer.Tests
         {
             var expected = new[]
             {
-                "AACTrack", "AV1Track", "H264Track", "H265Track", "H266Track",
-                "MJpegTrack", "OpusTrack", "PCMATrack", "PCMUTrack", "ProxyTrack",
+                "AACTrack", "AMRTrack", "AV1Track", "G726Track", "H264Track", "H265Track",
+                "H266Track", "MJpegTrack", "MP4VTrack", "OpusTrack", "PCMATrack", "PCMUTrack",
+                "ProxyTrack",
             };
 
             var actual = PublicTracks().Select(t => t.Name).ToArray();
@@ -53,6 +54,11 @@ namespace SharpRTSPServer.Tests
             new object[] { new PCMATrack(), "PCMA" },
             new object[] { new PCMUTrack(), "PCMU" },
             new object[] { new AACTrack(44100, 2), "mpeg4-generic" },
+            new object[] { new AMRTrack(), "AMR" },
+            new object[] { new AMRTrack(wideband: true), "AMR-WB" },
+            new object[] { new G726Track(), "G726-32" },
+            new object[] { new G726Track(G726BitRate.Rate16), "G726-16" },
+            new object[] { new MP4VTrack(), "MP4V-ES" },
         };
 
         [TestMethod]
@@ -69,6 +75,9 @@ namespace SharpRTSPServer.Tests
             Assert.AreEqual((int)TrackType.Audio, new AACTrack(44100, 2).ID);
             Assert.AreEqual((int)TrackType.Audio, new PCMATrack().ID);
             Assert.AreEqual((int)TrackType.Audio, new PCMUTrack().ID);
+            Assert.AreEqual((int)TrackType.Audio, new AMRTrack().ID);
+            Assert.AreEqual((int)TrackType.Audio, new G726Track().ID);
+            Assert.AreEqual((int)TrackType.Video, new MP4VTrack().ID);
         }
 
         [TestMethod]

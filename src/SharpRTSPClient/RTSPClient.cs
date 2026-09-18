@@ -1730,6 +1730,15 @@ namespace SharpRTSPClient
                             case "OPUS":
                                 _audioPayloadProcessor = new OpusPayload();
                                 break;
+                            case "G726-16":
+                            case "G726-24":
+                            case "G726-32":
+                            case "G726-40":
+                                // The payload is the ADPCM and nothing else - no header, no framing.
+                                // What a decoder needs in order to read it is the rate, which is in
+                                // the codec name and is reported to the caller as part of it.
+                                _audioPayloadProcessor = new RawPayload();
+                                break;
                             default:
                                 _audioPayloadProcessor = null;
                                 break;
