@@ -1957,8 +1957,14 @@ namespace SharpRTSPServer
                     stream.SSRC = frame.SourceSsrc;
                 }
 
-                _logger.LogDebug("Sending RTP session {sessionId} {TransportLogName} RTP timestamp={rtpTimestamp}. Sequence={sequenceNumber}",
-                    connection.SessionId, TransportLogName(stream.RtpChannel), frame.RtpTimestamp, stream.SequenceNumber);
+                // Asked first, because the call itself is not free: it gathers its arguments into an
+                // array and boxes the two numbers, once per frame and per client watching, whether
+                // or not anything is listening.
+                if (_logger.IsEnabled(LogLevel.Debug))
+                {
+                    _logger.LogDebug("Sending RTP session {sessionId} {TransportLogName} RTP timestamp={rtpTimestamp}. Sequence={sequenceNumber}",
+                        connection.SessionId, TransportLogName(stream.RtpChannel), frame.RtpTimestamp, stream.SequenceNumber);
+                }
 
                 // Decided here rather than when the frame was queued, so the report describes what is
                 // actually going out and when. A report that fails is not on its own a reason to drop
@@ -1972,7 +1978,12 @@ namespace SharpRTSPServer
                     }
                 }
 
-                var packets = new List<Memory<byte>>(frame.Packets.Count);
+                // Kept on the connection rather than made afresh. It is only ever touched under the
+                // send lock, which is held here, and a list per frame per client is a lot of small
+                // garbage for something whose contents are thrown away immediately.
+                List<Memory<byte>> packets = connection.PacketsToSend;
+                packets.Clear();
+
                 for (int i = 0; i < frame.Packets.Count; i++)
                 {
                     packets.Add(frame.Packets[i].AsMemory(0, frame.Lengths[i]));
@@ -2784,8 +2795,6 @@ namespace SharpRTSPServer
                 connections = streamSource.ConnectionList.ToArray();
             }
 
-            List<RTSPConnection> failed = null;
-
             // Copied once, not once per client. Everything about the frame is the same for all of
             // them, and the copy is the one cost here that grows with the size of the audience.
             var frame = new QueuedFrame
@@ -2838,18 +2847,9 @@ namespace SharpRTSPServer
                 frame.Release();
             }
 
-            // Dropping a session needs the list lock, and taking that while holding a send lock is
-            // the one order that deadlocks, so it happens once the enqueueing is done.
-            if (failed != null)
-            {
-                lock (_connectionList)
-                {
-                    foreach (RTSPConnection connection in failed)
-                    {
-                        RemoveSession(connection);
-                    }
-                }
-            }
+            // Nothing is dropped here any more. A frame is handed to a connection rather than written
+            // to it, so whether it could be sent is not known until later - the writer drops the
+            // connection when its own write fails.
         }
 
         #endregion // Track sink

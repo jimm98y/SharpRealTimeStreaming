@@ -1,5 +1,6 @@
 ﻿using Rtsp;
 using System;
+using System.Collections.Generic;
 
 namespace SharpRTSPServer
 {
@@ -34,6 +35,15 @@ namespace SharpRTSPServer
         /// the first frame and let go when the session is removed.
         /// </summary>
         internal OutboundQueue Outbound { get; set; }
+
+        /// <summary>
+        /// Scratch space for the packets of the frame being written, reused between frames.
+        /// </summary>
+        /// <remarks>
+        /// Only ever touched while <see cref="SendLock"/> is held, which is what makes reusing it
+        /// safe - one thread writes a connection at a time.
+        /// </remarks>
+        internal List<Memory<byte>> PacketsToSend { get; } = new List<Memory<byte>>();
 
         /// <summary>
         /// The transport the listener sits on. Kept so the server can notice that a client has gone
