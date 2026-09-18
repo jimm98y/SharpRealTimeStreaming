@@ -96,6 +96,42 @@ namespace SharpRTSPServer.Tests
             };
         }
 
+        /// <summary>
+        /// How long to keep feeding and waiting before deciding nothing is coming.
+        /// </summary>
+        /// <remarks>
+        /// Long, on purpose. These read real packets off a real socket, so how quickly one arrives is
+        /// up to the machine and how busy it is; only a run that is about to fail waits it out.
+        /// </remarks>
+        private static readonly TimeSpan Patience = TimeSpan.FromSeconds(10);
+
+        /// <summary>
+        /// Feeds until a packet reaches the group, and hands back the first one.
+        /// </summary>
+        private static byte[] WaitForPacket(UdpClient wire, Action feed)
+        {
+            var from = new IPEndPoint(IPAddress.Any, 0);
+            var until = DateTime.UtcNow + Patience;
+
+            wire.Client.ReceiveTimeout = 250;
+
+            while (DateTime.UtcNow < until)
+            {
+                feed();
+
+                try
+                {
+                    return wire.Receive(ref from);
+                }
+                catch (SocketException)
+                {
+                    // nothing yet
+                }
+            }
+
+            return null;
+        }
+
         private static UdpClient Listen(string group, int port)
         {
             var socket = new UdpClient();
@@ -153,22 +189,17 @@ namespace SharpRTSPServer.Tests
                 SrtpSessionContext context = SrtpProtocol.CreateSrtpSessionContext(keys);
 
                 int read = 0;
-                var from = new IPEndPoint(IPAddress.Any, 0);
 
                 for (int i = 0; i < 12 && read < 4; i++)
                 {
-                    videoTrack.FeedInRawSamples((uint)((i + 1) * 3000),
-                        new List<ReadOnlyMemory<byte>> { new ReadOnlyMemory<byte>(Nal) });
+                    int at = i;
+                    byte[] packet = WaitForPacket(wire, () => videoTrack.FeedInRawSamples(
+                        (uint)((at + 1) * 3000),
+                        new List<ReadOnlyMemory<byte>> { new ReadOnlyMemory<byte>(Nal) }));
 
-                    byte[] packet;
-
-                    try
+                    if (packet == null)
                     {
-                        packet = wire.Receive(ref from);
-                    }
-                    catch (SocketException)
-                    {
-                        continue;
+                        break;
                     }
 
                     // protected, not plain: the tag makes it longer than what went in
@@ -312,37 +343,35 @@ namespace SharpRTSPServer.Tests
                     group.MasterKeySalt);
                 SrtpSessionContext groupContext = SrtpProtocol.CreateSrtpSessionContext(keys);
 
-                bool fromGroup = false;
-                bool fromUnicast = false;
-                var from = new IPEndPoint(IPAddress.Any, 0);
+                uint timestamp = 0;
 
-                for (int i = 0; i < 15 && !(fromGroup && fromUnicast); i++)
+                void Feed() => videoTrack.FeedInRawSamples(
+                    timestamp += 3000,
+                    new List<ReadOnlyMemory<byte>> { new ReadOnlyMemory<byte>(Nal) });
+
+                // The group first, feeding as it waits. Reading the one to one client is what used to
+                // be interleaved with this, and it blocks for as long as its own socket allows - so
+                // a group packet that was merely slow could run the whole loop out.
+                byte[] toGroup = WaitForPacket(wire, Feed);
+
+                bool fromGroup = toGroup != null;
+
+                if (fromGroup)
                 {
-                    videoTrack.FeedInRawSamples((uint)((i + 1) * 3000),
-                        new List<ReadOnlyMemory<byte>> { new ReadOnlyMemory<byte>(Nal) });
+                    Assert.AreEqual(0,
+                        groupContext.DecodeRtpContext.UnprotectRtp(toGroup, toGroup.Length, out _),
+                        "the group's media should read under the key from the SDP");
+                }
 
-                    if (!fromGroup)
-                    {
-                        try
-                        {
-                            byte[] packet = wire.Receive(ref from);
-                            Assert.AreEqual(0,
-                                groupContext.DecodeRtpContext.UnprotectRtp(packet, packet.Length, out _),
-                                "the group's media should read under the key from the SDP");
-                            fromGroup = true;
-                        }
-                        catch (SocketException)
-                        {
-                        }
-                    }
+                bool fromUnicast = false;
 
-                    if (!fromUnicast)
+                for (int i = 0; i < 20 && !fromUnicast; i++)
+                {
+                    Feed();
+
+                    if (alone.Client.ReadInterleaved().Channel == 0)
                     {
-                        var frame = alone.Client.ReadInterleaved();
-                        if (frame.Channel == 0)
-                        {
-                            fromUnicast = true;
-                        }
+                        fromUnicast = true;
                     }
                 }
 

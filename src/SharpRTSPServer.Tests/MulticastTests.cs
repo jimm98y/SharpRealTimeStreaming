@@ -79,6 +79,80 @@ namespace SharpRTSPServer.Tests
         }
 
         /// <summary>
+        /// How long to keep feeding and waiting before deciding nothing is coming.
+        /// </summary>
+        /// <remarks>
+        /// Long, on purpose. These tests read real packets off a real socket, so how quickly one
+        /// arrives is up to the machine and how busy it is, and a limit that is merely usually long
+        /// enough fails a run for being slow rather than for being wrong. Only a run that is about to
+        /// fail waits the whole time.
+        /// </remarks>
+        private static readonly TimeSpan Patience = TimeSpan.FromSeconds(10);
+
+        /// <summary>
+        /// How long to go on listening after something should have stopped arriving.
+        /// </summary>
+        /// <remarks>
+        /// Short, for the opposite reason: every one of these is spent by a run that passes. It only
+        /// has to outlast what is already on its way.
+        /// </remarks>
+        private static readonly TimeSpan SettlingTime = TimeSpan.FromMilliseconds(600);
+
+        /// <summary>
+        /// Feeds until a packet reaches the group, and hands back the first one.
+        /// </summary>
+        private static byte[] WaitForPacket(UdpClient wire, Action feed)
+        {
+            var from = new IPEndPoint(IPAddress.Any, 0);
+            var until = DateTime.UtcNow + Patience;
+
+            wire.Client.ReceiveTimeout = 250;
+
+            while (DateTime.UtcNow < until)
+            {
+                feed();
+
+                try
+                {
+                    return wire.Receive(ref from);
+                }
+                catch (SocketException)
+                {
+                    // nothing yet
+                }
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Everything that arrives from now until the group has had time to go quiet.
+        /// </summary>
+        private static int CountWhatArrives(UdpClient wire, TimeSpan forHowLong)
+        {
+            var from = new IPEndPoint(IPAddress.Any, 0);
+            var until = DateTime.UtcNow + forHowLong;
+            int count = 0;
+
+            wire.Client.ReceiveTimeout = 100;
+
+            while (DateTime.UtcNow < until)
+            {
+                try
+                {
+                    wire.Receive(ref from);
+                    count++;
+                }
+                catch (SocketException)
+                {
+                    // nothing waiting, keep listening until the time is up
+                }
+            }
+
+            return count;
+        }
+
+        /// <summary>
         /// Listens to a group the way a client told to would.
         /// </summary>
         private static UdpClient Listen(string group, int port)
@@ -154,24 +228,17 @@ namespace SharpRTSPServer.Tests
 
                 Thread.Sleep(200);
 
+                // Fed until the group is known to be carrying media, so what follows is timed from
+                // the group being live rather than from an assumption about how long that takes.
+                Assert.IsNotNull(WaitForPacket(wire, () => videoTrack.FeedInRawSamples(3000, OneNal())),
+                    "the group should be carrying media before the frame that is counted");
+
+                CountWhatArrives(wire, SettlingTime);
+
                 // exactly one frame, of exactly one packet
                 videoTrack.FeedInRawSamples(9000, OneNal());
 
-                int arrived = 0;
-                var from = new IPEndPoint(IPAddress.Any, 0);
-
-                while (true)
-                {
-                    try
-                    {
-                        wire.Receive(ref from);
-                        arrived++;
-                    }
-                    catch (SocketException)
-                    {
-                        break; // nothing more is coming
-                    }
-                }
+                int arrived = CountWhatArrives(wire, SettlingTime);
 
                 // Three clients, one packet. Sending it once is what makes this multicast rather
                 // than three unicast streams that happen to share an address.
@@ -207,15 +274,14 @@ namespace SharpRTSPServer.Tests
                 {
                     videoTrack.FeedInRawSamples((uint)((i + 1) * 3000), OneNal());
 
-                    try
-                    {
-                        byte[] packet = wire.Receive(ref from);
-                        numbers.Add((packet[2] << 8) | packet[3]);
-                    }
-                    catch (SocketException)
+                    byte[] packet = WaitForPacket(wire, () => { });
+
+                    if (packet == null)
                     {
                         break;
                     }
+
+                    numbers.Add((packet[2] << 8) | packet[3]);
                 }
 
                 Assert.IsGreaterThanOrEqualTo(4, numbers.Count, "not enough arrived to say anything");
@@ -254,21 +320,7 @@ namespace SharpRTSPServer.Tests
                 Thread.Sleep(300);
 
                 // and the media does not stop for the one still watching
-                var from = new IPEndPoint(IPAddress.Any, 0);
-                byte[] packet = null;
-
-                for (int i = 0; i < 10 && packet == null; i++)
-                {
-                    videoTrack.FeedInRawSamples((uint)((i + 1) * 3000), OneNal());
-
-                    try
-                    {
-                        packet = wire.Receive(ref from);
-                    }
-                    catch (SocketException)
-                    {
-                    }
-                }
+                byte[] packet = WaitForPacket(wire, () => videoTrack.FeedInRawSamples(3000, OneNal()));
 
                 Assert.IsNotNull(packet, "one client leaving should not stop the group for the others");
             }
@@ -293,28 +345,15 @@ namespace SharpRTSPServer.Tests
                 Thread.Sleep(400);
 
                 // drain anything already in flight, including the group saying goodbye
-                var from = new IPEndPoint(IPAddress.Any, 0);
-                wire.Client.ReceiveTimeout = 300;
-
-                while (true)
-                {
-                    try { wire.Receive(ref from); }
-                    catch (SocketException) { break; }
-                }
+                CountWhatArrives(wire, SettlingTime);
 
                 for (int i = 0; i < 5; i++)
                 {
                     videoTrack.FeedInRawSamples((uint)((i + 1) * 3000), OneNal());
                 }
 
-                Thread.Sleep(200);
-
-                byte[] afterwards = null;
-
-                try { afterwards = wire.Receive(ref from); }
-                catch (SocketException) { }
-
-                Assert.IsNull(afterwards, "nothing should be sent to a group nobody is listening to");
+                Assert.AreEqual(0, CountWhatArrives(wire, SettlingTime),
+                    "nothing should be sent to a group nobody is listening to");
             }
         }
 
@@ -338,16 +377,7 @@ namespace SharpRTSPServer.Tests
                 // it is running
                 videoTrack.FeedInRawSamples(3000, OneNal());
 
-                var from = new IPEndPoint(IPAddress.Any, 0);
-                byte[] running = null;
-
-                for (int i = 0; i < 6 && running == null; i++)
-                {
-                    videoTrack.FeedInRawSamples((uint)((i + 2) * 3000), OneNal());
-
-                    try { running = wire.Receive(ref from); }
-                    catch (SocketException) { }
-                }
+                byte[] running = WaitForPacket(wire, () => videoTrack.FeedInRawSamples(3000, OneNal()));
 
                 Assert.IsNotNull(running, "the group should be carrying the media before the stream goes");
 
@@ -355,24 +385,15 @@ namespace SharpRTSPServer.Tests
                 server.RemoveStreamSource(streamSource);
                 Thread.Sleep(300);
 
-                while (true)
-                {
-                    try { wire.Receive(ref from); }
-                    catch (SocketException) { break; }
-                }
+                CountWhatArrives(wire, SettlingTime);
 
                 for (int i = 0; i < 5; i++)
                 {
                     videoTrack.FeedInRawSamples((uint)((i + 20) * 3000), OneNal());
                 }
 
-                Thread.Sleep(200);
-
-                byte[] afterwards = null;
-                try { afterwards = wire.Receive(ref from); }
-                catch (SocketException) { }
-
-                Assert.IsNull(afterwards, "a stream that has been removed should not still be sending to a group");
+                Assert.AreEqual(0, CountWhatArrives(wire, SettlingTime),
+                    "a stream that has been removed should not still be sending to a group");
             }
         }
 
