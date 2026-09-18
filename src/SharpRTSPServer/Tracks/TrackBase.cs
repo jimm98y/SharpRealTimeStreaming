@@ -89,7 +89,7 @@ namespace SharpRTSPServer
 
         public abstract StringBuilder BuildSDP(StringBuilder sdp);
 
-        public abstract (List<Memory<byte>>, List<IMemoryOwner<byte>>) CreateRtpPackets(List<ReadOnlyMemory<byte>> samples, uint rtpTimestamp);
+        public abstract void CreateRtpPackets(List<ReadOnlyMemory<byte>> samples, uint rtpTimestamp, RtpPackets packets);
 
 
         /// <summary>
@@ -169,11 +169,22 @@ namespace SharpRTSPServer
             if (samples.Count == 0)
                 return;
 
-            (List<Memory<byte>> rtpPackets, List<IMemoryOwner<byte>> memoryOwners) = CreateRtpPackets(samples, rtpTimestamp);
+            RtpPackets packets = RtpPackets.Take();
+
+            try
+            {
+                CreateRtpPackets(samples, rtpTimestamp, packets);
+            }
+            catch (Exception)
+            {
+                // Nothing has taken them over yet, so they are still this track's to give back.
+                packets.Release();
+                throw;
+            }
 
             // Handed over, not lent. The sink releases them once the last client has been sent the
             // frame, which is why it no longer has to copy every packet before letting this return.
-            sink.FeedInRawRTP(StreamID, ID, rtpTimestamp, rtpPackets, memoryOwners);
+            sink.FeedInRawRTP(StreamID, ID, rtpTimestamp, packets);
         }
     }
 }

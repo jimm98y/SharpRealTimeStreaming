@@ -40,13 +40,8 @@ namespace SharpRTSPServer
         /// </summary>
         public uint SourceSsrc { get; set; }
 
-        /// <summary>The packets of this frame, as the track built them.</summary>
-        public List<Memory<byte>> Packets { get; } = new List<Memory<byte>>();
-
-        /// <summary>
-        /// What is holding those packets, to be disposed once the last client has finished.
-        /// </summary>
-        private readonly List<IMemoryOwner<byte>> _owners = new List<IMemoryOwner<byte>>();
+        /// <summary>The packets of this frame, and the memory holding them.</summary>
+        public RtpPackets Packets { get; private set; }
 
         /// <summary>How much of the queue's budget this frame takes up.</summary>
         public int Bytes { get; private set; }
@@ -93,22 +88,14 @@ namespace SharpRTSPServer
         /// a pooled buffer per packet, for a frame about to go out unchanged. The track hands over
         /// what holds them instead, and this releases it when the last client is done.
         /// </remarks>
-        public void Fill(IReadOnlyList<Memory<byte>> packets, IReadOnlyList<IMemoryOwner<byte>> owners)
+        public void Fill(RtpPackets packets)
         {
+            Packets = packets;
+            Bytes = 0;
+
             for (int i = 0; i < packets.Count; i++)
             {
-                Packets.Add(packets[i]);
                 Bytes += packets[i].Length;
-            }
-
-            if (owners == null)
-            {
-                return;
-            }
-
-            for (int i = 0; i < owners.Count; i++)
-            {
-                _owners.Add(owners[i]);
             }
         }
 
@@ -131,13 +118,8 @@ namespace SharpRTSPServer
                 return;
             }
 
-            foreach (IMemoryOwner<byte> owner in _owners)
-            {
-                owner.Dispose();
-            }
-
-            _owners.Clear();
-            Packets.Clear();
+            Packets?.Release();
+            Packets = null;
             Bytes = 0;
 
             // Back for the next frame, unless there are already enough waiting. The lists keep

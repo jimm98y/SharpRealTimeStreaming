@@ -166,10 +166,8 @@ namespace SharpRTSPServer
         /// <param name="samples">An array of H266 NALUs.</param>
         /// <param name="rtpTimestamp">RTP timestamp in the timescale of the track.</param>
         /// <returns>RTP packets.</returns>
-        public override (List<Memory<byte>>, List<IMemoryOwner<byte>>) CreateRtpPackets(List<ReadOnlyMemory<byte>> samples, uint rtpTimestamp)
+        public override void CreateRtpPackets(List<ReadOnlyMemory<byte>> samples, uint rtpTimestamp, RtpPackets packets)
         {
-            List<Memory<byte>> rtpPackets = new List<Memory<byte>>();
-            List<IMemoryOwner<byte>> memoryOwners = new List<IMemoryOwner<byte>>();
             for (int x = 0; x < samples.Count; x++)
             {
                 var rawNal = samples[x];
@@ -220,9 +218,7 @@ namespace SharpRTSPServer
                         // 12 is header size. 3 bytes for H266 FU header
                         var fuHeader = 3;
                         var destSize = 12 + fuHeader + payloadSize;
-                        var owner = MemoryPool<byte>.Shared.Rent(destSize);
-                        memoryOwners.Add(owner);
-                        var rtpPacket = owner.Memory.Slice(0, destSize);
+                        Memory<byte> rtpPacket = packets.Rent(destSize);
 
                         // RTP Packet Header
                         // 0 - Version, P, X, CC, M, PT and Sequence Number
@@ -259,7 +255,6 @@ namespace SharpRTSPServer
                         nalPointer += payloadSize;
                         dataRemaining -= payloadSize;
 
-                        rtpPackets.Add(rtpPacket);
 
                         startBit = 0;
                     }
@@ -271,9 +266,7 @@ namespace SharpRTSPServer
                     // Also with RTP over RTSP there is a limit of 65535 bytes for the RTP packet.
 
                     // 12 is header size when there are no CSRCs or extensions
-                    var owner = MemoryPool<byte>.Shared.Rent(12 + rawNal.Length);
-                    memoryOwners.Add(owner);
-                    var rtpPacket = owner.Memory.Slice(0, 12 + rawNal.Length);
+                    Memory<byte> rtpPacket = packets.Rent(12 + rawNal.Length);
 
                     const bool rtpPadding = false;
                     const bool rtpHasExtension = false;
@@ -290,11 +283,8 @@ namespace SharpRTSPServer
                     // Now append the raw NAL
                     rawNal.CopyTo(rtpPacket.Slice(12));
 
-                    rtpPackets.Add(rtpPacket);
                 }
             }
-
-            return (rtpPackets, memoryOwners);
         }
     }
 }

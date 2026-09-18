@@ -2442,7 +2442,7 @@ namespace SharpRTSPServer
                 // connection's own, which is nothing beside the copy of every packet that used to
                 // happen before that - and is just as unnecessary, since sending does not change
                 // them.
-                dropConnection = !TrySendRawRTP(connection, stream, frame.Packets, frame.PreserveSourceHeaders);
+                dropConnection = !TrySendRawRTP(connection, stream, frame.Packets.Items, frame.PreserveSourceHeaders);
             }
 
             // outside the send lock: see RTSPConnection.SendLock for why that order matters
@@ -3830,14 +3830,13 @@ namespace SharpRTSPServer
             }
         }
 
-        public void FeedInRawRTP(string streamID, int streamType, uint rtpTimestamp,
-            List<Memory<byte>> rtpPackets, List<IMemoryOwner<byte>> memoryOwners)
+        public void FeedInRawRTP(string streamID, int streamType, uint rtpTimestamp, RtpPackets rtpPackets)
         {
             // Taken over before anything can go wrong, so that every way out of here - a stream that
             // does not exist, a track that does not, an exception - still releases what the caller
             // handed over. It promised not to.
             QueuedFrame frame = QueuedFrame.Take();
-            frame.Fill(rtpPackets, memoryOwners);
+            frame.Fill(rtpPackets);
 
             try
             {

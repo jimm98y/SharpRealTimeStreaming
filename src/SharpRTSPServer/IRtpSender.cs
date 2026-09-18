@@ -13,9 +13,9 @@ namespace SharpRTSPServer
         /// <para>
         /// The sink takes the packets over. It may still be writing them long after this returns -
         /// a frame goes to each client in that client's own time - so the caller must not touch
-        /// them again, and must not release them: the sink disposes everything in
-        /// <paramref name="memoryOwners"/> once the last client has finished with the frame, on
-        /// every path including the ones where it decides not to send anything.
+        /// them again, and must not release them: the sink releases <paramref name="packets"/> once
+        /// the last client has finished with the frame, on every path including the ones where it
+        /// decides not to send anything and the ones where something throws.
         /// </para>
         /// <para>
         /// This is what lets a frame be sent without being copied. The buffers used to be released
@@ -27,14 +27,8 @@ namespace SharpRTSPServer
         /// <param name="streamID">Which stream the frame belongs to.</param>
         /// <param name="streamType">Which track of it, by the track's ID.</param>
         /// <param name="rtpTimestamp">RTP timestamp in the timescale of the track.</param>
-        /// <param name="rtpPackets">The packets, already built.</param>
-        /// <param name="memoryOwners">
-        /// What to dispose when the frame has been sent, or null where the packets sit in memory
-        /// that outlives the sending and has nothing to release. The memory must stay valid until
-        /// then either way.
-        /// </param>
-        void FeedInRawRTP(string streamID, int streamType, uint rtpTimestamp,
-            List<Memory<byte>> rtpPackets, List<IMemoryOwner<byte>> memoryOwners);
+        /// <param name="packets">The packets, already built, and the memory holding them.</param>
+        void FeedInRawRTP(string streamID, int streamType, uint rtpTimestamp, RtpPackets packets);
 
         bool CanAcceptNewSamples(string streamID);
     }

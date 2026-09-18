@@ -94,21 +94,14 @@ namespace SharpRTSPServer
         /// </summary>
         /// <param name="samples">Runs of ADPCM data, each of which becomes one packet.</param>
         /// <param name="rtpTimestamp">RTP timestamp in the timescale of the track.</param>
-        public override (List<Memory<byte>>, List<IMemoryOwner<byte>>) CreateRtpPackets(
-            List<ReadOnlyMemory<byte>> samples, uint rtpTimestamp)
+        public override void CreateRtpPackets(List<ReadOnlyMemory<byte>> samples, uint rtpTimestamp, RtpPackets packets)
         {
-            var rtpPackets = new List<Memory<byte>>(samples.Count);
-            var memoryOwners = new List<IMemoryOwner<byte>>(samples.Count);
-
             for (int i = 0; i < samples.Count; i++)
             {
                 ReadOnlyMemory<byte> audio = samples[i];
                 int size = 12 + audio.Length;
 
-                IMemoryOwner<byte> owner = MemoryPool<byte>.Shared.Rent(size);
-                memoryOwners.Add(owner);
-
-                Memory<byte> rtpPacket = owner.Memory.Slice(0, size);
+                Memory<byte> rtpPacket = packets.Rent(size);
 
                 const bool rtpPadding = false;
                 const bool rtpHasExtension = false;
@@ -123,10 +116,7 @@ namespace SharpRTSPServer
                 RTPPacketUtil.WriteTS(rtpPacket.Span, rtpTimestamp);
                 audio.CopyTo(rtpPacket.Slice(12));
 
-                rtpPackets.Add(rtpPacket);
             }
-
-            return (rtpPackets, memoryOwners);
         }
     }
 }

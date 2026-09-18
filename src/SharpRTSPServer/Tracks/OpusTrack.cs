@@ -104,11 +104,8 @@ namespace SharpRTSPServer
         /// <param name="samples">An array of Opus fragments. By default single fragment is expected.</param>
         /// <param name="rtpTimestamp">RTP timestamp in the timescale of the track.</param>
         /// <returns>RTP packets.</returns>
-        public override (List<Memory<byte>>, List<IMemoryOwner<byte>>) CreateRtpPackets(List<ReadOnlyMemory<byte>> samples, uint rtpTimestamp)
+        public override void CreateRtpPackets(List<ReadOnlyMemory<byte>> samples, uint rtpTimestamp, RtpPackets packets)
         {
-            List<Memory<byte>> rtpPackets = new List<Memory<byte>>();
-            List<IMemoryOwner<byte>> memoryOwners = new List<IMemoryOwner<byte>>();
-
             for (int i = 0; i < samples.Count; i++)
             {
                 var audioPacket = samples[i];
@@ -116,10 +113,7 @@ namespace SharpRTSPServer
                 // Put the whole Audio Packet into one RTP packet.
                 // 12 is header size when there are no CSRCs or extensions
                 var size = 12 + audioPacket.Length;
-                var owner = MemoryPool<byte>.Shared.Rent(size);
-                memoryOwners.Add(owner);
-
-                var rtpPacket = owner.Memory.Slice(0, size);
+                Memory<byte> rtpPacket = packets.Rent(size);
 
                 const bool rtpPadding = false;
                 const bool rtpHasExtension = false;
@@ -135,10 +129,7 @@ namespace SharpRTSPServer
                 // Now append the audio packet
                 audioPacket.CopyTo(rtpPacket.Slice(12));
 
-                rtpPackets.Add(rtpPacket);
             }
-
-            return (rtpPackets, memoryOwners);
         }
     }
 }

@@ -15,13 +15,10 @@ namespace SharpRTSPServer.Tests
         private static List<byte[]> Packetize(AACTrack track, params byte[][] frames)
         {
             var samples = frames.Select(f => new ReadOnlyMemory<byte>(f)).ToList();
-            var (packets, owners) = track.CreateRtpPackets(samples, Timestamp);
+            var packets = RtpPackets.Take();
+            track.CreateRtpPackets(samples, Timestamp, packets);
 
             var copies = packets.Select(p => p.ToArray()).ToList();
-            foreach (var owner in owners)
-            {
-                owner.Dispose();
-            }
             return copies;
         }
 

@@ -11,13 +11,10 @@ namespace SharpRTSPServer.Tests
         private static List<byte[]> Packetize(ProxyTrack track, params byte[][] samples)
         {
             var input = samples.Select(s => new ReadOnlyMemory<byte>(s)).ToList();
-            var (packets, owners) = track.CreateRtpPackets(input, 0);
+            var packets = RtpPackets.Take();
+            track.CreateRtpPackets(input, 0, packets);
 
             var copies = packets.Select(p => p.ToArray()).ToList();
-            foreach (var owner in owners)
-            {
-                owner.Dispose();
-            }
             return copies;
         }
 
@@ -71,7 +68,7 @@ namespace SharpRTSPServer.Tests
         {
             var track = new ProxyTrack(TrackType.Video);
 
-            Assert.ThrowsExactly<ArgumentNullException>(() => track.CreateRtpPackets(null, 0));
+            Assert.ThrowsExactly<ArgumentNullException>(() => track.CreateRtpPackets(null, 0, RtpPackets.Take()));
         }
 
         [TestMethod]

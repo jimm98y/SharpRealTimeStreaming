@@ -23,10 +23,6 @@ namespace SharpRTSPServer.Tests
 
         private static void Release(List<IMemoryOwner<byte>> owners)
         {
-            foreach (var owner in owners)
-            {
-                owner.Dispose();
-            }
         }
 
         // ------------------------------------------------------------------ G.726
@@ -52,7 +48,8 @@ namespace SharpRTSPServer.Tests
             var track = new G726Track(G726BitRate.Rate32) { PayloadType = 97 };
 
             byte[] adpcm = { 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88 };
-            var (packets, owners) = track.CreateRtpPackets(One(adpcm), 12345);
+            var packets = RtpPackets.Take();
+            track.CreateRtpPackets(One(adpcm), 12345, packets);
 
             try
             {
@@ -67,7 +64,7 @@ namespace SharpRTSPServer.Tests
             }
             finally
             {
-                Release(owners);
+                packets.Release();
             }
         }
 
@@ -108,7 +105,8 @@ namespace SharpRTSPServer.Tests
             byte[] speech = Enumerable.Range(0, 31).Select(i => (byte)i).ToArray();
             byte[] storage = new byte[] { header }.Concat(speech).ToArray();
 
-            var (packets, owners) = track.CreateRtpPackets(One(storage), 900);
+            var packets = RtpPackets.Take();
+            track.CreateRtpPackets(One(storage), 900, packets);
 
             try
             {
@@ -131,7 +129,7 @@ namespace SharpRTSPServer.Tests
             }
             finally
             {
-                Release(owners);
+                packets.Release();
             }
         }
 
@@ -144,7 +142,8 @@ namespace SharpRTSPServer.Tests
             byte[] speech = new byte[31];
             byte[] two = new byte[] { header }.Concat(speech).Concat(new byte[] { header }).Concat(speech).ToArray();
 
-            var (packets, owners) = track.CreateRtpPackets(One(two), 900);
+            var packets = RtpPackets.Take();
+            track.CreateRtpPackets(One(two), 900, packets);
 
             try
             {
@@ -159,7 +158,7 @@ namespace SharpRTSPServer.Tests
             }
             finally
             {
-                Release(owners);
+                packets.Release();
             }
         }
 
@@ -171,7 +170,7 @@ namespace SharpRTSPServer.Tests
             // type 12 is one of the gaps in the narrowband table
             byte[] nonsense = { 12 << 3, 0x00, 0x00 };
 
-            Assert.ThrowsExactly<ArgumentException>(() => track.CreateRtpPackets(One(nonsense), 0));
+            Assert.ThrowsExactly<ArgumentException>(() => track.CreateRtpPackets(One(nonsense), 0, RtpPackets.Take()));
         }
 
         [TestMethod]
@@ -182,7 +181,7 @@ namespace SharpRTSPServer.Tests
             // says it holds 31 bytes of speech and holds two
             byte[] truncated = { 7 << 3, 0x01, 0x02 };
 
-            Assert.ThrowsExactly<ArgumentException>(() => track.CreateRtpPackets(One(truncated), 0));
+            Assert.ThrowsExactly<ArgumentException>(() => track.CreateRtpPackets(One(truncated), 0, RtpPackets.Take()));
         }
 
         // ------------------------------------------------------------------ MPEG-4 Part 2
@@ -218,7 +217,8 @@ namespace SharpRTSPServer.Tests
             var track = new MP4VTrack(new byte[] { 0x00, 0x00, 0x01, 0xB0 }) { PacketMTU = 200 };
 
             byte[] frame = new byte[700];
-            var (packets, owners) = track.CreateRtpPackets(One(frame), 3000);
+            var packets = RtpPackets.Take();
+            track.CreateRtpPackets(One(frame), 3000, packets);
 
             try
             {
@@ -238,7 +238,7 @@ namespace SharpRTSPServer.Tests
             }
             finally
             {
-                Release(owners);
+                packets.Release();
             }
         }
 
@@ -257,7 +257,8 @@ namespace SharpRTSPServer.Tests
             frame[startCode + 2] = 0x01;
             frame[startCode + 3] = 0xB6;
 
-            var (packets, owners) = track.CreateRtpPackets(One(frame), 3000);
+            var packets = RtpPackets.Take();
+            track.CreateRtpPackets(One(frame), 3000, packets);
 
             try
             {
@@ -271,7 +272,7 @@ namespace SharpRTSPServer.Tests
             }
             finally
             {
-                Release(owners);
+                packets.Release();
             }
         }
     }

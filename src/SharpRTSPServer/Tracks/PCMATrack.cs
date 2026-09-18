@@ -65,19 +65,13 @@ namespace SharpRTSPServer
         /// <param name="samples">An array of PCMA fragments. By default single fragment is expected.</param>
         /// <param name="rtpTimestamp">RTP timestamp in the timescale of the track.</param>
         /// <returns>RTP packets.</returns>
-        public override (List<Memory<byte>>, List<IMemoryOwner<byte>>) CreateRtpPackets(List<ReadOnlyMemory<byte>> samples, uint rtpTimestamp)
+        public override void CreateRtpPackets(List<ReadOnlyMemory<byte>> samples, uint rtpTimestamp, RtpPackets packets)
         {
-            List<Memory<byte>> rtpPackets = new List<Memory<byte>>();
-            List<IMemoryOwner<byte>> memoryOwners = new List<IMemoryOwner<byte>>();
-
             for (int i = 0; i < samples.Count; i++)
             {
                 var audioPacket = samples[i];
                 var size = 12 + audioPacket.Length;
-                var owner = MemoryPool<byte>.Shared.Rent(size);
-                memoryOwners.Add(owner);
-
-                var rtpPacket = owner.Memory.Slice(0, size);
+                Memory<byte> rtpPacket = packets.Rent(size);
 
                 const bool rtpPadding = false;
                 const bool rtpHasExtension = false;
@@ -89,10 +83,7 @@ namespace SharpRTSPServer
 
                 RTPPacketUtil.WriteTS(rtpPacket.Span, rtpTimestamp);
                 audioPacket.CopyTo(rtpPacket.Slice(12));
-                rtpPackets.Add(rtpPacket);
             }
-
-            return (rtpPackets, memoryOwners);
         }
     }
 }

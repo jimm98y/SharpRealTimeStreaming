@@ -123,12 +123,8 @@ namespace SharpRTSPServer
         /// down the per packet overhead of a slow codec.
         /// </param>
         /// <param name="rtpTimestamp">RTP timestamp in the timescale of the track.</param>
-        public override (List<Memory<byte>>, List<IMemoryOwner<byte>>) CreateRtpPackets(
-            List<ReadOnlyMemory<byte>> samples, uint rtpTimestamp)
+        public override void CreateRtpPackets(List<ReadOnlyMemory<byte>> samples, uint rtpTimestamp, RtpPackets packets)
         {
-            var rtpPackets = new List<Memory<byte>>(samples.Count);
-            var memoryOwners = new List<IMemoryOwner<byte>>(samples.Count);
-
             foreach (ReadOnlyMemory<byte> sample in samples)
             {
                 List<(byte Header, ReadOnlyMemory<byte> Speech)> frames = SplitIntoFrames(sample);
@@ -146,10 +142,7 @@ namespace SharpRTSPServer
                     size += frame.Speech.Length;
                 }
 
-                IMemoryOwner<byte> owner = MemoryPool<byte>.Shared.Rent(size);
-                memoryOwners.Add(owner);
-
-                Memory<byte> rtpPacket = owner.Memory.Slice(0, size);
+                Memory<byte> rtpPacket = packets.Rent(size);
 
                 RTPPacketUtil.WriteHeader(rtpPacket.Span,
                     RTPPacketUtil.RTP_VERSION, false, false, 0, true, PayloadType);
@@ -176,10 +169,8 @@ namespace SharpRTSPServer
                     at += frame.Speech.Length;
                 }
 
-                rtpPackets.Add(rtpPacket);
             }
 
-            return (rtpPackets, memoryOwners);
         }
 
         /// <summary>

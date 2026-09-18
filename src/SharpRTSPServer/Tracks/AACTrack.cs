@@ -122,11 +122,8 @@ namespace SharpRTSPServer
         /// <param name="samples">An array of AAC fragments. By default single fragment is expected.</param>
         /// <param name="rtpTimestamp">RTP timestamp in the timescale of the track.</param>
         /// <returns>RTP packets.</returns>
-        public override (List<Memory<byte>>, List<IMemoryOwner<byte>>) CreateRtpPackets(List<ReadOnlyMemory<byte>> samples, uint rtpTimestamp)
+        public override void CreateRtpPackets(List<ReadOnlyMemory<byte>> samples, uint rtpTimestamp, RtpPackets packets)
         {
-            List<Memory<byte>> rtpPackets = new List<Memory<byte>>();
-            List<IMemoryOwner<byte>> memoryOwners = new List<IMemoryOwner<byte>>();
-
             for (int i = 0; i < samples.Count; i++)
             {
                 ReadOnlyMemory<byte> frame = samples[i];
@@ -135,10 +132,7 @@ namespace SharpRTSPServer
                 // Put the whole Audio Packet into one RTP packet.
                 // 12 is header size when there are no CSRCs or extensions, 4 for the AU header section
                 var size = RTP_HEADER_LENGTH + AU_HEADER_LENGTH + frame.Length;
-                var owner = MemoryPool<byte>.Shared.Rent(size);
-                memoryOwners.Add(owner);
-
-                var rtpPacket = owner.Memory.Slice(0, size);
+                Memory<byte> rtpPacket = packets.Rent(size);
 
                 const bool rtpPadding = false;
                 const bool rtpHasExtension = false;
@@ -157,10 +151,8 @@ namespace SharpRTSPServer
                 WriteAUHeader(rtpPacket.Span.Slice(RTP_HEADER_LENGTH), frame.Length);
                 frame.Span.CopyTo(rtpPacket.Span.Slice(RTP_HEADER_LENGTH + AU_HEADER_LENGTH));
 
-                rtpPackets.Add(rtpPacket);
             }
 
-            return (rtpPackets, memoryOwners);
         }
 
         /// <summary>

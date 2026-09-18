@@ -64,16 +64,19 @@ namespace SharpRTSPServer
         /// Creates RTP packets.
         /// </summary>
         /// <remarks>
-        /// The packets and whatever holds them are handed on to the sink, which releases them once
-        /// the last client has been sent the frame - so the memory must stay valid until then, and
-        /// must not be memory this track goes on to reuse. Everything here builds its packets in
-        /// buffers rented for them, which is what makes that true; a track that returned a slice of
-        /// the sample it was given would have it read long after the caller had moved on.
+        /// The packets are handed on to the sink, which releases them once the last client has been
+        /// sent the frame - which is long after this returns. That is why a track asks
+        /// <see cref="RtpPackets"/> for the memory rather than finding its own: a track that wrote
+        /// into a buffer it kept, or handed back a slice of the sample it was given, would have it
+        /// read long after the caller had moved on.
         /// </remarks>
         /// <param name="samples">An array of samples.</param>
         /// <param name="rtpTimestamp">RTP timestamp in the timescale of the track.</param>
-        /// <returns>The packets, and what to dispose when they have been sent.</returns>
-        (List<Memory<byte>>, List<IMemoryOwner<byte>>) CreateRtpPackets(List<ReadOnlyMemory<byte>> samples, uint rtpTimestamp);
+        /// <param name="packets">
+        /// Where to build them. Ask it for each packet by length and fill it in; it owns the memory
+        /// and hands the lot on.
+        /// </param>
+        void CreateRtpPackets(List<ReadOnlyMemory<byte>> samples, uint rtpTimestamp, RtpPackets packets);
 
         void FeedInRawSamples(uint rtpTimestamp, List<ReadOnlyMemory<byte>> samples);
 

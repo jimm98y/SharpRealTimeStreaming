@@ -114,12 +114,8 @@ namespace SharpRTSPServer
         /// </summary>
         /// <param name="samples">Video frames, each cut into as many packets as it needs.</param>
         /// <param name="rtpTimestamp">RTP timestamp in the timescale of the track.</param>
-        public override (List<Memory<byte>>, List<IMemoryOwner<byte>>) CreateRtpPackets(
-            List<ReadOnlyMemory<byte>> samples, uint rtpTimestamp)
+        public override void CreateRtpPackets(List<ReadOnlyMemory<byte>> samples, uint rtpTimestamp, RtpPackets packets)
         {
-            var rtpPackets = new List<Memory<byte>>();
-            var memoryOwners = new List<IMemoryOwner<byte>>();
-
             int payloadMTU = PayloadMTU();
 
             for (int s = 0; s < samples.Count; s++)
@@ -137,10 +133,7 @@ namespace SharpRTSPServer
                     bool endOfFrame = at + take >= frame.Length;
 
                     int size = 12 + take;
-                    IMemoryOwner<byte> owner = MemoryPool<byte>.Shared.Rent(size);
-                    memoryOwners.Add(owner);
-
-                    Memory<byte> rtpPacket = owner.Memory.Slice(0, size);
+                    Memory<byte> rtpPacket = packets.Rent(size);
 
                     // The marker says this is the last packet of a frame, which is the only thing
                     // telling a receiver where one ends.
@@ -151,13 +144,11 @@ namespace SharpRTSPServer
                     RTPPacketUtil.WriteTS(rtpPacket.Span, rtpTimestamp);
 
                     frame.Slice(at, take).CopyTo(rtpPacket.Slice(12));
-                    rtpPackets.Add(rtpPacket);
 
                     at += take;
                 }
             }
 
-            return (rtpPackets, memoryOwners);
         }
 
         /// <summary>

@@ -194,8 +194,9 @@ namespace SharpRTSPServer.Tests
             var track = new MetadataTrack { PacketMTU = 200 };
 
             string document = new string('x', 2000);
-            var (packets, owners) = track.CreateRtpPackets(
-                One(Encoding.UTF8.GetBytes(document)), 3000);
+            var packets = RtpPackets.Take();
+            track.CreateRtpPackets(
+                One(Encoding.UTF8.GetBytes(document)), 3000, packets);
 
             try
             {
@@ -214,10 +215,6 @@ namespace SharpRTSPServer.Tests
             }
             finally
             {
-                foreach (var owner in owners)
-                {
-                    owner.Dispose();
-                }
             }
         }
 

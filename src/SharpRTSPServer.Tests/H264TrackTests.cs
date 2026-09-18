@@ -19,14 +19,11 @@ namespace SharpRTSPServer.Tests
         private static List<byte[]> Packetize(H264Track track, params byte[][] nals)
         {
             var samples = nals.Select(n => new ReadOnlyMemory<byte>(n)).ToList();
-            var (packets, owners) = track.CreateRtpPackets(samples, Timestamp);
+            var packets = RtpPackets.Take();
+            track.CreateRtpPackets(samples, Timestamp, packets);
 
             // the packets are pooled buffers that the caller owns, so copy before releasing them
             var copies = packets.Select(p => p.ToArray()).ToList();
-            foreach (var owner in owners)
-            {
-                owner.Dispose();
-            }
             return copies;
         }
 

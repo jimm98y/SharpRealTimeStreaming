@@ -154,7 +154,9 @@ namespace SharpRTSPServer.Tests
         private static QueuedFrame NewFrame()
         {
             var frame = new QueuedFrame();
-            frame.Fill(new List<Memory<byte>> { new Memory<byte>(new byte[64]) }, null);
+            var packets = RtpPackets.Take();
+            packets.Rent(64);
+            frame.Fill(packets);
             return frame;
         }
 

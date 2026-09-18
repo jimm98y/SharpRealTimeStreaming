@@ -40,15 +40,13 @@ namespace SharpRTSPServer
         }
 
         /// <inheritdoc/>
-        public override (List<Memory<byte>>, List<IMemoryOwner<byte>>) CreateRtpPackets(List<ReadOnlyMemory<byte>> samples, uint rtpTimestamp)
+        public override void CreateRtpPackets(List<ReadOnlyMemory<byte>> samples, uint rtpTimestamp, RtpPackets packets)
         {
             if (samples.Count != 1)
             {
                 throw new InvalidOperationException("Only 1 sample is supported.");
             }
 
-            var rtpPackets = new List<Memory<byte>>();
-            var memoryOwners = new List<IMemoryOwner<byte>>();
 
             for (int i = 0; i < samples.Count; i++)
             {
@@ -110,9 +108,7 @@ namespace SharpRTSPServer
 
                     // 12 is header size. then jpeg header, then payload
                     var destSize = 12 + 8 + payloadSize;
-                    var owner = MemoryPool<byte>.Shared.Rent(destSize);
-                    memoryOwners.Add(owner);
-                    var rtpPacket = owner.Memory.Slice(0, destSize);
+                    Memory<byte> rtpPacket = packets.Rent(destSize);
 
                     // RTP Packet Header
                     // 0 - Version, P, X, CC, M, PT and Sequence Number
@@ -215,11 +211,9 @@ namespace SharpRTSPServer
                         rtpPacket.Span[1] |= 0x80;
                     }
 
-                    rtpPackets.Add(rtpPacket);
                 }
             }
 
-            return (rtpPackets, memoryOwners);
         }
 
         public struct JpgComponent

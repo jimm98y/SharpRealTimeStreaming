@@ -111,13 +111,11 @@ namespace SharpRTSPServer
         /// Passes already packetized RTP through unchanged. Every sample is forwarded - the caller may
         /// hand in more than one, and dropping the rest would silently lose media.
         /// </summary>
-        public override (List<Memory<byte>>, List<IMemoryOwner<byte>>) CreateRtpPackets(List<ReadOnlyMemory<byte>> samples, uint rtpTimestamp)
+        public override void CreateRtpPackets(List<ReadOnlyMemory<byte>> samples, uint rtpTimestamp, RtpPackets packets)
         {
             if (samples == null)
                 throw new ArgumentNullException(nameof(samples));
 
-            List<Memory<byte>> rtpPackets = new List<Memory<byte>>();
-            List<IMemoryOwner<byte>> memoryOwners = new List<IMemoryOwner<byte>>();
 
             foreach (var sample in samples)
             {
@@ -128,14 +126,10 @@ namespace SharpRTSPServer
                 // alongside it names the same source
                 LearnSourceSsrc(sample.Span);
 
-                var owner = MemoryPool<byte>.Shared.Rent(sample.Length);
-                memoryOwners.Add(owner);
-                var rtpPacket = owner.Memory.Slice(0, sample.Length);
+                Memory<byte> rtpPacket = packets.Rent(sample.Length);
                 sample.Span.CopyTo(rtpPacket.Span);
-                rtpPackets.Add(rtpPacket);
             }
 
-            return (rtpPackets, memoryOwners);
         }
 
         protected virtual void Dispose(bool disposing)

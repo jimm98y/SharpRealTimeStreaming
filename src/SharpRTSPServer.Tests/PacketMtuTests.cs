@@ -60,8 +60,10 @@ namespace SharpRTSPServer.Tests
             var big = new H264Track(Sps, Pps) { PacketMTU = 1400 };
             var small = new H264Track(Sps, Pps) { PacketMTU = 400 };
 
-            var (bigPackets, bigOwners) = big.CreateRtpPackets(Nal(8000), 0);
-            var (smallPackets, smallOwners) = small.CreateRtpPackets(Nal(8000), 0);
+            var bigPackets = RtpPackets.Take();
+            big.CreateRtpPackets(Nal(8000), 0, bigPackets);
+            var smallPackets = RtpPackets.Take();
+            small.CreateRtpPackets(Nal(8000), 0, smallPackets);
 
             try
             {
@@ -72,7 +74,8 @@ namespace SharpRTSPServer.Tests
             }
             finally
             {
-                foreach (var owner in bigOwners.Concat(smallOwners)) owner.Dispose();
+                bigPackets.Release();
+                smallPackets.Release();
             }
         }
 
@@ -82,8 +85,10 @@ namespace SharpRTSPServer.Tests
             var big = new MJpegTrack { PacketMTU = 1400 };
             var small = new MJpegTrack { PacketMTU = 400 };
 
-            var (bigPackets, bigOwners) = big.CreateRtpPackets(Jpeg(6000), 0);
-            var (smallPackets, smallOwners) = small.CreateRtpPackets(Jpeg(6000), 0);
+            var bigPackets = RtpPackets.Take();
+            big.CreateRtpPackets(Jpeg(6000), 0, bigPackets);
+            var smallPackets = RtpPackets.Take();
+            small.CreateRtpPackets(Jpeg(6000), 0, smallPackets);
 
             try
             {
@@ -95,7 +100,8 @@ namespace SharpRTSPServer.Tests
             }
             finally
             {
-                foreach (var owner in bigOwners.Concat(smallOwners)) owner.Dispose();
+                bigPackets.Release();
+                smallPackets.Release();
             }
         }
 
@@ -115,7 +121,7 @@ namespace SharpRTSPServer.Tests
             // rather than looping for ever on a fragment size of zero
             var track = new H264Track(Sps, Pps) { PacketMTU = 40 };
 
-            Assert.ThrowsExactly<InvalidOperationException>(() => track.CreateRtpPackets(Nal(8000), 0));
+            Assert.ThrowsExactly<InvalidOperationException>(() => track.CreateRtpPackets(Nal(8000), 0, RtpPackets.Take()));
         }
 
         [TestMethod]
@@ -123,7 +129,7 @@ namespace SharpRTSPServer.Tests
         {
             var track = new MJpegTrack { PacketMTU = 40 };
 
-            Assert.ThrowsExactly<InvalidOperationException>(() => track.CreateRtpPackets(Jpeg(6000), 0));
+            Assert.ThrowsExactly<InvalidOperationException>(() => track.CreateRtpPackets(Jpeg(6000), 0, RtpPackets.Take()));
         }
     }
 }

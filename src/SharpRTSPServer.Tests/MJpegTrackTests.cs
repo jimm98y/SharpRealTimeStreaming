@@ -70,13 +70,10 @@ namespace SharpRTSPServer.Tests
         private static List<byte[]> Packetize(MJpegTrack track, byte[] jpeg)
         {
             var samples = new List<ReadOnlyMemory<byte>> { jpeg };
-            var (packets, owners) = track.CreateRtpPackets(samples, 90000);
+            var packets = RtpPackets.Take();
+            track.CreateRtpPackets(samples, 90000, packets);
 
             var copies = packets.Select(p => p.ToArray()).ToList();
-            foreach (var owner in owners)
-            {
-                owner.Dispose();
-            }
             return copies;
         }
 
@@ -234,7 +231,7 @@ namespace SharpRTSPServer.Tests
             var track = new MJpegTrack();
             var samples = new List<ReadOnlyMemory<byte>> { Jpeg(), Jpeg() };
 
-            Assert.ThrowsExactly<InvalidOperationException>(() => track.CreateRtpPackets(samples, 0));
+            Assert.ThrowsExactly<InvalidOperationException>(() => track.CreateRtpPackets(samples, 0, RtpPackets.Take()));
         }
 
         [TestMethod]

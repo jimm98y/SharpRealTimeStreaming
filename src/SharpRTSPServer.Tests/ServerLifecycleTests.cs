@@ -241,11 +241,13 @@ namespace SharpRTSPServer.Tests
         {
             using var server = new RTSPServer(TestPorts.FindFree(), "admin", "password");
 
-            var packets = new List<Memory<byte>> { new byte[12] };
+            var packets = RtpPackets.Take();
+            packets.Rent(12);
 
             try
             {
-                server.FeedInRawRTP("no-such-stream", 0, 0, packets, null);
+                // the sink takes them over, so a stream that does not exist still gives them back
+                server.FeedInRawRTP("no-such-stream", 0, 0, packets);
             }
             catch (Exception ex)
             {

@@ -97,11 +97,8 @@ namespace SharpRTSPServer
         /// <param name="samples">An array of AV1 OBUs.</param>
         /// <param name="rtpTimestamp">RTP timestamp in the timescale of the track.</param>
         /// <returns>RTP packets.</returns>
-        public override (List<Memory<byte>>, List<IMemoryOwner<byte>>) CreateRtpPackets(List<ReadOnlyMemory<byte>> samples, uint rtpTimestamp)
+        public override void CreateRtpPackets(List<ReadOnlyMemory<byte>> samples, uint rtpTimestamp, RtpPackets packets)
         {
-            List<Memory<byte>> rtpPackets = new List<Memory<byte>>();
-            List<IMemoryOwner<byte>> memoryOwners = new List<IMemoryOwner<byte>>();
-
             // The marker goes on the last OBU we actually send, which is not necessarily the last
             // sample - temporal delimiters and tile lists are dropped below.
             int lastEmittedSample = LastSampleToEmit(samples);
@@ -113,9 +110,10 @@ namespace SharpRTSPServer
                     continue;
                 }
 
-                var owner = MemoryPool<byte>.Shared.Rent(samples[x].Length);
-                memoryOwners.Add(owner);
-                var rawObu = owner.Memory.Slice(0, samples[x].Length);
+                // A copy to work on, not a packet: the size field is stripped out of it below and
+                // the bit that said it was there is cleared, neither of which may touch the caller's
+                // sample.
+                Memory<byte> rawObu = packets.RentScratch(samples[x].Length);
                 samples[x].CopyTo(rawObu);
 
                 bool lastObu = x == lastEmittedSample;
@@ -167,9 +165,7 @@ namespace SharpRTSPServer
 
                     var aggregationHeaderLen = 1;
                     var destSize = 12 + aggregationHeaderLen + payloadSize;
-                    var lowner = MemoryPool<byte>.Shared.Rent(destSize);
-                    memoryOwners.Add(lowner);
-                    var rtpPacket = lowner.Memory.Slice(0, destSize);
+                    Memory<byte> rtpPacket = packets.Rent(destSize);
 
                     // RTP Packet Header
                     // 0 - Version, P, X, CC, M, PT and Sequence Number
@@ -218,11 +214,9 @@ namespace SharpRTSPServer
                     obuPointer += payloadSize;
                     dataRemaining -= payloadSize;
 
-                    rtpPackets.Add(rtpPacket);
                 }                
             }
 
-            return (rtpPackets, memoryOwners);
         }
 
         /// <summary>

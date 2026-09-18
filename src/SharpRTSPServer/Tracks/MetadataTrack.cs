@@ -112,12 +112,8 @@ namespace SharpRTSPServer
         /// </summary>
         /// <param name="samples">Documents, each cut into as many packets as it needs.</param>
         /// <param name="rtpTimestamp">RTP timestamp in the timescale of the track.</param>
-        public override (List<Memory<byte>>, List<IMemoryOwner<byte>>) CreateRtpPackets(
-            List<ReadOnlyMemory<byte>> samples, uint rtpTimestamp)
+        public override void CreateRtpPackets(List<ReadOnlyMemory<byte>> samples, uint rtpTimestamp, RtpPackets packets)
         {
-            var rtpPackets = new List<Memory<byte>>();
-            var memoryOwners = new List<IMemoryOwner<byte>>();
-
             int payloadMTU = PayloadMTU();
 
             for (int s = 0; s < samples.Count; s++)
@@ -133,10 +129,7 @@ namespace SharpRTSPServer
                     bool endOfDocument = at + take >= document.Length;
 
                     int size = 12 + take;
-                    IMemoryOwner<byte> owner = MemoryPool<byte>.Shared.Rent(size);
-                    memoryOwners.Add(owner);
-
-                    Memory<byte> rtpPacket = owner.Memory.Slice(0, size);
+                    Memory<byte> rtpPacket = packets.Rent(size);
 
                     // The marker is what says a document has ended, and so where a receiver should
                     // stop collecting and start reading.
@@ -147,13 +140,10 @@ namespace SharpRTSPServer
                     RTPPacketUtil.WriteTS(rtpPacket.Span, rtpTimestamp);
 
                     document.Slice(at, take).CopyTo(rtpPacket.Slice(12));
-                    rtpPackets.Add(rtpPacket);
 
                     at += take;
                 }
             }
-
-            return (rtpPackets, memoryOwners);
         }
     }
 }
