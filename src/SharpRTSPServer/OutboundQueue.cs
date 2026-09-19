@@ -511,18 +511,18 @@ namespace SharpRTSPServer
                 _sentKeptKeyFrame = true;
             }
 
-            if (_sentKeptKeyFrame && DateTime.UtcNow - _midGroupSince < _keyFrameWait)
+            if (_sentKeptKeyFrame)
             {
-                // And the pictures after it are held back, because they describe changes to ones
-                // this client never saw: sending them on top of the kept frame would take a correct
-                // still picture and break it up. It holds that picture until the next live keyframe
-                // starts the stream again properly, which is a clean cut rather than a recovery.
+                // And the pictures after it are held back until the next live keyframe, because they
+                // describe changes to ones this client never saw: sending them on top of the kept
+                // frame takes a correct still picture and melts it. Holding the still and then
+                // cutting to the next group is the difference between a picture that waits and a
+                // picture that falls apart.
                 //
-                // Not indefinitely, though. A client holding a still picture is receiving nothing,
-                // and a player probing a stream it has just opened wants frames - ffmpeg gives up on
-                // one that sends a single picture and then stops, and reports a stream whose size it
-                // could not work out. So the hold is bounded like every other: past it the live
-                // pictures go out imperfect, which is at least a stream.
+                // No timeout on this one. The others exist because the thing being waited for might
+                // never come; here the stream has already produced a keyframe - that is where the
+                // one being shown came from - so another is coming. And the client is not left with
+                // nothing meanwhile: it has a picture to hold, and the sound never stops.
                 if (!_askedForKeyFrame)
                 {
                     _askedForKeyFrame = true;

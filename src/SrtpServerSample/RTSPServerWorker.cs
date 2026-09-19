@@ -36,6 +36,34 @@ namespace SrtpServerSample
             public Timer AudioTimer { get; set; }
             public IsoStream IsoStream { get; set; }
 
+            /// <summary>
+            /// How far into the playout the current time through the file begins, in seconds.
+            /// </summary>
+            /// <remarks>
+            /// <para>
+            /// A file played on a loop has presentation times that go back to zero every time round,
+            /// and RTP timestamps that went back with them would tell the client the stream had
+            /// jumped into the past. This carries the playout forward across the joins: every
+            /// timestamp sent is this plus the time within the file, so the clock only ever advances.
+            /// </para>
+            /// <para>
+            /// One value for the whole file rather than one per track, which is the point. Each track
+            /// used to notice the end on its own and start again on its own, so the sound and the
+            /// picture went round at different moments and drifted apart by the difference every time
+            /// - a few seconds a loop, never recovered.
+            /// </para>
+            /// </remarks>
+            public double LoopOffsetSeconds { get; set; }
+
+            /// <summary>
+            /// The furthest into the file any track of it has reached this time round, in seconds.
+            /// </summary>
+            /// <remarks>
+            /// What the loop advances by, so that the track which ran out first does not carry the
+            /// others back over ground they had already covered.
+            /// </remarks>
+            public double FurthestSeconds { get; set; }
+
             public MediaFileReader(string streamID)
             {
                 StreamID = streamID;
@@ -75,6 +103,35 @@ namespace SrtpServerSample
         /// The timescale the container counts a track presentation times in, which is what
         /// sample.PTS is expressed in - not the same thing as the track object timescale.
         /// </summary>
+        /// <summary>
+        /// Starts the file again, carrying the playout clock forward over the join.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Every track goes back to the beginning together, whichever of them ran out. They used to
+        /// go back one at a time, as each noticed its own end - so a file whose sound is longer than
+        /// its picture restarted the picture while the sound played on, and the two were that far
+        /// apart from then on, and further again every time round.
+        /// </para>
+        /// <para>
+        /// The offset advances by the furthest any track reached, so nothing is sent with a
+        /// timestamp it has already used. Whatever the longer track had left is not sent: a loop has
+        /// to cut somewhere, and cutting both tracks at the same instant is what keeps them
+        /// together.
+        /// </para>
+        /// </remarks>
+        private static void StartFileAgain(MediaFileReader reader, IEnumerable<KeyValuePair<uint, TrackContext>> tracks)
+        {
+            reader.LoopOffsetSeconds += reader.FurthestSeconds;
+            reader.FurthestSeconds = 0;
+
+            foreach (var track in tracks)
+            {
+                track.Value.SampleIndex = 0;
+                track.Value.FragmentIndex = 0;
+            }
+        }
+
         private static uint GetMediaTimescale(Container container, uint trackID)
         {
             foreach (var moov in container.Children.OfType<MovieBox>())
@@ -250,7 +307,9 @@ namespace SrtpServerSample
                             uint sourceVideoTimescale = GetMediaTimescale(fmp4, inputTrack.TrackID);
                             int videoRtpClock = SharpRTSPServer.H264Track.DEFAULT_CLOCK;
 
-                            mediaFileReader.VideoTimer = new Timer(inputTrack.DefaultSampleDuration * 1000d / inputTrack.Timescale);
+                            double videoSampleSeconds = inputTrack.DefaultSampleDuration / (double)inputTrack.Timescale;
+
+                            mediaFileReader.VideoTimer = new Timer(videoSampleSeconds * 1000d);
                             mediaFileReader.VideoTimer.Elapsed += (s, e) =>
                             {
                                 lock (_syncRoot)
@@ -261,11 +320,7 @@ namespace SrtpServerSample
                                     {
                                         if (mediaFile.Shuffle)
                                         {
-                                            foreach (var track in inputReader.Tracks)
-                                            {
-                                                track.Value.SampleIndex = 0;
-                                                track.Value.FragmentIndex = 0;
-                                            }
+                                            StartFileAgain(mediaFileReader, inputReader.Tracks);
                                         }
                                         else
                                         {
@@ -278,7 +333,13 @@ namespace SrtpServerSample
                                     }
 
                                     IEnumerable<byte[]> units = inputReader.ParseSample(inputTrack.TrackID, sample.Data);
-                                    long videoPts = (long)sample.PTS * videoRtpClock / sourceVideoTimescale;
+                                    // Where this sample sits in the file, and where that is in the playout -
+                                    // which stops being the same thing once the file has been round more than once.
+                                    double videoSeconds = (double)sample.PTS / sourceVideoTimescale;
+                                    mediaFileReader.FurthestSeconds = Math.Max(
+                                        mediaFileReader.FurthestSeconds, videoSeconds + videoSampleSeconds);
+
+                                    long videoPts = (long)((mediaFileReader.LoopOffsetSeconds + videoSeconds) * videoRtpClock);
                                     rtspVideoTrack.FeedInRawSamples((uint)unchecked(mediaFileReader.VideoRtpBaseTime + videoPts), units.Select(u => (ReadOnlyMemory<byte>)u).ToList());
                                 }
                             };
@@ -312,7 +373,9 @@ namespace SrtpServerSample
                             uint sourceAudioTimescale = GetMediaTimescale(fmp4, inputTrack.TrackID);
                             int audioRtpClock = AudioRtpClockOf(rtspAudioTrack);
 
-                            mediaFileReader.AudioTimer = new Timer(inputTrack.DefaultSampleDuration * 1000d / inputTrack.Timescale);
+                            double audioSampleSeconds = inputTrack.DefaultSampleDuration / (double)inputTrack.Timescale;
+
+                            mediaFileReader.AudioTimer = new Timer(audioSampleSeconds * 1000d);
                             mediaFileReader.AudioTimer.Elapsed += (s, e) =>
                             {
                                 lock (_syncRoot)
@@ -323,11 +386,7 @@ namespace SrtpServerSample
                                     {
                                         if (mediaFile.Shuffle)
                                         {
-                                            foreach (var track in inputReader.Tracks)
-                                            {
-                                                track.Value.SampleIndex = 0;
-                                                track.Value.FragmentIndex = 0;
-                                            }
+                                            StartFileAgain(mediaFileReader, inputReader.Tracks);
                                         }
                                         else
                                         {
@@ -340,7 +399,11 @@ namespace SrtpServerSample
                                     }
 
                                     IEnumerable<byte[]> units = inputReader.ParseSample(inputTrack.TrackID, sample.Data);
-                                    long audioPts = (long)sample.PTS * audioRtpClock / sourceAudioTimescale;
+                                    double audioSeconds = (double)sample.PTS / sourceAudioTimescale;
+                                    mediaFileReader.FurthestSeconds = Math.Max(
+                                        mediaFileReader.FurthestSeconds, audioSeconds + audioSampleSeconds);
+
+                                    long audioPts = (long)((mediaFileReader.LoopOffsetSeconds + audioSeconds) * audioRtpClock);
                                     rtspAudioTrack.FeedInRawSamples((uint)unchecked(mediaFileReader.AudioRtpBaseTime + audioPts), units.Select(u => (ReadOnlyMemory<byte>)u).ToList());
                                 }
                             };
