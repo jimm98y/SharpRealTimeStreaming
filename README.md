@@ -1,7 +1,7 @@
 # SharpRTSP client and server
 This is a thin wrapper around the fantastic SharpRTSP, mostly based off their sample code with some API enhancements to make it easier to use. Added support for streaming Opus, AV1 and H266.
 
-> **Upgrading from an earlier version?** See [doc/migration.md](doc/migration.md).
+> **Upgrading from 0.7.x?** See [doc/migration.md](doc/migration.md).
 
 ## SharpRTSPClient
 Simple RTSP client that supports MJPEG, H264, H265, H266, AV1 for video and AAC, Opus, PCMU and PCMA for audio.
@@ -64,14 +64,6 @@ unprotected bytes and it will protect them with the right track's keys:
 ```cs
 client.SendRTCP(trackIndex, client.BuildRtcpReceiverReport(ssrc));
 ```
-
-A stream that describes itself as encrypted but gives no key this client can use is not played: the
-client stops with `StoppedReason.EncryptionUnavailable` rather than carry on in the clear. Anyone
-able to alter the SDP could otherwise arrange that by deleting one line of it.
-
-The keys are not exposed at all, per track or otherwise. An `SrtpSessionContext` is live crypto
-state: protecting a packet with one outside the client advances the roll over counter and the replay
-state, and the far end can then no longer read what follows - so `SendRTCP` is what there is.
 
 ### Streams with more than one track of a kind
 
@@ -197,45 +189,8 @@ h264Track.RtpProfile = RtpProfiles.SAVP;
 ```
 The server then generates per-connection keys and advertises them in the SDP `a=crypto` attribute.
 
-The key lives in that attribute, so the DESCRIBE carrying it has to be encrypted or anyone on the
-path can read the key and, with it, the media. Configure SRTP together with a TLS certificate and
+Configure SRTP together with a TLS certificate and
 offer the stream over `rtsps://`; the server logs a warning if you ask for SRTP without one.
-
-### Starting a client that joins mid-stream
-
-A client that arrives in the middle of a group of pictures has nothing it can decode until the next
-keyframe - everything before it refers to frames the client never saw. That can be a second or two
-of sound playing against a blank picture.
-
-Most encoders can be asked for a keyframe on demand, which ends the wait properly and costs nothing.
-Handle `KeyFrameNeeded` and ask yours:
-
-```cs
-server.KeyFrameNeeded += (sender, e) => encoder.RequestKeyFrame();
-```
-
-Where there is nothing to ask, or nothing answers, a stream can instead keep the last keyframe it
-produced and start such a client on that:
-
-```cs
-streamSource.KeepLastKeyFrame = true;
-```
-
-Off by default, and a fallback rather than a first choice. It buys a real picture immediately
-instead of a blank one; it does not buy a clean stream, because the live pictures that follow refer
-to frames between that keyframe and now which the client still never saw, so it decodes them
-imperfectly until a real keyframe comes round. It costs one frame of memory per stream, whatever the
-audience, and it makes the stream packetise even with nobody attached so that a producer which
-starts on demand does not lose its first keyframe.
-
-`KeyFrameWait` is how long a client goes without a picture before the server gives up waiting and
-sends what it has. The sample servers expose the whole thing in `appsettings.json`:
-
-```json
-{
-  "KeepLastKeyFrame": true
-}
-```
 
 ### Multicast
 
