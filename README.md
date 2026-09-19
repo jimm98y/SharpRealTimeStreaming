@@ -128,7 +128,7 @@ Simple RTSP server that supports MJPEG, H264, H265, H266, AV1 for video and AAC,
 
 Create the server on port 8554:
 ```cs
-using(var server = new RTSPServer(8554, "admin", "password"))
+using (var server = new RTSPServer(8554, new InMemoryUserRepository("admin", "password")))
 {
 ...
 }
@@ -181,7 +181,7 @@ aacTrack.FeedInRawSamples(rtpAudioBaseTime + audioPTS, new List<byte[]> { aacFra
 
 The full constructor takes a TLS certificate, an HTTP tunnelling flag and an SRTP crypto suite:
 ```cs
-using (var server = new RTSPServer(8322, "admin", "password",
+using (var server = new RTSPServer(8322, new InMemoryUserRepository("admin", "password"),
     useHttpTunnel: false,
     tlsCertificate: certificate,
     srtpCryptoSuite: SrtpCryptoSuites.AES_CM_128_HMAC_SHA1_80,
@@ -228,18 +228,58 @@ server.AuthenticationScheme = RtspAuthenticationScheme.Basic;
 
 Basic sends the user name and password base64 encoded, which anyone who can read the traffic can reverse, so only enable it together with a TLS certificate. The server logs a warning if you turn it on without one. Set the scheme before calling `StartListen`.
 
-The sample servers expose this in `appsettings.json`, off by default:
+The sample servers expose this in `appsettings.json`, off by default, alongside their users:
 ```json
 {
-  "UserName": "admin",
-  "Password": "password",
+  "Users": [
+    {
+      "UserName": "admin",
+      "Password": "password"
+    },
+    {
+      "UserName": "viewer",
+      "Password": "viewer-password"
+    }
+  ],
   "AllowBasicAuthentication": false
 }
 ```
 
 The client side needs no configuration: it answers whichever of the two schemes a server challenges it with.
 
-Passing a null or empty user name disables authentication entirely, which is only appropriate on a trusted network.
+#### Users
+
+The server is given an `IUserRepository`, so it can have as many users as it likes:
+
+```cs
+var users = new InMemoryUserRepository()
+    .Add("alice", "alice-password")
+    .Add("bob", "bob-password");
+
+using (var server = new RTSPServer(8554, users))
+{
+    ...
+}
+```
+
+It is asked per request rather than read once, so users added or removed while the server is running
+take effect on the next request - though removing one does not end the sessions they already have.
+Anything larger or longer lived than a handful of users in memory belongs behind an
+`IUserRepository` of your own:
+
+```cs
+public interface IUserRepository
+{
+    UserInfo GetUser(string userName);
+}
+```
+
+The name it is given is whatever the client put in its Authorization header and is not evidence of
+anything; the server checks the password against whatever comes back. Returning null refuses. A
+repository that throws refuses too, and says so in the log.
+
+Passing no repository at all disables authentication entirely, which is only appropriate on a
+trusted network.
 
 Repeated failures from one address are answered slowly, so that guessing a password over a series of
 fresh connections is not free:
@@ -284,7 +324,7 @@ var client = new RTSPClient();
 client.Logger = new DefaultLog { Sink = line => myLog.Write(line) };
 
 // or say nothing at all
-var quiet = new RTSPServer(8554, "admin", "password") { Logger = NullLog.Instance };
+var quiet = new RTSPServer(8554, users) { Logger = NullLog.Instance };
 ```
 
 `ILog` is five methods and five switches, and implementing it takes no dependency on anything:

@@ -74,7 +74,7 @@ namespace SharpRTSPServer.Tests
         public void DroppingStalledClientsDoesNotHoldUpTheRestOfTheServer()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, "admin", "password");
+            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
             var videoTrack = new H264Track(Sps, Pps);
             server.AddStreamSource(new RTSPStreamSource("stream1", videoTrack, null));
             server.StartListen();
@@ -143,7 +143,7 @@ namespace SharpRTSPServer.Tests
         public void TearingDownAStalledClientLetsAnotherClientCarryOn()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, "admin", "password");
+            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
 
             var stalledTrack = new H264Track(Sps, Pps);
             var livelyTrack = new H264Track(Sps, Pps);

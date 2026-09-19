@@ -80,7 +80,7 @@ namespace SharpRTSPServer.Tests
 
         private static RTSPServer StartTlsServer(X509Certificate2 certificate, int port)
         {
-            var server = new RTSPServer(port, UserName, Password,
+            var server = new RTSPServer(port, new InMemoryUserRepository(UserName, Password),
                 useHttpTunnel: false,
                 tlsCertificate: certificate,
                 loggerFactory: null);

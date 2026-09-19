@@ -8,6 +8,7 @@ Everything that changed shape, and what to write instead.
 - [Which tracks to receive is one callback](#which-tracks-to-receive-is-one-callback)
 - [A track has to say what kind of media it carries](#a-track-has-to-say-what-kind-of-media-it-carries)
 - [The SRTP keys are not exposed](#the-srtp-keys-are-not-exposed)
+- [The server takes a user repository, not one user name and password](#the-server-takes-a-user-repository-not-one-user-name-and-password)
 - [Logging belongs to the client or server, not the process](#logging-belongs-to-the-client-or-server-not-the-process)
 - [Multicast is off by default](#multicast-is-off-by-default)
 
@@ -183,6 +184,85 @@ byte[] protectedRtcp = RTSPClient.ProtectRtcp(client.VideoContext, report);
 
 // after
 client.SendRTCP(trackIndex, report);
+```
+
+---
+
+## The server takes a user repository, not one user name and password
+
+Every `RTSPServer` constructor took a `string userName, string password` pair, so a server had
+exactly one user. Anything downstream that asked who a client was got the same answer every time,
+which left `AuthorizeStream` with nothing it could decide on. They now take an `IUserRepository`:
+
+```cs
+// before
+using var server = new RTSPServer(8554, "admin", "password");
+
+// after
+using var server = new RTSPServer(8554, new InMemoryUserRepository("admin", "password"));
+```
+
+For more than one user, or for users that come from somewhere else:
+
+```cs
+var users = new InMemoryUserRepository()
+    .Add("alice", "alice-password")
+    .Add("bob", "bob-password");
+
+using var server = new RTSPServer(8554, users);
+
+server.AuthorizeStream += (s, e) =>
+{
+    if (!TenantOwns(e.UserName, e.StreamID))
+    {
+        e.Deny(403);
+    }
+};
+```
+
+```cs
+public interface IUserRepository
+{
+    UserInfo GetUser(string userName);   // null refuses
+}
+```
+
+It is asked once per request that carries an Authorization header, on that connection's own receive
+thread, so an implementation that goes to a database holds up one client and no other. There is no
+asynchronous pair: the RTSP request path is synchronous, so the server would only have blocked on
+the result.
+
+A server that does not authenticate used to be one given a null or empty user name. It is now one
+given no repository:
+
+```cs
+// before
+using var server = new RTSPServer(8554, null, null);
+
+// after
+using var server = new RTSPServer(8554, (IUserRepository)null);
+```
+
+`UserInfo.Password` is the password in the clear, because that is what verifying a digest answer
+needs: the answer is built from `MD5(user:realm:password)` and there is no checking one without
+being able to compute it. Storing the hash instead - which is what a user database ought to keep -
+needs the digest verified here rather than by the transport library, which cannot be given anything
+but a password.
+
+The sample servers read a `Users` section from `appsettings.json` instead of a `UserName` and
+`Password` pair:
+
+```json
+"Users": [
+  {
+    "UserName": "admin",
+    "Password": "password"
+  },
+  {
+    "UserName": "viewer",
+    "Password": "viewer-password"
+  }
+]
 ```
 
 ---

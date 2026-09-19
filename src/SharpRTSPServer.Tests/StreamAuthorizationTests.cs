@@ -43,7 +43,7 @@ namespace SharpRTSPServer.Tests
         public StreamAuthorizationTests()
         {
             _port = TestPorts.FindFree();
-            _server = new RTSPServer(_port, UserName, Password);
+            _server = new RTSPServer(_port, new InMemoryUserRepository(UserName, Password));
             _server.AddStreamSource(new RTSPStreamSource("mine", new H264Track(Sps, Pps), null));
             _server.AddStreamSource(new RTSPStreamSource("theirs", new H264Track(Sps, Pps), null));
             _server.StartListen();

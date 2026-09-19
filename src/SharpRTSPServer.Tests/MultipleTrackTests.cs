@@ -48,7 +48,7 @@ namespace SharpRTSPServer.Tests
         public void AStreamCanCarryTwoAudioTracks()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, "admin", "password");
+            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
 
             var english = new PCMUTrack { ID = 1 };
             var french = new PCMATrack { ID = 2 };
@@ -84,7 +84,7 @@ namespace SharpRTSPServer.Tests
         public void EachOfTwoAudioTracksCarriesItsOwnMedia()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, "admin", "password");
+            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
 
             var english = new PCMUTrack { ID = 1 };
             var french = new PCMATrack { ID = 2 };
@@ -162,7 +162,7 @@ namespace SharpRTSPServer.Tests
         public void MetadataIsCarriedAlongsideThePicture()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, "admin", "password");
+            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
 
             var metadata = new MetadataTrack();
             server.AddStreamSource(new RTSPStreamSource("stream1",

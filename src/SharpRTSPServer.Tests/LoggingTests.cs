@@ -148,8 +148,8 @@ namespace SharpRTSPServer.Tests
             var first = new Recorder();
             var second = new Recorder();
 
-            using var one = new RTSPServer(TestPorts.FindFree(), "admin", "password") { Logger = first };
-            using var two = new RTSPServer(TestPorts.FindFree(), "admin", "password") { Logger = second };
+            using var one = new RTSPServer(TestPorts.FindFree(), new InMemoryUserRepository("admin", "password")) { Logger = first };
+            using var two = new RTSPServer(TestPorts.FindFree(), new InMemoryUserRepository("admin", "password")) { Logger = second };
 
             one.AddStreamSource(new RTSPStreamSource("stream1", new H264Track(Sps, Pps), null));
 
@@ -168,7 +168,7 @@ namespace SharpRTSPServer.Tests
         [TestMethod]
         public void ANullLoggerSaysNothingAndReportsEveryLevelOff()
         {
-            using var server = new RTSPServer(TestPorts.FindFree(), "admin", "password") { Logger = NullLog.Instance };
+            using var server = new RTSPServer(TestPorts.FindFree(), new InMemoryUserRepository("admin", "password")) { Logger = NullLog.Instance };
 
             Assert.IsFalse(server.Logger.IsErrorEnabled);
             Assert.IsFalse(server.Logger.IsTraceEnabled);
@@ -242,7 +242,7 @@ namespace SharpRTSPServer.Tests
         public void ATrackReportsWhereItsServerDoes()
         {
             var log = new Recorder();
-            using var server = new RTSPServer(TestPorts.FindFree(), "admin", "password") { Logger = log };
+            using var server = new RTSPServer(TestPorts.FindFree(), new InMemoryUserRepository("admin", "password")) { Logger = log };
 
             var opus = new OpusTrack { ID = 1, SamplingRate = 16000, Channels = 1 }; // neither is what Opus allows
             server.AddStreamSource(new RTSPStreamSource("stream1", new H264Track(Sps, Pps), opus));
@@ -259,7 +259,7 @@ namespace SharpRTSPServer.Tests
             var first = new Recorder();
             var second = new Recorder();
 
-            using var server = new RTSPServer(TestPorts.FindFree(), "admin", "password") { Logger = first };
+            using var server = new RTSPServer(TestPorts.FindFree(), new InMemoryUserRepository("admin", "password")) { Logger = first };
 
             var opus = new OpusTrack { ID = 1, SamplingRate = 16000, Channels = 1 };
             server.AddStreamSource(new RTSPStreamSource("stream1", new H264Track(Sps, Pps), opus));

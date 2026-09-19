@@ -49,7 +49,7 @@ namespace SharpRTSPServer.Tests
 
         private static RTSPServer NewSavpServer(int port, out H264Track videoTrack, bool overrideSdp)
         {
-            var server = new RTSPServer(port, "admin", "password", false, null,
+            var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"), false, null,
                 SrtpCryptoSuites.AES_CM_128_HMAC_SHA1_80, null);
 
             videoTrack = new H264Track(Sps, Pps) { RtpProfile = RtpProfiles.SAVP };
@@ -172,7 +172,7 @@ namespace SharpRTSPServer.Tests
         public void AnAvpTrackIsStillSetUpWithoutADescribe()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, "admin", "password");
+            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
             var videoTrack = new H264Track(Sps, Pps);
             server.AddStreamSource(new RTSPStreamSource("stream1", videoTrack, null));
             server.StartListen();

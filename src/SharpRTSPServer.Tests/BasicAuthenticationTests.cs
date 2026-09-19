@@ -46,7 +46,7 @@ namespace SharpRTSPServer.Tests
         public BasicAuthenticationTests()
         {
             _port = TestPorts.FindFree();
-            _server = new RTSPServer(_port, UserName, Password);
+            _server = new RTSPServer(_port, new InMemoryUserRepository(UserName, Password));
             _server.AuthenticationScheme = RtspAuthenticationScheme.Basic;
             _server.AddStreamSource(new RTSPStreamSource(StreamId, new H264Track(Sps, Pps), null));
             _server.StartListen();
@@ -137,7 +137,7 @@ namespace SharpRTSPServer.Tests
         {
             int port = TestPorts.FindFree();
 
-            using var open = new RTSPServer(port, null, null);
+            using var open = new RTSPServer(port, (IUserRepository)null);
             open.AuthenticationScheme = RtspAuthenticationScheme.Basic;
             open.AddStreamSource(new RTSPStreamSource(StreamId, new H264Track(Sps, Pps), null));
             open.StartListen();

@@ -44,7 +44,7 @@ namespace SharpRTSPServer.Tests
         public void RepeatedWrongPasswordsFromOneAddressAreAnsweredSlowly()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, UserName, Password)
+            using var server = new RTSPServer(port, new InMemoryUserRepository(UserName, Password))
             {
                 FailedAuthenticationsBeforeDelay = 2,
                 FailedAuthenticationDelay = TimeSpan.FromSeconds(2),
@@ -77,7 +77,7 @@ namespace SharpRTSPServer.Tests
         public void GettingThePasswordRightClearsTheCountAgain()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, UserName, Password)
+            using var server = new RTSPServer(port, new InMemoryUserRepository(UserName, Password))
             {
                 FailedAuthenticationsBeforeDelay = 1,
                 FailedAuthenticationDelay = TimeSpan.FromSeconds(3),
@@ -116,7 +116,7 @@ namespace SharpRTSPServer.Tests
         public void MulticastIsOffUnlessItIsAskedFor()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, UserName, Password);
+            using var server = new RTSPServer(port, new InMemoryUserRepository(UserName, Password));
 
             Assert.IsFalse(server.MulticastEnabled,
                 "a group publishes the stream to the whole segment, so it is not something to do by default");
@@ -205,7 +205,7 @@ namespace SharpRTSPServer.Tests
         public void AnOutlandishRangeIsAnsweredRatherThanFailing()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, UserName, Password);
+            using var server = new RTSPServer(port, new InMemoryUserRepository(UserName, Password));
             server.AddStreamSource(new RTSPStreamSource("stream1", new H264Track(Sps, Pps), null));
             server.StartListen();
 

@@ -50,7 +50,7 @@ namespace SharpRTSPServer.Tests
         public void RtpInfoCarriesTheTimestampTheTrackHasReached()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, "admin", "password");
+            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
             var videoTrack = new H264Track(Sps, Pps);
             server.AddStreamSource(new RTSPStreamSource("stream1", videoTrack, null));
             server.StartListen();
@@ -87,7 +87,7 @@ namespace SharpRTSPServer.Tests
         public void ATrackThatHasProducedNothingNamesNoTimestamp()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, "admin", "password");
+            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
             server.AddStreamSource(new RTSPStreamSource("stream1", new H264Track(Sps, Pps), null));
             server.StartListen();
 
@@ -114,7 +114,7 @@ namespace SharpRTSPServer.Tests
         public void EachTrackReportsItsOwnClock()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, "admin", "password");
+            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
 
             var videoTrack = new H264Track(Sps, Pps);
             var audioTrack = new PCMUTrack();

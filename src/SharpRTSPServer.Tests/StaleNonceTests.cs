@@ -42,7 +42,7 @@ namespace SharpRTSPServer.Tests
 
         private static RTSPServer NewServer(int port, TimeSpan nonceLifetime)
         {
-            var server = new RTSPServer(port, UserName, Password) { NonceLifetime = nonceLifetime };
+            var server = new RTSPServer(port, new InMemoryUserRepository(UserName, Password)) { NonceLifetime = nonceLifetime };
             server.AddStreamSource(new RTSPStreamSource("stream1", new H264Track(Sps, Pps), null));
             server.StartListen();
             return server;
@@ -184,7 +184,7 @@ namespace SharpRTSPServer.Tests
             Assert.AreEqual(TimeSpan.Zero, RTSPServer.DEFAULT_NONCE_LIFETIME);
 
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, UserName, Password);
+            using var server = new RTSPServer(port, new InMemoryUserRepository(UserName, Password));
             server.AddStreamSource(new RTSPStreamSource("stream1", new H264Track(Sps, Pps), null));
             server.StartListen();
 

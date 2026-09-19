@@ -18,6 +18,7 @@
   <ItemGroup>
     <PackageReference Include="Haukcode.PcapngUtils" Version="1.4.104" />
     <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="10.0.12" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="10.0.12" />
   </ItemGroup>
 
   <ItemGroup>

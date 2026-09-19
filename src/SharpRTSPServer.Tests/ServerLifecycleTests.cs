@@ -58,7 +58,7 @@ namespace SharpRTSPServer.Tests
             int port = TestPorts.FindFree();
             var sockets = new List<TcpClient>();
 
-            using (var server = new RTSPServer(port, "admin", "password"))
+            using (var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password")))
             {
                 server.MaxConnections = 2;
                 server.AddStreamSource(NewStreamSource());
@@ -100,7 +100,7 @@ namespace SharpRTSPServer.Tests
             int port = TestPorts.FindFree();
             var sockets = new List<TcpClient>();
 
-            using (var server = new RTSPServer(port, "admin", "password"))
+            using (var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password")))
             {
                 server.MaxConnections = 0; // no limit
                 server.AddStreamSource(NewStreamSource());
@@ -177,7 +177,7 @@ namespace SharpRTSPServer.Tests
             int port = TestPorts.FindFree();
             TcpClient client;
 
-            using (var server = new RTSPServer(port, "admin", "password"))
+            using (var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password")))
             {
                 server.AddStreamSource(NewStreamSource());
                 server.StartListen();
@@ -199,7 +199,7 @@ namespace SharpRTSPServer.Tests
         [TestMethod]
         public void AddingTwoStreamSourcesWithTheSameIdIsRejected()
         {
-            using var server = new RTSPServer(TestPorts.FindFree(), "admin", "password");
+            using var server = new RTSPServer(TestPorts.FindFree(), new InMemoryUserRepository("admin", "password"));
             server.AddStreamSource(NewStreamSource("stream1"));
 
             // the second would be unreachable, since lookups match the first by ID
@@ -209,7 +209,7 @@ namespace SharpRTSPServer.Tests
         [TestMethod]
         public void StreamSourcesCanBeAddedAndRemoved()
         {
-            using var server = new RTSPServer(TestPorts.FindFree(), "admin", "password");
+            using var server = new RTSPServer(TestPorts.FindFree(), new InMemoryUserRepository("admin", "password"));
             var first = NewStreamSource("stream1");
             var second = NewStreamSource("stream2");
 
@@ -224,7 +224,7 @@ namespace SharpRTSPServer.Tests
         [TestMethod]
         public void GetStreamSourcesReturnsASnapshotRatherThanTheLiveList()
         {
-            using var server = new RTSPServer(TestPorts.FindFree(), "admin", "password");
+            using var server = new RTSPServer(TestPorts.FindFree(), new InMemoryUserRepository("admin", "password"));
             server.AddStreamSource(NewStreamSource("stream1"));
 
             var snapshot = server.GetStreamSources();
@@ -237,7 +237,7 @@ namespace SharpRTSPServer.Tests
         [TestMethod]
         public void AddStreamSourceRejectsNull()
         {
-            using var server = new RTSPServer(TestPorts.FindFree(), "admin", "password");
+            using var server = new RTSPServer(TestPorts.FindFree(), new InMemoryUserRepository("admin", "password"));
 
             Assert.ThrowsExactly<ArgumentNullException>(() => server.AddStreamSource(null));
             Assert.ThrowsExactly<ArgumentNullException>(() => server.RemoveStreamSource(null));
@@ -246,7 +246,7 @@ namespace SharpRTSPServer.Tests
         [TestMethod]
         public void CheckTimeoutsOnAnUnknownStreamReportsNothingInsteadOfThrowing()
         {
-            using var server = new RTSPServer(TestPorts.FindFree(), "admin", "password");
+            using var server = new RTSPServer(TestPorts.FindFree(), new InMemoryUserRepository("admin", "password"));
 
             server.CheckTimeouts("no-such-stream", out int count, out int playCount);
 
@@ -257,7 +257,7 @@ namespace SharpRTSPServer.Tests
         [TestMethod]
         public void FeedingRtpForAnUnknownStreamIsIgnoredInsteadOfThrowing()
         {
-            using var server = new RTSPServer(TestPorts.FindFree(), "admin", "password");
+            using var server = new RTSPServer(TestPorts.FindFree(), new InMemoryUserRepository("admin", "password"));
 
             var packets = RtpPackets.Take();
             packets.Rent(12);
@@ -276,8 +276,8 @@ namespace SharpRTSPServer.Tests
         [TestMethod]
         public void PortNumberIsValidated()
         {
-            Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => new RTSPServer(-1, "admin", "password"));
-            Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => new RTSPServer(70000, "admin", "password"));
+            Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => new RTSPServer(-1, new InMemoryUserRepository("admin", "password")));
+            Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => new RTSPServer(70000, new InMemoryUserRepository("admin", "password")));
         }
     }
 }
