@@ -30,14 +30,14 @@ using SharpSRTP.SRTP;
 namespace SharpRTSPClient.Tests
 {
     /// <summary>
-    /// The raw RTCP events hand out what the client made of the payload, not what arrived on the wire.
+    /// The raw RTCP event hands out what the client made of the payload, not what arrived on the wire.
     /// </summary>
     /// <remarks>
-    /// Three of the four raw data events passed the unprotected copy and one passed the buffer as it
-    /// arrived, so under SAVP a subscriber was given ciphertext for audio RTCP and plaintext for
-    /// everything else. Without SRTP the two are the same object, which is why it went unnoticed -
-    /// so these tests set a real context up and protect the packet, or they would not tell the
-    /// difference either.
+    /// Three of the four raw data events used to pass the unprotected copy and one passed the buffer
+    /// as it arrived, so under SAVP a subscriber was given ciphertext for audio RTCP and plaintext
+    /// for everything else. Without SRTP the two are the same object, which is why it went unnoticed
+    /// - so these tests set a real context up and protect the packet, or they would not tell the
+    /// difference either. The four events are now one, but the packet still has to arrive decrypted.
     /// </remarks>
     [TestClass]
     public sealed class RawRtcpEventTests
@@ -52,7 +52,7 @@ namespace SharpRTSPClient.Tests
             public void Dispose() { }
         }
 
-        /// <summary>A sender report, which is the packet type the RTCP handlers act on.</summary>
+        /// <summary>A sender report, which is the packet type the RTCP handler acts on.</summary>
         private static byte[] SenderReport()
         {
             var packet = new byte[28];
@@ -62,27 +62,15 @@ namespace SharpRTSPClient.Tests
             return packet;
         }
 
-        private static void SetContext(RTSPClient client, string propertyName, SrtpSessionContext context)
-        {
-            PropertyInfo property = typeof(RTSPClient).GetProperty(propertyName);
-            Assert.IsNotNull(property, propertyName + " is not where the test expects it");
-            property.SetValue(client, context);
-        }
-
-        private static void Raise(RTSPClient client, string handlerName, byte[] payload)
-        {
-            MethodInfo handler = typeof(RTSPClient).GetMethod(handlerName,
-                BindingFlags.Instance | BindingFlags.NonPublic);
-            Assert.IsNotNull(handler, handlerName + " is not where the test expects it");
-
-            var data = new RtspData(new Owner(payload), payload.Length);
-            handler.Invoke(client, new object[] { null, new RtspDataEventArgs(data) });
-        }
-
         /// <summary>
-        /// Drives one handler with a protected report and gives back what its event carried.
+        /// Hands a protected report to the receive path of a track and reports what the event carried.
         /// </summary>
-        private static (byte[] Plaintext, byte[] OnTheWire, byte[] Seen) Exchange(string contextProperty, string handlerName)
+        /// <remarks>
+        /// This used to name one of a pair of by-kind handlers and set VideoContext or AudioContext
+        /// by reflection. Both are gone - a track carries its own keys and its own index - so it
+        /// drives the one handler with the track it means.
+        /// </remarks>
+        private static (byte[] Plaintext, byte[] OnTheWire, byte[] Seen, int TrackIndex) Exchange(TrackKind kind)
         {
             // both ends of the same session share the keys, so what one protects the other unprotects
             SrtpKeys keys = SrtpProtocol.CreateMasterKeys(CryptoSuite, SrtpProtocol.GenerateMki(0));
@@ -93,35 +81,37 @@ namespace SharpRTSPClient.Tests
             byte[] onTheWire = RTSPClient.ProtectRtcp(sender, plaintext);
 
             using var client = new RTSPClient { ProcessRTCP = false };
-            SetContext(client, contextProperty, receiver);
+
+            ClientTrack track = client.AddTrack(kind);
+            track.Context = receiver;
 
             byte[] seen = null;
-            if (handlerName.StartsWith("Video"))
-            {
-                client.ReceivedRawVideoRTCP += (s, e) => seen = e.Data.ToArray();
-            }
-            else
-            {
-                client.ReceivedRawAudioRTCP += (s, e) => seen = e.Data.ToArray();
-            }
+            int trackIndex = -1;
+            client.ReceivedRawRTCP += (s, e) => { seen = e.Data.Data.ToArray(); trackIndex = e.TrackIndex; };
 
-            Raise(client, handlerName, onTheWire.ToArray());
-            return (plaintext, onTheWire, seen);
+            MethodInfo handler = typeof(RTSPClient).GetMethod("RtcpControlDataReceived",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.IsNotNull(handler, "RtcpControlDataReceived is not where the test expects it");
+
+            var data = new RtspData(new Owner(onTheWire.ToArray()), onTheWire.Length);
+            handler.Invoke(client, new object[] { track, null, new RtspDataEventArgs(data) });
+
+            return (plaintext, onTheWire, seen, trackIndex);
         }
 
         [TestMethod]
-        public void TheVideoRtcpEventCarriesTheUnprotectedReport()
+        public void TheRtcpEventCarriesTheUnprotectedReportForAVideoTrack()
         {
-            var exchange = Exchange("VideoContext", "VideoRtcpControlDataReceived");
+            var exchange = Exchange(TrackKind.Video);
 
             Assert.IsNotNull(exchange.Seen, "the event should have been raised");
             CollectionAssert.AreEqual(exchange.Plaintext, exchange.Seen);
         }
 
         [TestMethod]
-        public void TheAudioRtcpEventCarriesTheUnprotectedReport()
+        public void TheRtcpEventCarriesTheUnprotectedReportForAnAudioTrack()
         {
-            var exchange = Exchange("AudioContext", "AudioRtcpControlDataReceived");
+            var exchange = Exchange(TrackKind.Audio);
 
             Assert.IsNotNull(exchange.Seen, "the event should have been raised");
             CollectionAssert.AreNotEqual(exchange.OnTheWire, exchange.Seen,
@@ -130,10 +120,18 @@ namespace SharpRTSPClient.Tests
         }
 
         [TestMethod]
+        public void TheEventSaysWhichTrackTheReportArrivedOn()
+        {
+            var exchange = Exchange(TrackKind.Audio);
+
+            Assert.AreEqual(0, exchange.TrackIndex, "the only track set up is the first one");
+        }
+
+        [TestMethod]
         public void TheProtectedAndUnprotectedFormsReallyDiffer()
         {
-            // otherwise the two tests above would pass whatever the handlers did
-            var exchange = Exchange("AudioContext", "AudioRtcpControlDataReceived");
+            // otherwise the tests above would pass whatever the handler did
+            var exchange = Exchange(TrackKind.Audio);
 
             CollectionAssert.AreNotEqual(exchange.Plaintext, exchange.OnTheWire,
                 "the test is not exercising SRTP at all if these match");

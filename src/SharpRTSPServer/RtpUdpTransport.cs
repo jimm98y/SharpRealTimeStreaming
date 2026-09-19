@@ -1,3 +1,24 @@
+// SharpRTSPServer
+// Copyright (C) 2026 Lukas Volf
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 using Microsoft.Extensions.Logging;
 using Rtsp;
 using Rtsp.Messages;
@@ -135,6 +156,75 @@ namespace SharpRTSPServer
         {
             _controlEndPoint = Resolve(hostname, port);
             ApplyMulticast(_controlSocket, _controlEndPoint);
+        }
+
+        /// <summary>
+        /// Whether packets arriving from somewhere other than where this session's media is sent are
+        /// discarded. On by default.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// These ports are open to anything that can reach them, and what arrives on them is taken
+        /// as the client's: it refreshes the session's keepalive and its reception reports are
+        /// believed. The range is a few hundred well known ports, so without this an off-path
+        /// attacker who can guess one can hold a session open past the idle sweep for as long as it
+        /// likes, and feed whatever loss and jitter figures it chooses to anything acting on them.
+        /// </para>
+        /// <para>
+        /// The address is matched, not the port: RFC 3550 lets a receiver send its reports from a
+        /// port of its own choosing, and many do. It is not a defence against an attacker who can
+        /// spoof the client's source address - nothing short of SRTP is - but it does mean one has
+        /// to.
+        /// </para>
+        /// </remarks>
+        public bool FilterBySourceAddress { get; set; } = true;
+
+        /// <summary>
+        /// Whether a datagram from this address is one this transport should act on.
+        /// </summary>
+        private bool IsExpectedSource(EndPoint from, IPEndPoint destination)
+        {
+            if (!FilterBySourceAddress || destination == null)
+            {
+                return true;
+            }
+
+            // A group is sent to, never received from, so nothing arriving is the group's.
+            if (IsMulticast(destination.Address))
+            {
+                return true;
+            }
+
+            if (!(from is IPEndPoint source))
+            {
+                return true;
+            }
+
+            return SameHost(source.Address, destination.Address);
+        }
+
+        /// <summary>
+        /// Whether two addresses name the same machine, allowing for the two ways an IPv4 one can be
+        /// written when a dual mode socket is in play.
+        /// </summary>
+        internal static bool SameHost(IPAddress left, IPAddress right)
+        {
+            if (left == null || right == null)
+            {
+                return false;
+            }
+
+            if (left.IsIPv4MappedToIPv6)
+            {
+                left = left.MapToIPv4();
+            }
+
+            if (right.IsIPv4MappedToIPv6)
+            {
+                right = right.MapToIPv4();
+            }
+
+            return left.Equals(right);
         }
 
         /// <summary>
@@ -277,14 +367,16 @@ namespace SharpRTSPServer
                 throw new InvalidOperationException("This transport has already been started.");
             }
 
-            _dataReader = Read(_dataSocket, DataPort, args => DataReceived?.Invoke(this, args));
-            _controlReader = Read(_controlSocket, ControlPort, args => ControlReceived?.Invoke(this, args));
+            // The destination is read per datagram rather than captured, because SETUP sets it after
+            // the transport is built and a repeated SETUP may move it.
+            _dataReader = Read(_dataSocket, DataPort, () => _dataEndPoint, args => DataReceived?.Invoke(this, args));
+            _controlReader = Read(_controlSocket, ControlPort, () => _controlEndPoint, args => ControlReceived?.Invoke(this, args));
         }
 
         /// <summary>
         /// Hands on whatever arrives, until the socket is closed.
         /// </summary>
-        private Task Read(UdpClient socket, int port, Action<RtspDataEventArgs> handler)
+        private Task Read(UdpClient socket, int port, Func<IPEndPoint> destination, Action<RtspDataEventArgs> handler)
         {
             // A thread of its own rather than a pooled one: it spends its life waiting on a socket.
             return Task.Factory.StartNew(() =>
@@ -309,6 +401,15 @@ namespace SharpRTSPServer
 
                     if (size <= 0)
                     {
+                        continue;
+                    }
+
+                    // Before anything is made of it. What arrives here is taken as the client's, and
+                    // this port is reachable by anything that can route to it.
+                    if (!IsExpectedSource(from, destination()))
+                    {
+                        _logger?.LogDebug("Discarding a datagram on UDP port {port} from {from}, which is not where this session's media goes",
+                            port, from);
                         continue;
                     }
 

@@ -50,36 +50,11 @@ namespace SharpRTSPServer
         /// </remarks>
         public IReadOnlyList<ITrack> Tracks => _tracks;
 
-        /// <summary>
-        /// The first video track, if there is one.
-        /// </summary>
-        /// <remarks>
-        /// Here because a stream with one of each is the ordinary case and this is how it was always
-        /// reached. Where a stream carries more than one, <see cref="Tracks"/> is what sees them all.
-        /// </remarks>
-        public ITrack VideoTrack
-        {
-            get => FirstOf(TrackType.Video);
-            set => Replace(TrackType.Video, value);
-        }
-
-        /// <summary>
-        /// Audio track.
-        /// </summary>
-        public ITrack AudioTrack
-        {
-            get => FirstOf(TrackType.Audio);
-            set => Replace(TrackType.Audio, value);
-        }
-
-        /// <summary>
-        /// The first metadata track, if there is one.
-        /// </summary>
-        public ITrack MetadataTrack
-        {
-            get => FirstOf(TrackType.Metadata);
-            set => Replace(TrackType.Metadata, value);
-        }
+        // VideoTrack, AudioTrack and MetadataTrack used to live here: the first track of each kind,
+        // from when a stream was one video and one audio. A stream is however many tracks it has, so
+        // "the video track" is a question with no answer once there are two of them - and the
+        // properties answered it anyway, with whichever came first. Use Tracks, TrackById or
+        // AddTrack, all of which say which track they mean.
 
         /// <summary>
         /// Adds a track to this stream.
@@ -128,48 +103,6 @@ namespace SharpRTSPServer
             }
 
             return null;
-        }
-
-        private ITrack FirstOf(TrackType kind)
-        {
-            foreach (ITrack track in _tracks)
-            {
-                if (track.Kind == kind)
-                {
-                    return track;
-                }
-            }
-
-            return null;
-        }
-
-        /// <summary>
-        /// Puts a track in the place of the first one of its kind, for the properties that name one.
-        /// </summary>
-        private void Replace(TrackType kind, ITrack track)
-        {
-            ITrack existing = FirstOf(kind);
-
-            if (existing != null)
-            {
-                int at = _tracks.IndexOf(existing);
-
-                if (track == null)
-                {
-                    _tracks.RemoveAt(at);
-                }
-                else
-                {
-                    _tracks[at] = track;
-                }
-
-                return;
-            }
-
-            if (track != null)
-            {
-                AddTrack(track);
-            }
         }
 
         /// <summary>
@@ -476,11 +409,6 @@ namespace SharpRTSPServer
             return true;
         }
 
-        public RTSPStreamSource(string streamID, ITrack rtspVideoTrack, ITrack rtspAudioTrack)
-            : this(streamID, Without(null, rtspVideoTrack, rtspAudioTrack))
-        {
-        }
-
         /// <param name="streamID">What a client names this stream by in a request URI.</param>
         /// <param name="tracks">The tracks this stream carries, in the order they belong in the SDP.</param>
         public RTSPStreamSource(string streamID, params ITrack[] tracks)
@@ -508,8 +436,6 @@ namespace SharpRTSPServer
                 }
             }
         }
-
-        private static IEnumerable<ITrack> Without(ITrack _, params ITrack[] tracks) => tracks;
 
         public void OverrideSDP(string sdp, bool mungleSDP = true)
         {
@@ -604,16 +530,6 @@ namespace SharpRTSPServer
         /// the client had never used. The section is matched by its media type rather than its
         /// position, so an SDP that lists audio first is read the right way round.
         /// </remarks>
-        /// <summary>
-        /// The control URL of the first track of a kind, for streams that carry one of each.
-        /// </summary>
-        public string GetTrackControl(TrackType trackType)
-        {
-            ITrack track = FirstOf(trackType);
-
-            return track == null ? null : GetTrackControl(track);
-        }
-
         /// <summary>
         /// The control URL a client uses to set up this particular track.
         /// </summary>

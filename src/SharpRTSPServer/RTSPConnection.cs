@@ -132,31 +132,19 @@ namespace SharpRTSPServer
             set { _play = value; }
         }
 
-        /// <summary>
-        /// SSRC of whichever track was set up last on this connection.
-        /// </summary>
-        /// <remarks>
-        /// A connection carries one RTP stream per track and each has its own SSRC, so a single value
-        /// here can only ever describe one of them. Read <see cref="RTPStream.SSRC"/> off the stream
-        /// you mean instead. Still assigned so that existing readers see what they always saw.
-        /// </remarks>
-        [Obsolete("A connection has one SSRC per stream. Use RTPStream.SSRC on Video, Audio or Streams[i].")]
-        public uint SSRC { get; set; }
+        // SSRC used to live here, as the SSRC of whichever track was set up last - a single value
+        // describing one of however many streams a connection carries. Read RTPStream.SSRC off the
+        // stream you mean, from Streams or StreamOrNull.
 
         /// <summary>
         /// RTSP Session ID used with this client connection.
         /// </summary>
         public string SessionId { get; set; } = "";
 
-        /// <summary>
-        /// Video stream.
-        /// </summary>
-        public RTPStream Video { get { return StreamFor((int)TrackType.Video); } }
-
-        /// <summary>
-        /// Audio stream.
-        /// </summary>
-        public RTPStream Audio { get { return StreamFor((int)TrackType.Audio); } }
+        // Video and Audio used to live here, reading Streams[0] and Streams[1] under the names of
+        // kinds. They were only ever the right streams for a stream of one video and one audio, and
+        // a track's ID is its place in the stream rather than what sort of media it carries. Use
+        // Streams, or StreamOrNull with the track ID you mean.
 
         private RTPStream[] _streams = new RTPStream[0];
 

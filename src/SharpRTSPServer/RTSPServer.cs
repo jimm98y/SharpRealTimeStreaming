@@ -1,3 +1,24 @@
+// SharpRTSPServer
+// Copyright (C) 2026 Lukas Volf
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 using Microsoft.Extensions.Logging;
 using Rtsp;
 using Rtsp.Messages;
@@ -246,6 +267,105 @@ namespace SharpRTSPServer
         /// </summary>
         public event EventHandler<RtspMessageEventArgs> ReceivedRtspMessage;
 
+        /// <summary>
+        /// Where this server says what it is doing and what it could not do.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// This server's own, not the process's. It used to be a static class, so two servers in one
+        /// program wrote to the same place and switching trace on for a noisy one switched it on for
+        /// all of them. Assign <see cref="NullLog.Instance"/> for a server that should say
+        /// nothing, or an <see cref="ILog"/> of your own to send it somewhere.
+        /// </para>
+        /// <para>
+        /// Ignored when an <see cref="ILoggerFactory"/> was passed to the constructor: that is the
+        /// host saying where its logging goes, and this would be a second answer to the same
+        /// question. Can be assigned at any time, including while the server is running.
+        /// </para>
+        /// </remarks>
+        public ILog Logger
+        {
+            get { return _ownLogger; }
+            set
+            {
+                _ownLogger = value;
+
+                // The tracks report where the server does, and this can be assigned at any time, so
+                // the ones already added are brought along rather than left pointing at the old one.
+                lock (_connectionList)
+                {
+                    foreach (RTSPStreamSource streamSource in StreamSources)
+                    {
+                        foreach (ITrack track in streamSource.Tracks)
+                        {
+                            if (track is TrackBase known)
+                            {
+                                known.Logger = value;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        private ILog _ownLogger = new DefaultLog();
+
+        /// <summary>
+        /// Raised once a request has authenticated, to ask whether that client may have the stream
+        /// it is asking for.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Authentication says who a client is and nothing about what it is entitled to. Without a
+        /// handler here the two are the same thing: any client that knows the password reaches every
+        /// stream the server offers, which is what this server did before this existed and what it
+        /// still does when nobody subscribes.
+        /// </para>
+        /// <para>
+        /// A handler refuses by calling <see cref="StreamAuthorizationEventArgs.Deny"/>. It is
+        /// raised for every request that names a stream - DESCRIBE, SETUP, PLAY and the rest - and
+        /// before the connection is attached to the stream, so a refused client is never sent any of
+        /// its media. It is not raised for OPTIONS, which is about the server rather than any one
+        /// stream.
+        /// </para>
+        /// <para>
+        /// It runs on the connection's own receive thread, so a handler that blocks holds up that
+        /// client and no other. One that throws is logged and the request refused - a handler that
+        /// cannot decide must not be a way in.
+        /// </para>
+        /// </remarks>
+        public event EventHandler<StreamAuthorizationEventArgs> AuthorizeStream;
+
+        /// <summary>
+        /// Counts failed authentication attempts per address, so guessing is slow.
+        /// </summary>
+        private readonly AuthenticationThrottle _authenticationThrottle = new AuthenticationThrottle();
+
+        /// <summary>
+        /// How many times in a row an address may fail to authenticate before its failures start
+        /// being answered slowly. Five by default; zero turns the throttle off.
+        /// </summary>
+        /// <remarks>
+        /// A wrong password already costs the client its connection, but reconnecting is cheap, so
+        /// on its own that bounds nothing. See <see cref="AuthenticationThrottle"/>.
+        /// </remarks>
+        public int FailedAuthenticationsBeforeDelay
+        {
+            get { return _authenticationThrottle.Failures; }
+            set { _authenticationThrottle.Failures = value; }
+        }
+
+        /// <summary>
+        /// How long a failed attempt from an address past
+        /// <see cref="FailedAuthenticationsBeforeDelay"/> is held before it is refused. One second
+        /// by default; zero turns the throttle off.
+        /// </summary>
+        public TimeSpan FailedAuthenticationDelay
+        {
+            get { return _authenticationThrottle.Delay; }
+            set { _authenticationThrottle.Delay = value; }
+        }
+
         public string SrtpCryptoSuite { get; set; } = null;
 
         /// <summary>
@@ -421,11 +541,22 @@ namespace SharpRTSPServer
         /// Whether a client may ask to be sent the media over multicast.
         /// </summary>
         /// <remarks>
-        /// On, because a server that refuses sends every client its own copy of the same frames. Turn
-        /// it off on a network where sending to a group is unwelcome; clients then fall back to a
-        /// transport of their own, as they did when it was not implemented.
+        /// <para>
+        /// Off by default. A group is not a client: once one is open the media goes onto the local
+        /// segment, where anyone who joins the group and listens on the port receives it, with no
+        /// authentication of any kind at the RTP layer. So a single client that authenticates can
+        /// make the server publish the stream to everything on the link - which is what multicast
+        /// is for, but not something to do because a client asked.
+        /// </para>
+        /// <para>
+        /// Turn it on where that is the intent. <see cref="MulticastTimeToLive"/> keeps it on the
+        /// local link, and pairing it with SAVP and
+        /// <see cref="RTSPStreamSource.SharedSrtpKey"/> means only clients that were given the key
+        /// can read what the group carries. Clients refused a group fall back to a transport of
+        /// their own, as they did when it was not implemented.
+        /// </para>
         /// </remarks>
-        public bool MulticastEnabled { get; set; } = true;
+        public bool MulticastEnabled { get; set; } = false;
 
         /// <summary>
         /// The group the media is sent to.
@@ -522,7 +653,7 @@ namespace SharpRTSPServer
             int portNumber,
             string userName,
             string password)
-            : this(portNumber, userName, password, null)
+            : this(portNumber, userName, password, (ILoggerFactory)null)
         { }
 
         /// <summary>
@@ -589,8 +720,9 @@ namespace SharpRTSPServer
 
             Contract.EndContractBlock();
 
+            // Over this server's own logger, read per message, so assigning Logger later works.
             if (loggerFactory == null)
-                loggerFactory = new CustomLoggerFactory();
+                loggerFactory = new CustomLoggerFactory(() => Logger);
 
             _loggerFactory = loggerFactory;
             _logger = loggerFactory.CreateLogger<RTSPServer>();
@@ -777,6 +909,8 @@ namespace SharpRTSPServer
                 throw new InvalidOperationException("The server is already listening. Call StopListen before starting it again.");
             }
 
+            ArmTunnelHandshakeTimeout();
+
             _serverListener.Start();
             _stopping = new CancellationTokenSource();
             _writers = _writers ?? new RtpWriterPool(_logger, MaxWriterThreads);
@@ -799,14 +933,67 @@ namespace SharpRTSPServer
             }
         }
 
+        /// <summary>
+        /// Bounds the handshake the HTTP tunnel reads inside its accept.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Every other arrangement lets the handshake happen away from the accept loop, under
+        /// <see cref="HandshakeTimeout"/> - see <see cref="HandshakeAndAdmitAsync"/>. The tunnel
+        /// cannot: reading the HTTP request that opens it is the library's, and it happens inside
+        /// the accept. So a client that connected and then said nothing held the loop and nobody
+        /// else got in at all - one socket, no credentials, and the server stopped accepting while
+        /// everything already connected carried on, so nothing looked wrong from the outside.
+        /// </para>
+        /// <para>
+        /// A receive timeout on the listening socket is inherited by the sockets accepted from it,
+        /// and it applies to blocking reads - which is what that handshake is - so the read gives up
+        /// rather than waiting for ever. It does not apply to overlapped reads, which is what the
+        /// RTSP session that follows uses, so a connection that gets as far as being a session is
+        /// unaffected and the sixty second RTSP timeout still governs it.
+        /// </para>
+        /// <para>
+        /// Windows inherits these on accept. Where a platform does not, the tunnel is back to
+        /// relying on whatever the client does, so prefer a plain TLS listener if that matters.
+        /// </para>
+        /// </remarks>
+        private void ArmTunnelHandshakeTimeout()
+        {
+            if (!UseHttpTunnel || HandshakeTimeout <= TimeSpan.Zero)
+            {
+                return;
+            }
+
+            double milliseconds = HandshakeTimeout.TotalMilliseconds;
+            int timeout = milliseconds >= int.MaxValue ? int.MaxValue : (int)milliseconds;
+
+            try
+            {
+                _tcpListener.Server.ReceiveTimeout = timeout;
+                _tcpListener.Server.SendTimeout = timeout;
+            }
+            catch (Exception ex)
+            {
+                // Not fatal: the server still works, it is just back to being held up by a client
+                // that connects and says nothing.
+                _logger.LogWarning(ex, "Could not put a {timeout}ms timeout on the HTTP tunnel handshake", timeout);
+            }
+        }
+
         private void ReapIdleConnectionsSafely()
         {
             try
             {
+                var pending = new List<PendingTeardown>();
+
                 lock (_connectionList)
                 {
-                    ReapIdleConnections();
+                    ReapIdleConnections(pending);
                 }
+
+                // Outside the lock. This is the sweep that drops stalled clients, and each one of
+                // those is a wait - doing them here rather than above is the whole point.
+                FinishTeardowns(pending);
             }
             catch (Exception ex)
             {
@@ -1037,11 +1224,12 @@ namespace SharpRTSPServer
 
             // Add the RtspListener to the RTSPConnections List
             bool accepted;
+            var sweptAway = new List<PendingTeardown>();
             lock (_connectionList)
             {
                 // sweep first, so that connections that have already gone away do not count
                 // towards the limit and keep a legitimate client out
-                ReapIdleConnections();
+                ReapIdleConnections(sweptAway);
 
                 accepted = MaxConnections <= 0 || _connectionList.Count < MaxConnections;
                 if (accepted)
@@ -1049,6 +1237,11 @@ namespace SharpRTSPServer
                     _connectionList.Add(candidate);
                 }
             }
+
+            // Off this thread. This is the accept loop, and shutting a stalled session down waits
+            // for its writer - doing that here would make the next client wait for the last one to
+            // come apart, which is the stall moved rather than removed.
+            FinishTeardownsInBackground(sweptAway);
 
             if (!accepted)
             {
@@ -1073,13 +1266,17 @@ namespace SharpRTSPServer
         /// </summary>
         private void DropConnection(RtspListener listener)
         {
+            var pending = new List<PendingTeardown>();
+
             lock (_connectionList)
             {
                 foreach (RTSPConnection connection in _connectionList.Where(c => c.Listener == listener).ToArray())
                 {
-                    RemoveSession(connection);
+                    DetachSession(connection, pending);
                 }
             }
+
+            FinishTeardowns(pending);
         }
 
         /// <summary>
@@ -1324,6 +1521,13 @@ namespace SharpRTSPServer
             // One snapshot for the whole check, so a scheme change cannot validate against one scheme
             // and then challenge with the other.
             Authentication[] authentications = _authentications;
+
+            // Null on a server with no credentials configured, which is one that does not
+            // authenticate at all. Otherwise it is the user the request proved it is, which is the
+            // only thing about the client worth handing to an authorization handler.
+            string authenticatedUser = null;
+            string throttleKey = AuthenticationThrottle.KeyFor(listener.RemoteEndPoint);
+
             if (authentications.Length > 0)
             {
                 // Challenge with the newest, but accept any that is still within its grace period.
@@ -1331,16 +1535,32 @@ namespace SharpRTSPServer
 
                 if (message.Headers.ContainsKey("Authorization"))
                 {
-                    // The Header contained Authorization
-                    // Check the message has the correct Authorization
-                    // If it does not have the correct Authorization then close the RTSP connection
-                    if (!authentications.Any(candidate => candidate.IsValid(message)))
+                    // The Header contained Authorization. A correct answer lets the request
+                    // through; a wrong one costs the client its connection, and a merely expired
+                    // nonce gets a fresh challenge on the connection it already has.
+                    if (authentications.Any(candidate => candidate.IsValid(message)))
+                    {
+                        // It got the password right, so it starts clean again - an honest client
+                        // that mistyped once is not left being answered slowly.
+                        _authenticationThrottle.Succeeded(throttleKey);
+                        authenticatedUser = _credentials?.UserName;
+                    }
+                    else
                     {
                         // Answering correctly under a nonce we no longer hold is not a failed login,
                         // it is a session that has outlived the nonce it started with. RFC 2617 calls
                         // that stale: the client redoes the digest against the new nonce and carries
                         // on, and only a client that cannot do that is any worse off than before.
                         bool staleNonce = HasStaleNonce(message);
+
+                        // A nonce that has merely expired is not a wrong password, so it is not
+                        // counted and not delayed - the client is entitled to answer the new
+                        // challenge and carry on.
+                        if (!staleNonce)
+                        {
+                            _authenticationThrottle.Failed(throttleKey);
+                            DelayFailedAuthentication(throttleKey);
+                        }
 
                         RtspResponse authorizationResponse = message.CreateResponse();
                         authorizationResponse.AddHeader("WWW-Authenticate: " + authentication.GetServerResponse()
@@ -1357,17 +1577,21 @@ namespace SharpRTSPServer
                             return;
                         }
 
-                        // Go through RemoveSession rather than just dropping it from the list. A
+                        // Taken off the books properly rather than just dropped from the list. A
                         // connection that had already started playing is also in the stream source's
                         // list and owns UDP sockets; leaving those behind kept it streaming to nobody,
                         // invisible to both the idle sweep and the connection limit.
+                        var unauthorized = new List<PendingTeardown>();
+
                         lock (_connectionList)
                         {
                             foreach (var staleConnection in _connectionList.Where(c => c.Listener == listener).ToArray())
                             {
-                                RemoveSession(staleConnection);
+                                DetachSession(staleConnection, unauthorized);
                             }
                         }
+
+                        FinishTeardowns(unauthorized);
 
                         listener.Dispose();
                         return;
@@ -1432,6 +1656,13 @@ namespace SharpRTSPServer
                 RtspResponse notFoundResponse = message.CreateResponse();
                 notFoundResponse.ReturnCode = 404;
                 listener.SendMessage(notFoundResponse);
+                return;
+            }
+
+            // Before the connection is attached to the stream below, which is what would start it
+            // being sent the media.
+            if (!IsAuthorizedForStream(listener, message, streamSource.StreamID, authenticatedUser))
+            {
                 return;
             }
 
@@ -1514,7 +1745,13 @@ namespace SharpRTSPServer
                                 .Where(x => x.stream != null)
                                 .Select(x =>
                                 {
-                                    string entry = $"url={TrackControlUri(message.RtspUri, streamSource.GetTrackControl((TrackType)x.trackId))};seq={x.stream.SequenceNumber}";
+                                    // The track with this ID, not the first track of the kind that
+                                    // ID happens to cast to. Casting it meant a stream with two
+                                    // video tracks reported the second one under the first audio
+                                    // track's control URL, or under the session URL when there was
+                                    // no audio track to find.
+                                    string control = streamSource.GetTrackControl(streamSource.TrackById(x.trackId));
+                                    string entry = $"url={TrackControlUri(message.RtspUri, control)};seq={x.stream.SequenceNumber}";
 
                                     if (streamSource.TryGetLastRtpTimestamp(x.trackId, out uint rtpTimestamp))
                                     {
@@ -1651,10 +1888,8 @@ namespace SharpRTSPServer
                         // TEARDOWN, and RemoveSession disposes this listener as part of the cleanup.
                         listener.SendMessage(message.CreateResponse());
 
-                        lock (_connectionList)
-                        {
-                            RemoveSession(connection);
-                        }
+                        RemoveSession(connection);
+
                         RaiseReceivedRtspMessage(sender, new RtspMessageEventArgs(message, connection));
                     }
                     return;
@@ -1669,6 +1904,92 @@ namespace SharpRTSPServer
                     }
                     return;
             }
+        }
+
+        /// <summary>
+        /// Holds a failed attempt for as long as the throttle says, before it is answered.
+        /// </summary>
+        /// <remarks>
+        /// On the connection's own receive thread, so it delays this client and nothing else. That
+        /// is the whole mechanism: the cost of a guess is paid by whoever is guessing.
+        /// </remarks>
+        private void DelayFailedAuthentication(string throttleKey)
+        {
+            TimeSpan delay = _authenticationThrottle.DelayFor(throttleKey);
+
+            if (delay <= TimeSpan.Zero)
+            {
+                return;
+            }
+
+            _logger.LogDebug("Holding a failed authentication from {address} for {delay}", throttleKey, delay);
+
+            try
+            {
+                Thread.Sleep(delay);
+            }
+            catch (ThreadInterruptedException)
+            {
+                // the server is going away, which is a fine reason to stop waiting
+            }
+        }
+
+        /// <summary>
+        /// Asks whoever is listening whether this client may have this stream, and answers the
+        /// client itself if the answer is no.
+        /// </summary>
+        /// <returns>True if the request should go ahead.</returns>
+        private bool IsAuthorizedForStream(RtspListener listener, RtspRequest message, string streamId, string authenticatedUser)
+        {
+            EventHandler<StreamAuthorizationEventArgs> handler = AuthorizeStream;
+
+            if (handler == null)
+            {
+                // Nobody is deciding, so authentication is the only gate - which is what this server
+                // did before there was anywhere to decide.
+                return true;
+            }
+
+            var args = new StreamAuthorizationEventArgs(streamId, message, listener.RemoteEndPoint, authenticatedUser);
+
+            try
+            {
+                handler(this, args);
+            }
+            catch (Exception ex)
+            {
+                // A handler that cannot answer must not be a way in. This is the one place where
+                // swallowing an exception from someone else's code would hand out the thing it was
+                // asked to protect, so this one refuses instead.
+                _logger.LogError(ex, "An AuthorizeStream handler threw for {streamID}, refusing the request", streamId);
+                args.Deny(500);
+            }
+
+            if (args.IsAuthorized)
+            {
+                return true;
+            }
+
+            _logger.LogWarning("Refusing {method} on {streamID} from {remoteEndPoint} for {user}: not authorized",
+                message.RequestTyped, streamId, listener.RemoteEndPoint, authenticatedUser ?? "an unauthenticated client");
+
+            RtspResponse denied = message.CreateResponse();
+            denied.ReturnCode = args.DeniedStatusCode;
+
+            // A 401 is an invitation to try again as somebody else, so it carries the challenge that
+            // says how. Anything else is final and does not.
+            if (args.DeniedStatusCode == 401)
+            {
+                Authentication[] authentications = _authentications;
+
+                if (authentications.Length > 0)
+                {
+                    denied.AddHeader("WWW-Authenticate: " + authentications[0].GetServerResponse());
+                }
+            }
+
+            listener.SendMessage(denied);
+            return false;
         }
 
         private void HandleSetup(RtspListener listener, RtspRequestSetup setupMessage)
@@ -2012,9 +2333,6 @@ namespace SharpRTSPServer
                     // and the reply has to name the one it will actually hear
                     transportReply.SSrc = stream.SSRC.ToString("X8");
                     stream.RequiresSrtp = setupTrack.RtpProfile == RtpProfiles.SAVP;
-#pragma warning disable CS0618 // kept in step for anyone still reading the obsolete connection-wide value
-                    connection.SSRC = trackSSRC;
-#pragma warning restore CS0618
 
                     // a repeated SETUP for the same track would otherwise leak the sockets of the previous one
                     if (stream.RtpChannel != null && !ReferenceEquals(stream.RtpChannel, rtpTransport))
@@ -2128,6 +2446,8 @@ namespace SharpRTSPServer
                     "Pass one to the RTSPServer constructor, or leave the track on AVP.");
             }
 
+            WarnIfSrtpKeysTravelInTheClear();
+
             // A stream whose key belongs to the stream derives it once and announces the same one to
             // everybody, which is the only way a group can read what is sent to it. The client's own
             // stream is given the same keys, so that the SETUP which follows can tell this client has
@@ -2155,6 +2475,40 @@ namespace SharpRTSPServer
 
             // https://www.rfc-editor.org/rfc/rfc4568.txt
             return $"a=crypto:1 {SrtpCryptoSuite} inline:{Convert.ToBase64String(masterKeySalt)}{optionalMki}";
+        }
+
+        /// <summary>
+        /// Whether the warning about SRTP keys on a plaintext connection has already been given.
+        /// </summary>
+        private int _warnedAboutSrtpInTheClear;
+
+        /// <summary>
+        /// Says, once, that the keys this server is about to hand out are not protected on the way.
+        /// </summary>
+        /// <remarks>
+        /// SRTP as RFC 4568 describes it puts the master key in the SDP, so the DESCRIBE that
+        /// carries it has to be encrypted or the key is readable by anyone on the path - and with
+        /// the key, so is every packet it protects. Configured without a TLS certificate, the
+        /// encryption is therefore decorative, and nothing downstream would report it. The same
+        /// warning is given for Basic authentication without TLS, and for the same reason.
+        /// </remarks>
+        private void WarnIfSrtpKeysTravelInTheClear()
+        {
+            if (TlsCertificate != null)
+            {
+                return;
+            }
+
+            // Once per server. This is reached from DESCRIBE, so per client and per track otherwise.
+            if (Interlocked.Exchange(ref _warnedAboutSrtpInTheClear, 1) != 0)
+            {
+                return;
+            }
+
+            _logger.LogWarning(
+                "SRTP is configured but this server has no TLS certificate. The master key is carried in the SDP, " +
+                "so anyone who can read the DESCRIBE can read the media it protects. Configure a TLS certificate " +
+                "and offer the stream over rtsps://.");
         }
 
         /// <summary>
@@ -2355,7 +2709,23 @@ namespace SharpRTSPServer
 
             lock (_connectionList)
             {
-                return _connectionList.Find(c => c.Video.RtpChannel == rtpTransport || c.Audio.RtpChannel == rtpTransport);
+                // Every stream, not just the first two. This used to read the connection's Video and
+                // Audio properties, which are Streams[0] and Streams[1] - so RTCP arriving on the
+                // UDP pair of any track after those two found no connection at all: its keepalive
+                // was never refreshed, so the idle sweep dropped a session whose client was talking,
+                // and its reception reports were thrown away.
+                foreach (RTSPConnection connection in _connectionList)
+                {
+                    foreach (RTPStream stream in connection.Streams)
+                    {
+                        if (stream.RtpChannel == rtpTransport)
+                        {
+                            return connection;
+                        }
+                    }
+                }
+
+                return null;
             }
         }
 
@@ -2401,10 +2771,7 @@ namespace SharpRTSPServer
             if (!TrySendRawRTP(connection, stream, rtpPackets, preserveSourceHeaders))
             {
                 // outside the send lock: see RTSPConnection.SendLock for why that order matters
-                lock (_connectionList)
-                {
-                    RemoveSession(connection);
-                }
+                RemoveSession(connection);
             }
         }
 
@@ -2473,10 +2840,7 @@ namespace SharpRTSPServer
             // outside the send lock: see RTSPConnection.SendLock for why that order matters
             if (dropConnection)
             {
-                lock (_connectionList)
-                {
-                    RemoveSession(connection);
-                }
+                RemoveSession(connection);
             }
         }
 
@@ -2958,7 +3322,20 @@ namespace SharpRTSPServer
 
                     rtpPacket.CopyTo(rtp);
                     int ret = stream.Context.ProtectRtp(rtp, rtpPacket.Length, out var len);
-                    if (ret != 0) throw new Exception("Protect failed!");
+
+                    if (ret != 0)
+                    {
+                        // Not an exception. One thrown here unwound into the writer pool, which logs
+                        // at Debug and moves on - so a stream that could no longer be protected went
+                        // quiet with nothing said at any level anyone runs in production, and the
+                        // connection stayed open sending nothing. It cannot be sent unprotected, so
+                        // the honest outcome is to say so and drop the client.
+                        _logger.LogError(
+                            "SRTP could not protect an RTP packet for session {sessionId} (error {error}), dropping it - it cannot be sent unencrypted",
+                            connection.SessionId, ret);
+                        return false;
+                    }
+
                     rtpPacket = rtp.AsMemory().Slice(0, len);
                 }
 
@@ -3083,7 +3460,17 @@ namespace SharpRTSPServer
                     byte[] rtcp = new byte[stream.Context.EncodeRtcpContext.CalculateRequiredSrtcpPayloadLength(rtcpSenderReport.Length)];
                     rtcpSenderReport.CopyTo(rtcp);
                     int ret = stream.Context.EncodeRtcpContext.ProtectRtcp(rtcp, rtcpSenderReport.Length, out var len);
-                    if (ret != 0) throw new Exception("Protect failed!");
+
+                    if (ret != 0)
+                    {
+                        // As with the RTP above: said plainly rather than thrown into a catch that
+                        // logs at Debug, and never sent in the clear.
+                        _logger.LogError(
+                            "SRTP could not protect an RTCP packet for session {sessionId} (error {error}), it will not be sent",
+                            connection.SessionId, ret);
+                        return false;
+                    }
+
                     rtcpSenderReport = rtcp.AsSpan().Slice(0, len);
                 }
 
@@ -3105,68 +3492,170 @@ namespace SharpRTSPServer
         }
 
         /// <summary>
+        /// A session that has been taken off the books and still has to be shut down.
+        /// </summary>
+        /// <remarks>
+        /// Shutting one down waits on its writer, and a write to a client that has stopped reading
+        /// does not come back until the socket is closed. That wait must not happen under the
+        /// connection list lock, so what is left to do is carried out of the lock in one of these
+        /// and finished by <see cref="FinishTeardowns"/>.
+        /// </remarks>
+        private readonly struct PendingTeardown
+        {
+            public PendingTeardown(RTSPConnection connection, RtspListener listener, List<RTSPConnection> finishedGroups)
+            {
+                Connection = connection;
+                Listener = listener;
+                FinishedGroups = finishedGroups;
+            }
+
+            public RTSPConnection Connection { get; }
+
+            public RtspListener Listener { get; }
+
+            /// <summary>Groups this connection was the last listener of, or null for none.</summary>
+            public List<RTSPConnection> FinishedGroups { get; }
+        }
+
+        /// <summary>
         /// Drops a connection and releases its transports.
         /// </summary>
         /// <remarks>
-        /// Takes the connection list lock itself rather than relying on callers to hold it - some
-        /// (like <see cref="SendRawRTP(RTSPConnection, RTPStream, List{Memory{byte}})"/>) are public
-        /// and can be reached without it. The lock is
-        /// re-entrant, so the callers that do already hold it are unaffected.
+        /// For callers holding nothing. A caller that already holds the connection list lock must
+        /// use <see cref="DetachSession"/> and then <see cref="FinishTeardowns"/> once it has let
+        /// go - otherwise the slow half of this runs under that lock, which is the stall the
+        /// outbound queue exists to prevent.
         /// </remarks>
         private void RemoveSession(RTSPConnection connection)
         {
-            RtspListener listener;
-            List<RTSPConnection> finishedGroups;
+            var pending = new List<PendingTeardown>(1);
 
             lock (_connectionList)
             {
-                // Deliberately not under the connection's send lock. The writer holds that while it
-                // is in a write, and a write to a client that has stopped reading does not come back
-                // until the socket is closed - which is what this method is on its way to doing. So
-                // waiting for the lock here would wait for the very thing this is here to end.
-                if (!_connectionList.Contains(connection))
+                DetachSession(connection, pending);
+            }
+
+            FinishTeardowns(pending);
+        }
+
+        /// <summary>
+        /// Takes a session off the books, and notes what is left to shut down.
+        /// </summary>
+        /// <remarks>
+        /// Everything here is bookkeeping that has to happen under the connection list lock and that
+        /// waits for nothing. The parts that wait - saying goodbye to a group, handing UDP ports
+        /// back, closing the socket - are added to <paramref name="pending"/> for
+        /// <see cref="FinishTeardowns"/> to do once the lock has been let go.
+        /// <para>
+        /// The caller must hold the connection list lock.
+        /// </para>
+        /// </remarks>
+        private void DetachSession(RTSPConnection connection, List<PendingTeardown> pending)
+        {
+            Debug.Assert(Monitor.IsEntered(_connectionList), "DetachSession is bookkeeping under the connection list lock");
+
+            // Deliberately not under the connection's send lock. The writer holds that while it
+            // is in a write, and a write to a client that has stopped reading does not come back
+            // until the socket is closed - which is what this session is on its way to doing. So
+            // waiting for the lock here would wait for the very thing this is here to end.
+            if (!_connectionList.Contains(connection))
+            {
+                // already gone, and a second disposal of its transports is not wanted
+                return;
+            }
+
+            connection.Play = false; // stop sending data
+
+            // Before the connection is taken off the lists, since that is where the groups it was
+            // listening to are found. What it leaves empty is shut down outside the lock.
+            List<RTSPConnection> finishedGroups = LeaveMulticastGroups(connection);
+
+            // stops the writer taking any more work, and hands back what it was still holding
+            connection.Outbound?.Dispose();
+            connection.Outbound = null;
+
+            // Deliberately left attached. Taking a transport off a connection is half of
+            // releasing it, and doing that here - with the writer possibly part way through a
+            // frame on it - makes the rest of that frame fail on a channel that went null
+            // underneath it, and reports a session that ended perfectly well as a lost client.
+            // Both halves happen together in FinishTeardowns, with the writer held out.
+            RtspListener listener = connection.Listener;
+
+            _connectionList.Remove(connection);
+            foreach (var streamSource in StreamSources)
+            {
+                streamSource.ConnectionList.Remove(connection);
+
+                // The last one out takes the key with them. Nobody is holding it, so replacing it
+                // breaks nothing - and it is what gives the stream its SSRCs back, since what
+                // must not repeat is an SSRC under the key it was used with.
+                if (streamSource.SharedSrtpKey && streamSource.ConnectionList.Count == 0)
                 {
-                    // already gone, and a second disposal of its transports is not wanted
-                    return;
-                }
-
-                connection.Play = false; // stop sending data
-
-                // Before the connection is taken off the lists, since that is where the groups it was
-                // listening to are found. What it leaves empty is shut down further down, outside
-                // this lock.
-                finishedGroups = LeaveMulticastGroups(connection);
-
-                // stops the writer taking any more work, and hands back what it was still holding
-                connection.Outbound?.Dispose();
-                connection.Outbound = null;
-
-                // Deliberately left attached. Taking a transport off a connection is half of
-                // releasing it, and doing that here - with the writer possibly part way through a
-                // frame on it - makes the rest of that frame fail on a channel that went null
-                // underneath it, and reports a session that ended perfectly well as a lost client.
-                // Both halves happen together below, with the writer held out.
-                listener = connection.Listener;
-
-                _connectionList.Remove(connection);
-                foreach (var streamSource in StreamSources)
-                {
-                    streamSource.ConnectionList.Remove(connection);
-
-                    // The last one out takes the key with them. Nobody is holding it, so replacing it
-                    // breaks nothing - and it is what gives the stream its SSRCs back, since what
-                    // must not repeat is an SSRC under the key it was used with.
-                    if (streamSource.SharedSrtpKey && streamSource.ConnectionList.Count == 0)
-                    {
-                        streamSource.ReleaseSharedSrtpKey();
-                    }
+                    streamSource.ReleaseSharedSrtpKey();
                 }
             }
 
-            // Outside the list lock, so waiting for the writer cannot hold up the rest of the server.
-            ShutDownMulticastSenders(finishedGroups);
-            ReleaseUdpTransports(connection);
-            CloseConnection(connection, listener);
+            pending.Add(new PendingTeardown(connection, listener, finishedGroups));
+        }
+
+        /// <summary>
+        /// Finishes off sessions that have been taken off the books: says goodbye to whatever groups
+        /// they emptied, hands their UDP ports back and closes their sockets.
+        /// </summary>
+        /// <remarks>
+        /// Every part of this waits for the connection's writer, for up to a few seconds where the
+        /// client at the other end has stopped reading. It must therefore run with the connection
+        /// list lock let go: holding it across these waits stopped every other connection, every
+        /// RTSP request, every accept and the media of every stream for as long as they took, and a
+        /// sweep dropping several stalled clients at once multiplied that by how many.
+        /// </remarks>
+        /// <summary>
+        /// Finishes off sessions on a thread of its own, for callers that must not be delayed.
+        /// </summary>
+        /// <remarks>
+        /// The accept loop, chiefly. A sweep there exists only to keep the connection count honest,
+        /// and the sessions it drops have already been taken off the books - so nothing is waiting
+        /// on their sockets being closed except the sockets themselves.
+        /// </remarks>
+        private void FinishTeardownsInBackground(List<PendingTeardown> pending)
+        {
+            if (pending == null || pending.Count == 0)
+            {
+                return;
+            }
+
+            Task.Run(() => FinishTeardowns(pending));
+        }
+
+        private void FinishTeardowns(List<PendingTeardown> pending)
+        {
+            Debug.Assert(!Monitor.IsEntered(_connectionList), "FinishTeardowns waits for writers and must not hold the connection list lock");
+
+            if (pending == null)
+            {
+                return;
+            }
+
+            for (int i = 0; i < pending.Count; i++)
+            {
+                PendingTeardown teardown = pending[i];
+
+                try
+                {
+                    ShutDownMulticastSenders(teardown.FinishedGroups);
+                    ReleaseUdpTransports(teardown.Connection);
+                    CloseConnection(teardown.Connection, teardown.Listener);
+                }
+                catch (Exception ex)
+                {
+                    // One session that will not come apart must not leave the others attached, and
+                    // some callers of this run on timer or pool threads where an escape would end
+                    // the process.
+                    _logger.LogWarning(ex, "Error shutting down session {sessionId}", teardown.Connection?.SessionId);
+                }
+            }
+
+            pending.Clear();
         }
 
         /// <summary>
@@ -3751,20 +4240,26 @@ namespace SharpRTSPServer
         /// </summary>
         private void DisconnectAllClients()
         {
+            RTSPConnection[] connections;
+
             lock (_connectionList)
             {
-                foreach (RTSPConnection connection in _connectionList.ToArray())
-                {
-                    foreach (var stream in connection.Streams)
-                    {
-                        if (stream.RtpChannel != null)
-                        {
-                            SendRTCPBye(connection, stream);
-                        }
-                    }
+                connections = _connectionList.ToArray();
+            }
 
-                    RemoveSession(connection);
+            // Saying goodbye waits on each connection's writer, so it happens with the list lock let
+            // go, like the teardown that follows it.
+            foreach (RTSPConnection connection in connections)
+            {
+                foreach (var stream in connection.Streams)
+                {
+                    if (stream.RtpChannel != null)
+                    {
+                        SendRTCPBye(connection, stream);
+                    }
                 }
+
+                RemoveSession(connection);
             }
         }
 
@@ -3780,20 +4275,31 @@ namespace SharpRTSPServer
         /// <param name="currentRtspPlayCount">Number of those connections that are playing.</param>
         public void CheckTimeouts(string streamID, out int currentRtspCount, out int currentRtspPlayCount)
         {
-            lock (_connectionList)
+            var pending = new List<PendingTeardown>();
+
+            try
             {
-                ReapIdleConnections();
-
-                var streamSource = GetStreamSource(streamID);
-                if (streamSource == null)
+                lock (_connectionList)
                 {
-                    currentRtspCount = 0;
-                    currentRtspPlayCount = 0;
-                    return;
-                }
+                    ReapIdleConnections(pending);
 
-                currentRtspCount = streamSource.ConnectionList.Count;
-                currentRtspPlayCount = streamSource.ConnectionList.Count(c => c.Play);
+                    var streamSource = GetStreamSource(streamID);
+                    if (streamSource == null)
+                    {
+                        currentRtspCount = 0;
+                        currentRtspPlayCount = 0;
+                        return;
+                    }
+
+                    currentRtspCount = streamSource.ConnectionList.Count;
+                    currentRtspPlayCount = streamSource.ConnectionList.Count(c => c.Play);
+                }
+            }
+            finally
+            {
+                // Whatever the sweep took off the books is shut down here, with the lock let go -
+                // including on the way out of the early return above.
+                FinishTeardowns(pending);
             }
         }
 
@@ -3801,11 +4307,13 @@ namespace SharpRTSPServer
         /// Removes every connection that has not been heard from within <see cref="RTSP_TIMEOUT"/>.
         /// </summary>
         /// <remarks>
-        /// The caller must hold the connection list lock. Runs on a timer as well as from the media
-        /// path, so that idle connections and their UDP sockets are released even when nothing is
-        /// being streamed.
+        /// The caller must hold the connection list lock, and must pass whatever this collects to
+        /// <see cref="FinishTeardowns"/> once it has let go of it - the sessions are off the books
+        /// when this returns but their sockets are not yet closed. Runs on a timer as well as from
+        /// the media path, so that idle connections and their UDP sockets are released even when
+        /// nothing is being streamed.
         /// </remarks>
-        private void ReapIdleConnections()
+        private void ReapIdleConnections(List<PendingTeardown> pending)
         {
             DateTime timeOut = DateTime.UtcNow.AddSeconds(-RTSP_TIMEOUT);
 
@@ -3818,14 +4326,14 @@ namespace SharpRTSPServer
                 if (connection.IsDisconnected)
                 {
                     _logger.LogDebug("Removing session {sessionId}, the connection was closed", connection.SessionId);
-                    RemoveSession(connection);
+                    DetachSession(connection, pending);
                     continue;
                 }
 
                 if (timeOut > connection.TimeSinceLastRtspKeepAlive)
                 {
                     _logger.LogDebug("Removing session {sessionId} due to TIMEOUT", connection.SessionId);
-                    RemoveSession(connection);
+                    DetachSession(connection, pending);
                 }
             }
         }
@@ -4068,6 +4576,12 @@ namespace SharpRTSPServer
             {
                 track.Sink = this;
                 track.StreamID = streamSource.StreamID;
+
+                // so a track reports wherever the server it has just joined does
+                if (track is TrackBase known)
+                {
+                    known.Logger = Logger;
+                }
             }
 
             // the list is read by the RTSP and media threads under this lock, so it has to be taken to write it too
@@ -4114,6 +4628,7 @@ namespace SharpRTSPServer
                 throw new ArgumentNullException(nameof(streamSource));
 
             RTSPConnection finishedGroup;
+            RTSPConnection[] watching;
 
             lock (_connectionList)
             {
@@ -4127,30 +4642,41 @@ namespace SharpRTSPServer
                     track.Sink = null;
                 }
 
-                foreach (RTSPConnection connection in streamSource.ConnectionList.ToArray())
+                // Taken under the lock, said goodbye to and shut down outside it - both of those
+                // wait on the connection's writer, and this lock is what the whole server is behind.
+                var clients = new List<RTSPConnection>(streamSource.ConnectionList.Count);
+
+                foreach (RTSPConnection connection in streamSource.ConnectionList)
                 {
-                    // Not the group's own sender: it has no session to remove and RemoveSession would
-                    // pass over it, so it is taken apart below rather than left holding its sockets.
+                    // Not the group's own sender: it has no session to remove, so it is taken apart
+                    // below rather than left holding its sockets.
                     if (streamSource.Multicast != null && ReferenceEquals(connection, streamSource.Multicast.Sender))
                     {
                         continue;
                     }
 
-                    foreach (var stream in connection.Streams)
-                    {
-                        SendRTCPBye(connection, stream);
-                    }
-
-                    RemoveSession(connection);
+                    clients.Add(connection);
                 }
 
+                watching = clients.ToArray();
+
                 // Whatever is left of the group. Usually nothing, because the last client to be
-                // removed above took it with them - but a group outlives its listeners if a SETUP
+                // removed below takes it with them - but a group outlives its listeners if a SETUP
                 // created one and then could not finish, and a stream being taken away is the end of
                 // its group whether anyone was listening or not.
                 finishedGroup = CloseMulticastGroup(streamSource);
 
                 this.StreamSources.Remove(streamSource);
+            }
+
+            foreach (RTSPConnection connection in watching)
+            {
+                foreach (var stream in connection.Streams)
+                {
+                    SendRTCPBye(connection, stream);
+                }
+
+                RemoveSession(connection);
             }
 
             ShutDownMulticastSenders(new List<RTSPConnection> { finishedGroup });

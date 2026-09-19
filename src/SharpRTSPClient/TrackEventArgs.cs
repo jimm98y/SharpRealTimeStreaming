@@ -63,6 +63,78 @@ namespace SharpRTSPClient
     }
 
     /// <summary>
+    /// An RTP packet as it arrived on one track, with enough about the track to say which.
+    /// </summary>
+    /// <remarks>
+    /// The counterpart of <see cref="TrackDataEventArgs"/> for the raw packets: the video and audio
+    /// events report the first track of each kind, and this one reports every track.
+    /// </remarks>
+    public class TrackRawRtpEventArgs : EventArgs
+    {
+        public TrackRawRtpEventArgs(int trackIndex, TrackKind kind, string codec, RawRtpDataEventArgs data)
+        {
+            TrackIndex = trackIndex;
+            Kind = kind;
+            Codec = codec;
+            Data = data;
+        }
+
+        /// <summary>
+        /// Where this track came in the description, which is what tells two of a kind apart.
+        /// </summary>
+        public int TrackIndex { get; }
+
+        /// <summary>
+        /// What sort of media the track carries.
+        /// </summary>
+        public TrackKind Kind { get; }
+
+        /// <summary>
+        /// The codec as the description named it.
+        /// </summary>
+        public string Codec { get; }
+
+        /// <summary>
+        /// The packet, decrypted where the stream is protected.
+        /// </summary>
+        public RawRtpDataEventArgs Data { get; }
+    }
+
+    /// <summary>
+    /// An RTCP packet as it arrived on one track, with enough about the track to say which.
+    /// </summary>
+    public class TrackRawRtcpEventArgs : EventArgs
+    {
+        public TrackRawRtcpEventArgs(int trackIndex, TrackKind kind, string codec, RawRtcpDataEventArgs data)
+        {
+            TrackIndex = trackIndex;
+            Kind = kind;
+            Codec = codec;
+            Data = data;
+        }
+
+        /// <summary>
+        /// Where this track came in the description, which is what tells two of a kind apart.
+        /// </summary>
+        public int TrackIndex { get; }
+
+        /// <summary>
+        /// What sort of media the track carries.
+        /// </summary>
+        public TrackKind Kind { get; }
+
+        /// <summary>
+        /// The codec as the description named it.
+        /// </summary>
+        public string Codec { get; }
+
+        /// <summary>
+        /// The report, decrypted where the stream is protected.
+        /// </summary>
+        public RawRtcpDataEventArgs Data { get; }
+    }
+
+    /// <summary>
     /// A track the stream offers, reported as the description is read.
     /// </summary>
     public class NewTrackEventArgs : EventArgs

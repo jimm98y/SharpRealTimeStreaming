@@ -54,8 +54,10 @@ namespace SharpRTSPClient.Tests
             using var client = new RTSPClient();
             client.Stopped += (s, e) => { lock (stops) stops.Add(e.Reason); };
 
+            client.AcceptTrack = t => t.Kind == TrackKind.Video;
+
             client.Connect(server.BaseUri, RTPTransport.TCP, "admin", "password",
-                MediaRequest.VIDEO_ONLY, false, null, false);
+                false, null, false);
 
             bool reachedPlay = server.WaitForRequest("PLAY", 3000);
             Thread.Sleep(200);

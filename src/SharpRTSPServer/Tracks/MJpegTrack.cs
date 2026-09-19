@@ -1,5 +1,25 @@
+// SharpRTSPServer
+// Copyright (C) 2026 Lukas Volf
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 using System;
-using System.Buffers;
 using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Linq;
@@ -249,23 +269,40 @@ namespace SharpRTSPServer
         {
             firstQuantizationTable = ReadOnlySpan<byte>.Empty;
             secondQuantizationTable = ReadOnlySpan<byte>.Empty;
+            imageData = ReadOnlySpan<byte>.Empty;
             ReadOnlySpan<byte> br = jpegImage;
             bool isDriPresent = false;
+
+            // Every read below is from a buffer whose shape is whatever was handed in. A sample that
+            // is not the JPEG it claims to be used to walk off the end of it, which a span turns into
+            // an IndexOutOfRangeException thrown out of a method documented to throw
+            // ArgumentException for exactly this - so the length is checked before each read, and a
+            // short or truncated image is refused the way the caller is told to expect.
+            if (!Has(br, 2))
+            {
+                throw new ArgumentException("A JPEG image is at least two bytes long.", nameof(jpegImage));
+            }
 
             // JPG magic bytes 
             if (br[0] != 0xff || br[1] != 0xd8)
             {
-                throw new ArgumentException();
+                throw new ArgumentException("A JPEG image starts with the SOI marker FFD8.", nameof(jpegImage));
             }
 
             br = br.Slice(2);
 
-            while (br[0] == 0xff)
+            while (Has(br, 2) && br[0] == 0xff)
             {
                 // Start-Of-Frame (SOF) has 4 possible values
                 if (br[1] == 0xc0 || br[1] == 0xc1 || br[1] == 0xc2 || br[1] == 0xc3)
                 {
                     imageData = br;
+
+                    // marker, length, bits per pixel, height, width and the component count
+                    if (!Has(br, 10))
+                    {
+                        throw new ArgumentException("The JPEG start of frame segment is truncated.", nameof(jpegImage));
+                    }
 
                     br = br.Slice(2);
                     br = br.Slice(2);
@@ -289,6 +326,17 @@ namespace SharpRTSPServer
 
                     int numComponents = br[0];
                     br = br.Slice(1);
+
+                    if (numComponents < 1)
+                    {
+                        throw new ArgumentException("A JPEG image has at least one component.", nameof(jpegImage));
+                    }
+
+                    // three bytes each, and the loop below reads every one of them
+                    if (!Has(br, numComponents * 3))
+                    {
+                        throw new ArgumentException("The JPEG component list is truncated.", nameof(jpegImage));
+                    }
 
                     List<JpgComponent> components = new List<JpgComponent>(numComponents);
                     for (int i = 0; i < numComponents; i++)
@@ -345,14 +393,35 @@ namespace SharpRTSPServer
                 byte marker = br[0];
                 br = br.Slice(1);
 
-                short chunkLength = (short)((br[0] << 8) | br[1]);
+                // the segment's own length, which has to be there before it can be read
+                if (!Has(br, 2))
+                {
+                    throw new ArgumentException("A JPEG segment is truncated before its length.", nameof(jpegImage));
+                }
+
+                // Unsigned. Read as a short, a segment of 32768 bytes or more came out negative and
+                // had to be put back together further down; read as what it is, it never is.
+                int chunkLength = (br[0] << 8) | br[1];
                 br = br.Slice(2);
+
+                // The length counts itself, so anything below two describes a segment shorter than
+                // the field saying how long it is.
+                if (chunkLength < 2)
+                {
+                    throw new ArgumentException($"A JPEG segment declares a length of {chunkLength}.", nameof(jpegImage));
+                }
+
+                int payloadLength = chunkLength - 2;
+
+                if (!Has(br, payloadLength))
+                {
+                    throw new ArgumentException("A JPEG segment runs past the end of the image.", nameof(jpegImage));
+                }
 
                 // quantization tables
                 if (marker == 0xdb)
                 {
-                    int matrix_length = chunkLength - 2;
-                    var matrix = br.Slice(0, matrix_length);
+                    var matrix = br.Slice(0, payloadLength);
                     if (firstQuantizationTable.IsEmpty)
                         firstQuantizationTable = matrix;
                     else if (secondQuantizationTable.IsEmpty)
@@ -367,18 +436,19 @@ namespace SharpRTSPServer
                     isDriPresent = true;
                 }
 
-                if (chunkLength < 0)
-                {
-                    ushort uchunkLength = (ushort)chunkLength;
-                    br = br.Slice(uchunkLength - 2);
-                }
-                else
-                {
-                    br = br.Slice(chunkLength - 2);
-                }
+                br = br.Slice(payloadLength);
             }
 
-            throw new ArgumentException();
+            throw new ArgumentException("The JPEG image has no start of frame segment.", nameof(jpegImage));
         }
+
+        /// <summary>
+        /// Whether a span still holds at least this many bytes.
+        /// </summary>
+        /// <remarks>
+        /// The image being parsed is whatever the producer handed over, so every read past the first
+        /// is guarded by one of these rather than trusted to be there.
+        /// </remarks>
+        private static bool Has(ReadOnlySpan<byte> data, int count) => count >= 0 && data.Length >= count;
     }
 }

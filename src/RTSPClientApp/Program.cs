@@ -31,10 +31,13 @@ string password = config["Password"];
 
 using (RTSPClient client = new RTSPClient())
 {
-    client.NewVideoStream += (sender, e) => Console.WriteLine(e.ToString());
-    client.ReceivedVideoData += (sender, e) => Console.Write("*");
-    client.NewAudioStream += (sender, e) => Console.WriteLine(e.ToString());
-    client.ReceivedAudioData += (sender, e) => Console.Write("+");
+    // Every track the stream offers, and which one each frame belongs to. The events named after
+    // a kind reported the first video track and the first audio track and nothing else.
+    client.NewTrack += (sender, e) =>
+        Console.WriteLine($"track {e.TrackIndex}: {e.Kind} {e.Codec} {e.StreamConfigurationData}");
+
+    client.ReceivedData += (sender, e) =>
+        Console.Write(e.Kind == TrackKind.Video ? "*" : e.Kind == TrackKind.Audio ? "+" : ".");
     client.Stopped += async (sender, e) => 
     {
         Console.WriteLine($"Stopped: {e.Reason}");
@@ -46,7 +49,11 @@ using (RTSPClient client = new RTSPClient())
         }
     };
 
-    client.Connect(rtspUri, RTPTransport.TCP, userName, password, MediaRequest.VIDEO_AND_AUDIO, false, null, true);
+    // Everything the stream offers, rather than the first video and audio track. Leave AcceptTrack
+    // unset for that older behaviour, or narrow it: t => t.Kind == TrackKind.Video, t => t.Codec == "H265".
+    client.AcceptTrack = _ => true;
+
+    client.Connect(rtspUri, RTPTransport.TCP, userName, password, false, null, true);
 
     Console.WriteLine("Press any key to exit");
     // Asking whether a key has been pressed throws outright when there is no console, or when

@@ -101,12 +101,12 @@ namespace SharpRTSPServer
         {
             if (SamplingRate != 48000)
             {
-                if (Log.WarnEnabled) Log.Warn($"Opus track set to use unsupported sampling rate {SamplingRate}. Opus requires 48000.");
+                Logger.Warning($"Opus track set to use unsupported sampling rate {SamplingRate}. Opus requires 48000.");
             }
 
             if (Channels != 2)
             {
-                if (Log.WarnEnabled) Log.Warn($"Opus track set to use unsupported channels {Channels}. Opus requires 2.");
+                Logger.Warning($"Opus track set to use unsupported channels {Channels}. Opus requires 2.");
             }
 
             sdp.Append($"m=audio 0 RTP/{RtpProfile} {PayloadType}\r\n"); // <---- Payload Type 0 means G711 ULAW, 96+ means dynamic payload type
