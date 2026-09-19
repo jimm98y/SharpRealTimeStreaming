@@ -64,6 +64,12 @@ using (var server = new RTSPServer(port, userName, password))
 
     var streamSource = new RTSPStreamSource(STREAM_ID, rtspVideoTrack, rtspAudioTrack);
     streamSource.OverrideSDP(rtspProtocolParser.SDP, true);
+
+    // A client that arrives mid-group has nothing it can decode until the next keyframe.
+    // Keeping the last one means it is given a picture straight away, and held on that
+    // picture until the stream starts a group it can follow properly.
+    streamSource.KeepLastKeyFrame = true;
+
     server.AddStreamSource(streamSource);
 
     rtspVideoTrack?.Start();

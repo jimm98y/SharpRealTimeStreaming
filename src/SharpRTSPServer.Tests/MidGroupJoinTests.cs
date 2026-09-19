@@ -455,6 +455,84 @@ namespace SharpRTSPServer.Tests
                 "nothing arrived: a stream whose keyframes cannot be recognised was held up for one");
         }
 
+        /// <summary>
+        /// The kept picture is held, not broken up by the live pictures that follow it.
+        /// </summary>
+        /// <remarks>
+        /// The frames after the kept keyframe describe changes to pictures this client never saw, so
+        /// sending them on top of it takes a correct still picture and turns it into a moving mess.
+        /// It keeps the still until the next live keyframe starts the stream again properly, which
+        /// is a clean cut rather than a recovery.
+        /// </remarks>
+        [TestMethod]
+        public void TheKeptPictureIsHeldUntilTheNextGroupRatherThanBrokenUp()
+        {
+            int port = TestPorts.FindFree();
+            using var server = new RTSPServer(port, "admin", "password");
+            server.KeyFrameWait = TimeSpan.FromMinutes(5);
+
+            var video = new H264Track(Sps, Pps);
+            var source = new RTSPStreamSource("stream1", video, null);
+            source.KeepLastKeyFrame = true;
+
+            server.AddStreamSource(source);
+            server.StartListen();
+
+            // The stream opens with a keyframe, before anyone has connected, and runs on.
+            video.FeedInRawSamples(3750, Idr());
+
+            for (int i = 0; i < 5; i++)
+            {
+                video.FeedInRawSamples((uint)((i + 2) * 3750), Predicted());
+            }
+
+            string baseUri = $"rtsp://127.0.0.1:{port}/stream1";
+
+            using var client = new RtspTestClient(port, "admin", "password");
+            client.Send("OPTIONS", baseUri);
+            client.Send("DESCRIBE", baseUri, "Accept: application/sdp");
+
+            var setup = client.Send("SETUP", baseUri + "/trackID=0",
+                "Transport: RTP/AVP/TCP;unicast;interleaved=0-1");
+            Assert.AreEqual(200, client.Send("PLAY", baseUri, "Session: " + setup.Session).StatusCode);
+
+            // The rest of the group this client arrived in the middle of.
+            for (int i = 0; i < 12; i++)
+            {
+                video.FeedInRawSamples((uint)((i + 10) * 3750), Predicted());
+                Thread.Sleep(5);
+            }
+
+            // Then the stream starts a new group, which is where this client can join properly.
+            video.FeedInRawSamples(30 * 3750, Idr());
+
+            for (int i = 0; i < 4; i++)
+            {
+                video.FeedInRawSamples((uint)((i + 31) * 3750), Predicted());
+                Thread.Sleep(5);
+            }
+
+            var pictures = new List<int>();
+
+            for (int i = 0; i < 25 && pictures.Count < 3; i++)
+            {
+                var frame = client.ReadInterleaved();
+
+                if (frame.Channel == 0)
+                {
+                    pictures.Add(NalTypeOf(frame.Payload));
+                }
+            }
+
+            Assert.IsGreaterThanOrEqualTo(2, pictures.Count, "too little arrived to say anything");
+
+            Assert.AreEqual(NAL_IDR, pictures[0], "the client was not started on the keyframe kept for it");
+
+            Assert.AreEqual(NAL_IDR, pictures[1],
+                "the still picture was broken up by pictures referring to frames the client never saw, "
+                + "instead of being held until the next group");
+        }
+
         [TestMethod]
         public void TheEncoderIsAskedForAPictureTheClientCanStartOn()
         {

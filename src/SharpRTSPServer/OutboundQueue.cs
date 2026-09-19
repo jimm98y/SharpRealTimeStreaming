@@ -289,6 +289,11 @@ namespace SharpRTSPServer
 
         /// <summary>Whether the encoder has already been asked for a keyframe for this wait.</summary>
         private bool _askedForKeyFrame;
+
+        /// <summary>
+        /// Whether this client is showing the keyframe kept for it, waiting for a live one.
+        /// </summary>
+        private bool _sentKeptKeyFrame;
         private long _dropped;
         private long _reportedDrops;
         private long _queuedBytes;
@@ -385,7 +390,10 @@ namespace SharpRTSPServer
                 // Counted all the same, because it is still media the client did not get.
                 frame.Release();
                 _dropped++;
-                return false;
+
+                // Not necessarily nothing to do, though - holding this one back may have put the
+                // kept keyframe in the queue in its place.
+                return AskForAWriter();
             }
 
             // Bounded by both, because the two say different things: a frame count is a bound on
@@ -401,12 +409,29 @@ namespace SharpRTSPServer
             _frames.AddLast(frame);
             _queuedBytes += frame.Bytes;
 
-            // Only when nobody has it. A thread that is already writing this connection will see
-            // the frame when it comes round again, and asking twice would put the connection in
-            // the queue of the pool twice and let two threads write it at once.
-            bool ask = !_scheduled;
+            return AskForAWriter();
+        }
+
+        /// <summary>
+        /// Whether the pool needs asking for a thread, given what is in the queue.
+        /// </summary>
+        /// <remarks>
+        /// Only when nobody has it. A thread already writing this connection will see whatever is
+        /// there when it comes round again, and asking twice would put the connection in the pool's
+        /// queue twice and let two threads write it at once.
+        /// <para>
+        /// Called with <see cref="_gate"/> held.
+        /// </para>
+        /// </remarks>
+        private bool AskForAWriter()
+        {
+            if (_frames.Count == 0 || _scheduled)
+            {
+                return false;
+            }
+
             _scheduled = true;
-            return ask;
+            return true;
         }
 
         /// <summary>
@@ -462,6 +487,7 @@ namespace SharpRTSPServer
                 _midGroup = false;
                 _gaveUpWaiting = false;
                 _askedForKeyFrame = false;
+                _sentKeptKeyFrame = false;
                 return true;
             }
 
@@ -477,14 +503,33 @@ namespace SharpRTSPServer
                 return true;
             }
 
-            // One was kept, so the client can be given a real picture now rather than nothing for as
+            // One was kept, so the client is given a real picture now rather than nothing for as
             // long as the next live one takes. Straight away, not after the wait: the whole cost of
-            // waiting is the picture the client does not have, and where the kept frame is recent -
-            // a stream that has only just started, say - what follows it refers to very little the
-            // client missed.
-            if (SendKeptKeyFrame())
+            // waiting is the picture the client does not have.
+            if (!_sentKeptKeyFrame && SendKeptKeyFrame())
             {
-                return true;
+                _sentKeptKeyFrame = true;
+            }
+
+            if (_sentKeptKeyFrame && DateTime.UtcNow - _midGroupSince < _keyFrameWait)
+            {
+                // And the pictures after it are held back, because they describe changes to ones
+                // this client never saw: sending them on top of the kept frame would take a correct
+                // still picture and break it up. It holds that picture until the next live keyframe
+                // starts the stream again properly, which is a clean cut rather than a recovery.
+                //
+                // Not indefinitely, though. A client holding a still picture is receiving nothing,
+                // and a player probing a stream it has just opened wants frames - ffmpeg gives up on
+                // one that sends a single picture and then stops, and reports a stream whose size it
+                // could not work out. So the hold is bounded like every other: past it the live
+                // pictures go out imperfect, which is at least a stream.
+                if (!_askedForKeyFrame)
+                {
+                    _askedForKeyFrame = true;
+                    ask = true;
+                }
+
+                return false;
             }
 
             if (DateTime.UtcNow - _midGroupSince < _keyFrameWait)
@@ -546,7 +591,9 @@ namespace SharpRTSPServer
 
             _logger.LogDebug("Starting {connection} on the last keyframe kept for its stream", _describedAs);
 
-            _midGroup = false;
+            // Still mid-group on purpose. This gives the client a picture to show; it does not put
+            // the client where the live stream is, and the pictures between the two are what would
+            // break the one it has just been given.
             return true;
         }
 
@@ -667,6 +714,7 @@ namespace SharpRTSPServer
                 _midGroup = true;
                 _midGroupSince = DateTime.UtcNow;
                 _askedForKeyFrame = false;
+                _sentKeptKeyFrame = false;
             }
 
             // the size first: the frame reports nothing once the last share of it is gone
