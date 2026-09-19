@@ -1,7 +1,7 @@
 # SharpRTSP client and server
 This is a thin wrapper around the fantastic SharpRTSP, mostly based off their sample code with some API enhancements to make it easier to use. Added support for streaming Opus, AV1 and H266.
 
-Upgrading from an earlier version? See [doc/migration.md](doc/migration.md).
+> **Upgrading from an earlier version?** See [doc/migration.md](doc/migration.md).
 
 ## SharpRTSPClient
 Simple RTSP client that supports MJPEG, H264, H265, H266, AV1 for video and AAC, Opus, PCMU and PCMA for audio.
