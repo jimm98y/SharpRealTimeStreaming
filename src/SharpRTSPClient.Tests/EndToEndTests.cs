@@ -113,18 +113,42 @@ namespace SharpRTSPClient.Tests
         /// wrote a line per packet and formatted a string to do it. This is the direct form of what
         /// <see cref="ClientAllocationTests"/> can only see as a number.
         /// </remarks>
+        /// <summary>
+        /// An <see cref="ILog"/> that counts trace lines and keeps the default enablement.
+        /// </summary>
+        /// <remarks>
+        /// Trace off and the rest on, as <see cref="DefaultLog"/> has them, because whether the
+        /// default writes a line per packet is the whole question here.
+        /// </remarks>
+        private sealed class TraceCounter : ILog
+        {
+            private int _traces;
+
+            public int Traces => Volatile.Read(ref _traces);
+
+            public void LogTrace(string trace) { Interlocked.Increment(ref _traces); }
+
+            public void LogError(string error) { }
+            public void LogWarning(string warning) { }
+            public void LogInfo(string info) { }
+            public void LogDebug(string debug) { }
+
+            public bool IsErrorEnabled { get; set; } = true;
+            public bool IsWarningEnabled { get; set; } = true;
+            public bool IsInfoEnabled { get; set; } = true;
+            public bool IsDebugEnabled { get; set; } = true;
+            public bool IsTraceEnabled { get; set; } = false;
+        }
+
         [TestMethod]
         public void ReceivingDoesNotWriteALineForEveryPacket()
         {
-            int traced = 0;
+            // The client's own logger, counting only what reaches trace level - the sink on
+            // DefaultLog takes every level, and the handshake writes plenty at the others.
+            // Deliberately left at the default enablement: the default is what is under test.
+            var counting = new TraceCounter();
 
-            var wasEnabled = Log.TraceEnabled;
-            var oldSink = Log.SinkTrace;
-            Log.SinkTrace = (m, ex) => Interlocked.Increment(ref traced);
-
-            try
             {
-                // deliberately not touching Log.TraceEnabled: the default is what is under test
                 int port = FreePort();
 
                 using var server = new SharpRTSPServer.RTSPServer(port, "admin", "password");
@@ -133,7 +157,7 @@ namespace SharpRTSPClient.Tests
                 server.AddStreamSource(new SharpRTSPServer.RTSPStreamSource("stream1", video, null));
                 server.StartListen();
 
-                using var client = new RTSPClient();
+                using var client = new RTSPClient { Logger = counting };
 
                 int frames = 0;
                 client.ReceivedData += (s, e) => Interlocked.Increment(ref frames);
@@ -156,13 +180,8 @@ namespace SharpRTSPClient.Tests
                 client.Stop();
 
                 Assert.IsGreaterThan(0, Volatile.Read(ref frames), "nothing arrived, so nothing was proved");
-                Assert.AreEqual(0, Volatile.Read(ref traced),
+                Assert.AreEqual(0, counting.Traces,
                     "the client wrote trace lines while simply receiving a stream");
-            }
-            finally
-            {
-                Log.SinkTrace = oldSink;
-                Log.TraceEnabled = wasEnabled;
             }
         }
     }

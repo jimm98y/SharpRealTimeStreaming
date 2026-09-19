@@ -24,6 +24,7 @@ using SharpMP4.Builders;
 using SharpMP4.Tracks;
 using SharpRTSPClient;
 using System;
+using System.Collections.Generic;
 using System.IO;
 
 IConfiguration config = new ConfigurationBuilder().AddJsonFile("appsettings.json").Build();
@@ -37,15 +38,19 @@ using (Stream output = new BufferedStream(new FileStream("recording_out.mp4", Fi
 
     using (RTSPClient client = new RTSPClient())
     {
-        uint videoTrackID = 0;
-        uint audioTrackID = 0;
-        client.NewVideoStream += (sender, e) =>
+        // One handler for every track the stream offers, rather than a pair per kind. The client
+        // reports which track each frame came from, so the mapping from its tracks to the output
+        // file's is just a lookup - and a stream carrying two qualities or two languages records
+        // all of them instead of the first of each.
+        var outputTrackOfClientTrack = new Dictionary<int, uint>();
+
+        client.NewTrack += (sender, e) =>
         {
             ITrack outputTrack;
 
             // The SDP may carry no fmtp at all, in which case the client reports the codec with no
             // configuration data. Recording cannot start without the parameter sets.
-            switch(e.StreamType)
+            switch (e.Codec)
             {
                 case "H264":
                     {
@@ -92,30 +97,6 @@ using (Stream output = new BufferedStream(new FileStream("recording_out.mp4", Fi
                     }
                     break;
 
-                default:
-                    Console.WriteLine($"Ignoring the {e.StreamType} video stream, it cannot be recorded to MP4.");
-                    return;
-            }
-
-            outputBuilder.AddTrack(outputTrack);
-            videoTrackID = outputTrack.TrackID;
-        };
-
-        client.ReceivedVideoData += (sender, e) =>
-        {
-            foreach (var unit in e.Data)
-            {
-                var sample = unit.ToArray();
-                outputBuilder.ProcessTrackSample(videoTrackID, sample);
-            }
-        };
-
-        client.NewAudioStream += (sender, e) =>
-        {
-            ITrack outputTrack;
-
-            switch (e.StreamType)
-            {
                 case "AAC":
                     {
                         if (!(e.StreamConfigurationData is AACStreamConfigurationData config))
@@ -129,25 +110,32 @@ using (Stream output = new BufferedStream(new FileStream("recording_out.mp4", Fi
                         {
                             samplingFrequency = SharpISOBMFF.AudioSpecificConfigDescriptor.SamplingFrequencyMap[(uint)config.FrequencyIndex];
                         }
+
                         outputTrack = new AACTrack((byte)config.ChannelConfiguration, samplingFrequency, 16);
                     }
                     break;
 
                 default:
-                    Console.WriteLine($"Ignoring the {e.StreamType} audio stream, it cannot be recorded to MP4.");
+                    Console.WriteLine($"Ignoring the {e.Codec} {e.Kind} stream, it cannot be recorded to MP4.");
                     return;
             }
 
             outputBuilder.AddTrack(outputTrack);
-            audioTrackID = outputTrack.TrackID;
+            outputTrackOfClientTrack[e.TrackIndex] = outputTrack.TrackID;
         };
 
-        client.ReceivedAudioData += (sender, e) =>
+        client.ReceivedData += (sender, e) =>
         {
-            foreach (var unit in e.Data)
+            // A track whose codec could not be recorded never got an output track, so its frames
+            // are dropped rather than written to whichever track happens to be there.
+            if (!outputTrackOfClientTrack.TryGetValue(e.TrackIndex, out uint outputTrackID))
             {
-                var sample = unit.ToArray();
-                outputBuilder.ProcessTrackSample(audioTrackID, sample);
+                return;
+            }
+
+            foreach (var unit in e.Data.Data)
+            {
+                outputBuilder.ProcessTrackSample(outputTrackID, unit.ToArray());
             }
         };
 
@@ -157,7 +145,11 @@ using (Stream output = new BufferedStream(new FileStream("recording_out.mp4", Fi
             client.TryReconnect();
         };
 
-        client.Connect(rtspUri, RTPTransport.TCP, userName, password, MediaRequest.VIDEO_AND_AUDIO, false, null, true);
+        // Every track the stream offers; the ones this recorder has no MP4 track for are dropped
+        // in NewTrack above.
+        client.AcceptTrack = _ => true;
+
+        client.Connect(rtspUri, RTPTransport.TCP, userName, password, false, null, true);
 
         Console.WriteLine("Press any key to exit");
         // Asking whether a key has been pressed throws outright when there is no console, or when

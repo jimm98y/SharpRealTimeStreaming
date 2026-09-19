@@ -83,6 +83,17 @@ namespace SharpRTSPServer
 
         public IRtpSender Sink { get; set; } = null;
 
+        /// <summary>
+        /// Where this track reports what it could not do.
+        /// </summary>
+        /// <remarks>
+        /// Set by <see cref="RTSPServer.AddStreamSource"/> to the server's own logger, and kept in
+        /// step when that is reassigned - so a track says what it has to say wherever the server it
+        /// belongs to does. Null for a track that has not been added to one, which is why every use
+        /// of it goes through the null-safe extensions.
+        /// </remarks>
+        public ILog Logger { get; set; }
+
         public string StreamID { get; set; } = null;
 
         public abstract string Codec { get; }
@@ -90,15 +101,31 @@ namespace SharpRTSPServer
         public abstract int ID { get; set; }
 
         /// <summary>
-        /// What kind of media this track carries.
+        /// What kind of media this track carries. Every track has to say.
         /// </summary>
         /// <remarks>
-        /// Read from the ID by default, which is what the ID meant when a stream could hold one video
-        /// track and one audio track and nothing else. Every track here says which it is instead, and
-        /// so should any written elsewhere - a stream carrying two of a kind has IDs that run past
-        /// the kinds.
+        /// <para>
+        /// This used to fall back to <c>(TrackType)ID</c> - a track's place in its stream read as
+        /// the sort of media it carries - which is right only for a stream that is one video track
+        /// followed by one audio track. A stream with two video tracks had the second reporting
+        /// itself as audio, and the kind is acted on: it decides which frames are thrown away first
+        /// when a client falls behind, whether a frame is held back waiting for a keyframe, and
+        /// which media section of an overridden SDP a track's control URL and keys belong to. A
+        /// silently wrong answer there is worse than no answer.
+        /// </para>
+        /// <para>
+        /// Every track in this library overrides it. One written elsewhere must too.
+        /// </para>
         /// </remarks>
-        public virtual TrackType Kind => (TrackType)ID;
+        /// <exception cref="NotImplementedException">
+        /// The track does not say what kind of media it carries.
+        /// </exception>
+        public virtual TrackType Kind =>
+            throw new NotImplementedException(
+                $"{GetType().Name} does not say what kind of media it carries. Override {nameof(Kind)} " +
+                $"and return the {nameof(TrackType)} this track is. It used to default to the track's ID " +
+                "read as a kind, which is wrong for any stream that is not one video track followed by " +
+                "one audio track.");
 
         /// <summary>
         /// Payload type. AAC uses a dynamic payload type, which by default we calculate as 96 + track ID.

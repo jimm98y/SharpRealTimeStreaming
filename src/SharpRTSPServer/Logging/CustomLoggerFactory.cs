@@ -20,17 +20,52 @@
 // SOFTWARE.
 
 using Microsoft.Extensions.Logging;
+using System;
 
 namespace SharpRTSPServer.Logging
 {
+    /// <summary>
+    /// Hands out <see cref="ILogger"/>s that write to one <see cref="ILog"/>.
+    /// </summary>
+    /// <remarks>
+    /// What a server builds for itself when it is not given an <see cref="ILoggerFactory"/>. The
+    /// logger is looked up per message rather than captured, so
+    /// <see cref="RTSPServer.Logger"/> can be assigned after the server exists.
+    /// </remarks>
     public class CustomLoggerFactory : ILoggerFactory
     {
+        private readonly Func<ILog> _logger;
+
+        /// <summary>
+        /// A factory over a logger that may change, which is what a server uses for its own.
+        /// </summary>
+        public CustomLoggerFactory(Func<ILog> logger)
+        {
+            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        }
+
+        /// <summary>
+        /// A factory over one fixed logger.
+        /// </summary>
+        public CustomLoggerFactory(ILog logger)
+            : this(() => logger)
+        {
+        }
+
+        /// <summary>
+        /// A factory over a <see cref="DefaultLog"/> of its own.
+        /// </summary>
+        public CustomLoggerFactory()
+            : this(new DefaultLog())
+        {
+        }
+
         public void AddProvider(ILoggerProvider provider)
         { }
 
         public ILogger CreateLogger(string categoryName)
         {
-            return new CustomLogger();
+            return new CustomLogger(_logger);
         }
 
         public void Dispose()

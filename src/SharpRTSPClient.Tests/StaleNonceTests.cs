@@ -50,8 +50,10 @@ namespace SharpRTSPClient.Tests
             using var client = new RTSPClient();
             client.Stopped += (s, e) => { lock (stops) stops.Add(e.Reason); };
 
+            client.AcceptTrack = t => t.Kind == TrackKind.Video;
+
             client.Connect(server.BaseUri, RTPTransport.TCP, "admin", "password",
-                MediaRequest.VIDEO_ONLY, false, null, false);
+                false, null, false);
 
             // The client used to treat any 401 to an authorized request as a wrong password and stop
             // for good, so a nonce expiring under a live session ended it.
@@ -80,8 +82,10 @@ namespace SharpRTSPClient.Tests
             using var client = new RTSPClient();
             client.Stopped += (s, e) => { lock (stops) stops.Add(e.Reason); };
 
+            client.AcceptTrack = t => t.Kind == TrackKind.Video;
+
             client.Connect(server.BaseUri, RTPTransport.TCP, "admin", "password",
-                MediaRequest.VIDEO_ONLY, false, null, false);
+                false, null, false);
 
             var deadline = DateTime.UtcNow.AddSeconds(8);
             while (DateTime.UtcNow < deadline)

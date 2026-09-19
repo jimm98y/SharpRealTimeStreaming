@@ -19,6 +19,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+using System;
 using System.Linq;
 using System.Threading;
 
@@ -50,7 +51,7 @@ namespace SharpRTSPClient.Tests
         /// <summary>
         /// Connects a client to a server serving the given SDP and reports what it made of it.
         /// </summary>
-        private static Result Describe(string sdp, MediaRequest mediaRequest = MediaRequest.VIDEO_AND_AUDIO)
+        private static Result Describe(string sdp, Func<TrackOffer, bool> acceptTrack = null)
         {
             var result = new Result();
             using var server = new FakeRtspServer(SdpHeader + sdp);
@@ -58,21 +59,32 @@ namespace SharpRTSPClient.Tests
 
             var settled = new ManualResetEventSlim(false);
 
-            client.NewVideoStream += (s, e) =>
+            // The first track of each kind, which is what these tests are about - worked out here
+            // rather than handed over by the client, which reports every track and says which.
+            client.NewTrack += (s, e) =>
             {
-                result.VideoCodec = e.StreamType;
-                result.VideoConfiguration = e.StreamConfigurationData;
-            };
-            client.NewAudioStream += (s, e) =>
-            {
-                result.AudioCodec = e.StreamType;
-                result.AudioConfiguration = e.StreamConfigurationData;
+                if (e.Kind == TrackKind.Video && result.VideoCodec == null)
+                {
+                    result.VideoCodec = e.Codec;
+                    result.VideoConfiguration = e.StreamConfigurationData;
+                }
+                else if (e.Kind == TrackKind.Audio && result.AudioCodec == null)
+                {
+                    result.AudioCodec = e.Codec;
+                    result.AudioConfiguration = e.StreamConfigurationData;
+                }
             };
             client.Stopped += (s, e) => { result.Stopped = e.Reason; settled.Set(); };
             client.SetupMessageCompleted += (s, e) => settled.Set();
 
             client.AutoPlay = false;
-            client.Connect(server.BaseUri, RTPTransport.TCP, mediaRequest: mediaRequest);
+
+            if (acceptTrack != null)
+            {
+                client.AcceptTrack = acceptTrack;
+            }
+
+            client.Connect(server.BaseUri, RTPTransport.TCP);
 
             settled.Wait(5000);
             client.Stop();
@@ -189,7 +201,7 @@ namespace SharpRTSPClient.Tests
                 "m=video 0 RTP/AVP 96\r\na=control:trackID=0\r\na=rtpmap:96 H264/90000\r\n" +
                 "m=audio 0 RTP/AVP 8\r\na=control:trackID=1\r\n";
 
-            var result = Describe(sdp, MediaRequest.AUDIO_ONLY);
+            var result = Describe(sdp, t => t.Kind == TrackKind.Audio);
 
             Assert.IsNull(result.VideoCodec);
             Assert.AreEqual("PCMA", result.AudioCodec);
@@ -202,7 +214,7 @@ namespace SharpRTSPClient.Tests
                 "m=video 0 RTP/AVP 96\r\na=control:trackID=0\r\na=rtpmap:96 H264/90000\r\n" +
                 "m=audio 0 RTP/AVP 8\r\na=control:trackID=1\r\n";
 
-            var result = Describe(sdp, MediaRequest.VIDEO_ONLY);
+            var result = Describe(sdp, t => t.Kind == TrackKind.Video);
 
             Assert.AreEqual("H264", result.VideoCodec);
             Assert.IsNull(result.AudioCodec);

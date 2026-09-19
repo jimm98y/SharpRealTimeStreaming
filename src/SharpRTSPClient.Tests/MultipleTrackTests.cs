@@ -19,6 +19,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -55,15 +56,26 @@ namespace SharpRTSPClient.Tests
 
         private static Seen Describe(string sdp, bool receiveAllTracks)
         {
+            return Describe(sdp, receiveAllTracks ? (_ => true) : RTSPClient.FirstOfEachKind);
+        }
+
+        private static Seen Describe(string sdp, Func<TrackOffer, bool> acceptTrack)
+        {
             var seen = new Seen();
             using var server = new FakeRtspServer(SdpHeader + sdp);
-            using var client = new RTSPClient { ReceiveAllTracks = receiveAllTracks, AutoPlay = false };
+            using var client = new RTSPClient { AutoPlay = false, AcceptTrack = acceptTrack };
 
             var settled = new ManualResetEventSlim(false);
 
             client.NewTrack += (s, e) => { lock (seen.Tracks) { seen.Tracks.Add(e); } };
-            client.NewVideoStream += (s, e) => seen.VideoCodec = e.StreamType;
-            client.NewAudioStream += (s, e) => seen.AudioCodec = e.StreamType;
+            // The first track of each kind, which is what these assertions are about. The client
+            // no longer works that out for anyone: it reports every track and says which, and the
+            // "first of a kind" is a question only the caller knows whether it wants answered.
+            client.NewTrack += (s, e) =>
+            {
+                if (e.Kind == TrackKind.Video && seen.VideoCodec == null) seen.VideoCodec = e.Codec;
+                if (e.Kind == TrackKind.Audio && seen.AudioCodec == null) seen.AudioCodec = e.Codec;
+            };
             client.Stopped += (s, e) => { seen.Stopped = e.Reason; settled.Set(); };
             client.SetupMessageCompleted += (s, e) => settled.Set();
 
@@ -128,12 +140,26 @@ namespace SharpRTSPClient.Tests
         }
 
         [TestMethod]
-        public void MetadataIsPassedOverUnlessItIsAskedFor()
+        public void MetadataIsTakenByDefaultLikeAnyOtherFirstOfItsKind()
         {
             var seen = Describe(WithMetadata, receiveAllTracks: false);
 
+            // It used to need ReceiveAllTracks, which also pulled in every second video and audio
+            // track. The default is now one rule for every kind alike: the first of each.
+            Assert.IsTrue(seen.Tracks.Any(t => t.Kind == TrackKind.Application),
+                "the first metadata track is the first of its kind");
+
+            Assert.AreEqual("H264", seen.VideoCodec, "and the video should be unaffected");
+        }
+
+        [TestMethod]
+        public void MetadataCanBeLeftOutWithoutLeavingOutTheOtherExtras()
+        {
+            var seen = Describe(WithMetadata,
+                t => RTSPClient.FirstOfEachKind(t) && t.Kind != TrackKind.Application);
+
             Assert.IsFalse(seen.Tracks.Any(t => t.Kind == TrackKind.Application),
-                "a client that did not ask for metadata should not set it up");
+                "a client that said not to should not set it up");
 
             Assert.AreEqual("H264", seen.VideoCodec, "and the video should be unaffected");
         }

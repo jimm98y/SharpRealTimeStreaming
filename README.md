@@ -1,6 +1,8 @@
 # SharpRTSP client and server
 This is a thin wrapper around the fantastic SharpRTSP, mostly based off their sample code with some API enhancements to make it easier to use. Added support for streaming Opus, AV1 and H266.
 
+Upgrading from an earlier version? See [doc/migration.md](doc/migration.md).
+
 ## SharpRTSPClient
 Simple RTSP client that supports MJPEG, H264, H265, H266, AV1 for video and AAC, Opus, PCMU and PCMA for audio.
 
@@ -14,21 +16,19 @@ using (RTSPClient client = new RTSPClient())
 }
 ```
 
-Subscribe events for video:
+Subscribe to the tracks the stream offers, and to the media arriving on them:
 ```cs
-client.NewVideoStream += (sender, e) => { ... }
-client.ReceivedVideoData += (sender, e) => { ... }
+client.NewTrack += (sender, e) => { ... }
+client.ReceivedData += (sender, e) => { ... }
 ```
 
-The `NewVideoStream` callback will contain the video codec in `e.StreamType` as well as codec-specific info such as SPS/PPS from the SDP in `e.StreamConfigurationData`.
+`NewTrack` is raised once per track as the description is read. It carries the track's index in
+`e.TrackIndex`, what sort of media it is in `e.Kind`, the codec in `e.Codec`, and codec-specific
+information from the SDP - SPS/PPS and the like - in `e.StreamConfigurationData`.
 
-Subscribe events for audio:
-```cs
-client.NewAudioStream += (sender, e) => { ... }
-client.ReceivedAudioData += (sender, e) => { ... }
-```
-
-The `NewAudioStream` callback will contain the audio codec in `e.StreamType` as well as codec-specific info from the SDP in `e.StreamConfigurationData`.
+`ReceivedData` carries the frame in `e.Data`, and the same `e.TrackIndex` and `e.Kind` so you can
+tell which track it came from. `ReceivedRawRTP` and `ReceivedRawRTCP` report the packets themselves
+the same way.
 
 For re-connection, you can optionally subscribe the `Stopped` event:
 ```cs
@@ -56,7 +56,53 @@ client.Connect("rtsps://localhost:8322/stream1", RTPTransport.TCP, "admin", "pas
     userCertificateSelectionCallback: (sender, cert, chain, errors) => errors == SslPolicyErrors.None);
 ```
 
-SRTP is negotiated automatically: when the SDP offers a `SAVP`/`SAVPF` profile with a `crypto` attribute, the client derives the keys and decrypts RTP and RTCP for you. The derived contexts are exposed as `VideoContext` and `AudioContext`.
+SRTP is negotiated automatically: when the SDP offers a `SAVP`/`SAVPF` profile with a `crypto`
+attribute, the client derives the keys and decrypts RTP and RTCP for you, on every track it sets up.
+The keys stay inside the client. To send RTCP on a protected stream, hand the client the
+unprotected bytes and it will protect them with the right track's keys:
+
+```cs
+client.SendRTCP(trackIndex, client.BuildRtcpReceiverReport(ssrc));
+```
+
+A stream that describes itself as encrypted but gives no key this client can use is not played: the
+client stops with `StoppedReason.EncryptionUnavailable` rather than carry on in the clear. Anyone
+able to alter the SDP could otherwise arrange that by deleting one line of it.
+
+The keys are not exposed at all, per track or otherwise. An `SrtpSessionContext` is live crypto
+state: protecting a packet with one outside the client advances the roll over counter and the replay
+state, and the far end can then no longer read what follows - so `SendRTCP` is what there is.
+
+### Streams with more than one track of a kind
+
+A stream is however many tracks it has: two qualities, two languages, or the metadata describing
+what is in the picture. Every one of them is reported the same way, and says which it is:
+
+```cs
+client.AcceptTrack = _ => true;   // take all of them, not just the first of each kind
+
+client.NewTrack += (s, e) => Console.WriteLine($"track {e.TrackIndex}: {e.Kind} {e.Codec}");
+client.ReceivedData += (s, e) => Save(e.TrackIndex, e.Data);
+client.ReceivedRawRTP += (s, e) => Inspect(e.TrackIndex, e.Data);
+client.ReceivedRawRTCP += (s, e) => Inspect(e.TrackIndex, e.Data);
+```
+
+Every one of these says which track it is about, and `TrackCount` says how many there are.
+`SendRTCP` and `GetSsrc`/`SetSsrc` take the same index.
+
+Which of the offered tracks are set up is `AcceptTrack`, one question per track:
+
+```cs
+client.AcceptTrack = _ => true;                            // everything on offer
+client.AcceptTrack = t => t.Kind == TrackKind.Video;       // pictures only
+client.AcceptTrack = t => t.Codec == "H265";               // the H265 one of two video tracks
+client.AcceptTrack = t => t.AcceptedSoFar < 2;             // the first two, whatever they are
+```
+
+It is asked before anything is bound for the track, so one passed over costs no transport, no
+`SETUP` and nothing on the wire, and it is only asked about tracks this client could actually play.
+Unset, it takes the first track of each kind. `MaxTracks` bounds what a description can make the
+client set up whatever the filter says.
 
 ### Knowing why a stream ended
 
@@ -71,6 +117,7 @@ The `Stopped` event reports a `StoppedReason` so you can decide whether reconnec
 | `ServerError` | The server rejected a request with an error we cannot recover from. |
 | `UnsupportedMedia` | The SDP described no media this client can play. |
 | `ProtocolError` | The RTSP dialog failed unexpectedly. Details are in the log. |
+| `EncryptionUnavailable` | The SDP described the media as encrypted but gave no key this client can use, so it stopped rather than accept the media unprotected. |
 
 Retrying is only worthwhile for `ConnectionFailed`, `RtcpBye` and sometimes `ServerError`; the rest will fail again the same way.
 
@@ -150,6 +197,25 @@ h264Track.RtpProfile = RtpProfiles.SAVP;
 ```
 The server then generates per-connection keys and advertises them in the SDP `a=crypto` attribute.
 
+The key lives in that attribute, so the DESCRIBE carrying it has to be encrypted or anyone on the
+path can read the key and, with it, the media. Configure SRTP together with a TLS certificate and
+offer the stream over `rtsps://`; the server logs a warning if you ask for SRTP without one.
+
+### Multicast
+
+Multicast is **off** by default. A group is not a client: once one is open the media goes onto the
+local segment, where anything that joins the group and listens on the port receives it, with no
+authentication at the RTP layer at all. Turn it on where that is what you want:
+
+```cs
+server.MulticastEnabled = true;
+server.MulticastAddress = "239.1.1.1";
+server.MulticastTimeToLive = 1; // one hop, so it stays on the local link
+```
+
+To keep a group readable only by clients that were given the key, set the track to `SAVP` and the
+stream source's `SharedSrtpKey`, so every member is handed the one key the group sends under.
+
 ### Limits and access control
 
 `MaxConnections` caps how many clients the server will hold at once (100 by default, `0` disables the limit). Connections that go quiet for longer than the 60 second RTSP timeout are dropped and their sockets released.
@@ -173,7 +239,83 @@ The sample servers expose this in `appsettings.json`, off by default:
 
 The client side needs no configuration: it answers whichever of the two schemes a server challenges it with.
 
-Authentication is also the only access control: any client that authenticates can reach every stream the server offers. If you need per-stream authorization, hook the `ReceivedRtspMessage` event and enforce it there. Passing a null or empty user name disables authentication entirely, which is only appropriate on a trusted network.
+Passing a null or empty user name disables authentication entirely, which is only appropriate on a trusted network.
+
+Repeated failures from one address are answered slowly, so that guessing a password over a series of
+fresh connections is not free:
+
+```cs
+server.FailedAuthenticationsBeforeDelay = 5;              // per address, in a row
+server.FailedAuthenticationDelay = TimeSpan.FromSeconds(1);
+```
+
+An address that authenticates successfully starts clean again, so a client that mistyped its password
+once pays nothing. Set either to zero to turn the throttle off.
+
+#### Per-stream authorization
+
+Authentication says who a client is; it says nothing about which streams it may have. Handle
+`AuthorizeStream` to decide:
+
+```cs
+server.AuthorizeStream += (sender, e) =>
+{
+    if (!TenantOwns(e.UserName, e.StreamID))
+    {
+        e.Deny(404); // or 403 to say no outright, 401 to invite them to be somebody else
+    }
+};
+```
+
+It is raised for every request that names a stream — DESCRIBE, SETUP, PLAY and the rest — after the
+request has authenticated and before the connection is attached to the stream, so a refused client is
+never sent any of its media. `e.UserName` is the user the request actually proved it is; everything
+else on the request came from the client. A handler that throws refuses the request. With no handler
+the server behaves as it always did: any client that authenticates reaches every stream.
+
+## Logging
+
+Both libraries report through an `ILog` that belongs to the client or server rather than to the
+process. Nothing is shared between two of them, so one noisy stream can be followed without turning
+trace on for everything else:
+
+```cs
+var client = new RTSPClient();
+client.Logger = new DefaultLog { Sink = line => myLog.Write(line) };
+
+// or say nothing at all
+var quiet = new RTSPServer(8554, "admin", "password") { Logger = NullLog.Instance };
+```
+
+`ILog` is five methods and five switches, and implementing it takes no dependency on anything:
+
+```cs
+public interface ILog
+{
+    void LogError(string error);
+    void LogWarning(string warning);
+    void LogInfo(string info);
+    void LogDebug(string debug);
+    void LogTrace(string trace);
+
+    bool IsErrorEnabled { get; set; }
+    bool IsWarningEnabled { get; set; }
+    bool IsInfoEnabled { get; set; }
+    bool IsDebugEnabled { get; set; }
+    bool IsTraceEnabled { get; set; }
+}
+```
+
+`DefaultLog` is what a client or server uses when it is not given anything: it writes to the debug
+output, and its `Sink` can be pointed elsewhere without implementing the interface. Trace is off on
+it, deliberately - that is the level the per-packet lines are written at, and formatting them costs
+more than sending the media does.
+
+Hosts that already use `Microsoft.Extensions.Logging` can pass an `ILoggerFactory` to the
+constructor instead, and the messages arrive structured. Doing that overrides `Logger`.
+
+`DefaultLog` and `NullLog` are named for their pairing with `ILog`; `NullLogger` would have collided
+with `Microsoft.Extensions.Logging.Abstractions.NullLogger`.
 
 ## Samples
 

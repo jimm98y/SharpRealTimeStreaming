@@ -1,3 +1,24 @@
+// SharpRTSPServer
+// Copyright (C) 2026 Lukas Volf
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 using System;
 using System.Globalization;
 
@@ -123,6 +144,13 @@ namespace SharpRTSPServer
         }
 
         /// <summary>
+        /// The longest position this will read, in seconds. A TimeSpan cannot hold more, and the
+        /// header is client supplied - so a value past this is refused rather than allowed to
+        /// overflow, which threw out of a method whose whole contract is to say yes or no.
+        /// </summary>
+        private const double MOST_SECONDS = 365.0 * 24 * 3600 * 1000;
+
+        /// <summary>
         /// Reads either of the two ways normal play time is written.
         /// </summary>
         private static bool TryParseTime(string value, out TimeSpan time)
@@ -134,7 +162,8 @@ namespace SharpRTSPServer
                 if (!double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out double seconds)
                     || seconds < 0
                     || double.IsNaN(seconds)
-                    || double.IsInfinity(seconds))
+                    || double.IsInfinity(seconds)
+                    || seconds > MOST_SECONDS)
                 {
                     return false;
                 }
@@ -157,7 +186,8 @@ namespace SharpRTSPServer
                 return false;
             }
 
-            if (hours < 0 || minutes < 0 || minutes > 59 || seconds2 < 0 || seconds2 >= 60)
+            if (hours < 0 || minutes < 0 || minutes > 59 || seconds2 < 0 || seconds2 >= 60
+                || hours > MOST_SECONDS / 3600)
             {
                 return false;
             }

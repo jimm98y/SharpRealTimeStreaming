@@ -19,6 +19,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+using System;
 using System.Collections.Generic;
 using System.Threading;
 
@@ -42,7 +43,7 @@ namespace SharpRTSPClient.Tests
             public List<StoppedReason> Stops { get; set; }
         }
 
-        private static Outcome Connect(string sdp, MediaRequest request = MediaRequest.VIDEO_ONLY)
+        private static Outcome Connect(string sdp, Func<TrackOffer, bool> acceptTrack = null)
         {
             using var server = new FakeRtspServer(sdp);
 
@@ -50,8 +51,12 @@ namespace SharpRTSPClient.Tests
             using var client = new RTSPClient();
             client.Stopped += (s, e) => { lock (stops) stops.Add(e.Reason); };
 
+            // These are about malformed descriptions, so the default is not enough: the video track
+            // is the one under test and it must be the one taken.
+            client.AcceptTrack = acceptTrack ?? (t => t.Kind == TrackKind.Video);
+
             client.Connect(server.BaseUri, RTPTransport.TCP, "admin", "password",
-                request, false, null, false);
+                false, null, false);
 
             bool reachedPlay = server.WaitForRequest("PLAY", 3000);
             Thread.Sleep(200);

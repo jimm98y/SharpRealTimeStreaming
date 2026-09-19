@@ -46,6 +46,19 @@ namespace SharpRTSPServer.Tests
             "m=audio 0 RTP/SAVP 97\r\na=control:sound\r\na=rtpmap:97 mpeg4-generic/44100/1\r\n" +
             "m=video 0 RTP/SAVP 96\r\na=control:picture\r\na=rtpmap:96 H264/90000\r\n";
 
+        /// <summary>
+        /// The video track these tests add, which is the first one they add.
+        /// </summary>
+        /// <remarks>
+        /// By position, not by kind. RTSPStreamSource used to answer "the video track" itself, which
+        /// is a question with no answer for a stream carrying two of them - the test knows which one
+        /// it put there.
+        /// </remarks>
+        private static ProxyTrack VideoOf(RTSPStreamSource source) => (ProxyTrack)source.Tracks[0];
+
+        /// <summary>The audio track these tests add, which is the second one they add.</summary>
+        private static ProxyTrack AudioOf(RTSPStreamSource source) => (ProxyTrack)source.Tracks[1];
+
         private static RTSPStreamSource NewSource(string sdp)
         {
             var source = new RTSPStreamSource("stream1",
@@ -62,8 +75,8 @@ namespace SharpRTSPServer.Tests
 
             // by position the video section is second - reading it as the first one is what put each
             // track's keys and URLs on the other one
-            Assert.AreEqual("picture", source.GetTrackControl(TrackType.Video));
-            Assert.AreEqual("sound", source.GetTrackControl(TrackType.Audio));
+            Assert.AreEqual("picture", source.GetTrackControl(VideoOf(source)));
+            Assert.AreEqual("sound", source.GetTrackControl(AudioOf(source)));
         }
 
         [TestMethod]
@@ -71,8 +84,9 @@ namespace SharpRTSPServer.Tests
         {
             var source = new RTSPStreamSource("stream1", new H264Track(Sps, Pps), new AACTrack(new byte[] { 0x12, 0x10 }, 44100, 2));
 
-            Assert.AreEqual("trackID=0", source.GetTrackControl(TrackType.Video));
-            Assert.AreEqual("trackID=1", source.GetTrackControl(TrackType.Audio));
+            // Not the ProxyTracks the other tests use, so the tracks are taken as they were added.
+            Assert.AreEqual("trackID=0", source.GetTrackControl(source.Tracks[0]));
+            Assert.AreEqual("trackID=1", source.GetTrackControl(source.Tracks[1]));
         }
 
         [TestMethod]
@@ -82,8 +96,8 @@ namespace SharpRTSPServer.Tests
             using var server = new RTSPServer(port, "admin", "password");
 
             var source = NewSource(AudioFirstSdp);
-            var videoTrack = (ProxyTrack)source.VideoTrack;
-            var audioTrack = (ProxyTrack)source.AudioTrack;
+            var videoTrack = VideoOf(source);
+            var audioTrack = AudioOf(source);
             server.AddStreamSource(source);
             videoTrack.Start();
             audioTrack.Start();
@@ -112,8 +126,8 @@ namespace SharpRTSPServer.Tests
             using var server = new RTSPServer(port, "admin", "password");
 
             var source = NewSource(AudioFirstSdp);
-            ((ProxyTrack)source.VideoTrack).Start();
-            ((ProxyTrack)source.AudioTrack).Start();
+            VideoOf(source).Start();
+            AudioOf(source).Start();
             server.AddStreamSource(source);
             server.StartListen();
 
@@ -145,8 +159,8 @@ namespace SharpRTSPServer.Tests
                 new ProxyTrack(TrackType.Video) { RtpProfile = RtpProfiles.SAVP },
                 new ProxyTrack(TrackType.Audio) { RtpProfile = RtpProfiles.SAVP });
             source.OverrideSDP(AudioFirstSavpSdp, true);
-            ((ProxyTrack)source.VideoTrack).Start();
-            ((ProxyTrack)source.AudioTrack).Start();
+            VideoOf(source).Start();
+            AudioOf(source).Start();
             server.AddStreamSource(source);
             server.StartListen();
 
@@ -175,7 +189,7 @@ namespace SharpRTSPServer.Tests
             Assert.AreEqual(200, setup.StatusCode);
             Assert.AreEqual(200, client.Send("PLAY", baseUri, "Session: " + setup.Session).StatusCode);
 
-            ((ProxyTrack)source.VideoTrack).FeedInRawSamples(9000, new List<ReadOnlyMemory<byte>>
+            VideoOf(source).FeedInRawSamples(9000, new List<ReadOnlyMemory<byte>>
             {
                 new ReadOnlyMemory<byte>(new byte[16])
             });

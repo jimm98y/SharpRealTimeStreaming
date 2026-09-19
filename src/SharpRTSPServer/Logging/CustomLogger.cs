@@ -25,8 +25,31 @@ using System.Diagnostics;
 
 namespace SharpRTSPServer.Logging
 {
+    /// <summary>
+    /// Presents an <see cref="ILog"/> as the <see cref="ILogger"/> the server's own code writes to.
+    /// </summary>
+    /// <remarks>
+    /// The server is written against <see cref="ILogger"/> throughout, because its messages are
+    /// structured - named values rather than strings already glued together - and that is worth
+    /// keeping for a host that has somewhere structured to put them. <see cref="ILog"/> is the
+    /// simpler thing a host can implement without taking a dependency on anything, and this is what
+    /// joins the two.
+    /// <para>
+    /// The logger is read through a delegate rather than held, so that assigning
+    /// <see cref="RTSPServer.Logger"/> after the server is built takes effect. It used to read a
+    /// static class, which is why every server in a process shared one.
+    /// </para>
+    /// </remarks>
     public class CustomLogger : ILogger
     {
+        private readonly Func<ILog> _logger;
+
+        /// <param name="logger">Where to look for the logger each time something is written.</param>
+        public CustomLogger(Func<ILog> logger)
+        {
+            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        }
+
         class CustomLoggerScope<TState> : IDisposable
         {
             public CustomLoggerScope(TState state)
@@ -53,19 +76,26 @@ namespace SharpRTSPServer.Logging
         /// </remarks>
         public bool IsEnabled(LogLevel logLevel)
         {
+            ILog logger = _logger();
+
+            if (logger == null)
+            {
+                return false;
+            }
+
             switch (logLevel)
             {
                 case LogLevel.Trace:
-                    return Logging.Log.TraceEnabled;
+                    return logger.IsTraceEnabled;
                 case LogLevel.Debug:
-                    return Logging.Log.DebugEnabled;
+                    return logger.IsDebugEnabled;
                 case LogLevel.Information:
-                    return Logging.Log.InfoEnabled;
+                    return logger.IsInfoEnabled;
                 case LogLevel.Warning:
-                    return Logging.Log.WarnEnabled;
+                    return logger.IsWarningEnabled;
                 case LogLevel.Error:
                 case LogLevel.Critical:
-                    return Logging.Log.ErrorEnabled;
+                    return logger.IsErrorEnabled;
                 case LogLevel.None:
                     return false;
                 default:
@@ -75,58 +105,41 @@ namespace SharpRTSPServer.Logging
 
         public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception exception, Func<TState, Exception, string> formatter)
         {
+            ILog logger = _logger();
+
+            if (logger == null || formatter == null)
+            {
+                return;
+            }
+
             switch (logLevel)
             {
                 case LogLevel.Trace:
-                    {
-                        if (Logging.Log.TraceEnabled)
-                        {
-                            Logging.Log.Trace(formatter.Invoke(state, exception));
-                        }
-                    }
+                    logger.Trace(formatter.Invoke(state, exception), exception);
                     break;
 
                 case LogLevel.Debug:
-                    {
-                        if (Logging.Log.DebugEnabled)
-                        {
-                            Logging.Log.Debug(formatter.Invoke(state, exception));
-                        }
-                    }
+                    logger.Debug(formatter.Invoke(state, exception), exception);
                     break;
 
                 case LogLevel.Information:
-                    {
-                        if (Logging.Log.InfoEnabled)
-                        {
-                            Logging.Log.Info(formatter.Invoke(state, exception));
-                        }
-                    }
+                    logger.Info(formatter.Invoke(state, exception), exception);
                     break;
 
                 case LogLevel.Warning:
-                    {
-                        if (Logging.Log.WarnEnabled)
-                        {
-                            Logging.Log.Warn(formatter.Invoke(state, exception));
-                        }
-                    }
+                    logger.Warning(formatter.Invoke(state, exception), exception);
                     break;
 
                 case LogLevel.Error:
                 case LogLevel.Critical:
-                    {
-                        if (Logging.Log.ErrorEnabled)
-                        {
-                            Logging.Log.Error(formatter.Invoke(state, exception));
-                        }
-                    }
+                    logger.Error(formatter.Invoke(state, exception), exception);
+                    break;
+
+                case LogLevel.None:
                     break;
 
                 default:
-                    {
-                        Debug.WriteLine($"Unknown trace level: {logLevel}");
-                    }
+                    Debug.WriteLine($"Unknown trace level: {logLevel}");
                     break;
             }
         }
