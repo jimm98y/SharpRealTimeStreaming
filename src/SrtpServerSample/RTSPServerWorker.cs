@@ -64,6 +64,26 @@ namespace SrtpServerSample
             /// </remarks>
             public double FurthestSeconds { get; set; }
 
+            /// <summary>
+            /// Whether a track is still handing back samples from where it was before the loop.
+            /// </summary>
+            /// <remarks>
+            /// Putting a track back to its first sample does not take effect at once: the reader has
+            /// a fragment in hand and goes on returning what is left of it. Those samples belong to
+            /// the end of the file, and feeding them once the offset has moved on sends them a whole
+            /// file into the future and then jumps back - which is the tail of the sound playing over
+            /// the beginning of the next time round. They are skipped until the track's own times go
+            /// backwards, which is the reader actually arriving at the start.
+            /// </remarks>
+            public bool VideoRewinding { get; set; }
+
+            public bool AudioRewinding { get; set; }
+
+            /// <summary>Where each track was last time it was read, to notice that going backwards.</summary>
+            public double VideoLastSeconds { get; set; }
+
+            public double AudioLastSeconds { get; set; }
+
             public MediaFileReader(string streamID)
             {
                 StreamID = streamID;
@@ -120,10 +140,25 @@ namespace SrtpServerSample
         /// together.
         /// </para>
         /// </remarks>
+        /// <summary>
+        /// How near the beginning of a file counts as the file having started again.
+        /// </summary>
+        /// <remarks>
+        /// One sample is a few tens of milliseconds, so anything under a second is the start. It has to
+        /// be a distance from the start rather than a step backwards, because the reader rewinds only as
+        /// far as the fragment it had in hand: what it hands back after a loop is the last second or so
+        /// of the file over again, which is earlier than before and still not the beginning.
+        /// </remarks>
+        private const double START_OF_FILE_SECONDS = 1.0;
+
         private static void StartFileAgain(MediaFileReader reader, IEnumerable<KeyValuePair<uint, TrackContext>> tracks)
         {
             reader.LoopOffsetSeconds += reader.FurthestSeconds;
             reader.FurthestSeconds = 0;
+
+            // Until each track's times go backwards, what it hands back is still the end of the file.
+            reader.VideoRewinding = true;
+            reader.AudioRewinding = true;
 
             foreach (var track in tracks)
             {
@@ -336,6 +371,23 @@ namespace SrtpServerSample
                                     // Where this sample sits in the file, and where that is in the playout -
                                     // which stops being the same thing once the file has been round more than once.
                                     double videoSeconds = (double)sample.PTS / sourceVideoTimescale;
+                                    if (mediaFileReader.VideoRewinding)
+                                    {
+                                        // Near the beginning of the file, not merely earlier than before.
+                                        // Putting the track back to its first sample rewinds the reader as
+                                        // far as the fragment it had in hand and no further, so what comes
+                                        // back next is the last second or so of the file over again - which
+                                        // is exactly what this is here to swallow.
+                                        if (videoSeconds >= START_OF_FILE_SECONDS)
+                                        {
+                                            mediaFileReader.VideoLastSeconds = videoSeconds;
+                                            return;
+                                        }
+
+                                        mediaFileReader.VideoRewinding = false;
+                                    }
+
+                                    mediaFileReader.VideoLastSeconds = videoSeconds;
                                     mediaFileReader.FurthestSeconds = Math.Max(
                                         mediaFileReader.FurthestSeconds, videoSeconds + videoSampleSeconds);
 
@@ -400,6 +452,20 @@ namespace SrtpServerSample
 
                                     IEnumerable<byte[]> units = inputReader.ParseSample(inputTrack.TrackID, sample.Data);
                                     double audioSeconds = (double)sample.PTS / sourceAudioTimescale;
+                                    if (mediaFileReader.AudioRewinding)
+                                    {
+                                        // Near the beginning of the file, not merely earlier than before -
+                                        // see the video track above for why.
+                                        if (audioSeconds >= START_OF_FILE_SECONDS)
+                                        {
+                                            mediaFileReader.AudioLastSeconds = audioSeconds;
+                                            return;
+                                        }
+
+                                        mediaFileReader.AudioRewinding = false;
+                                    }
+
+                                    mediaFileReader.AudioLastSeconds = audioSeconds;
                                     mediaFileReader.FurthestSeconds = Math.Max(
                                         mediaFileReader.FurthestSeconds, audioSeconds + audioSampleSeconds);
 

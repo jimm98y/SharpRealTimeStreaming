@@ -295,6 +295,15 @@ namespace SharpRTSPServer
         /// </summary>
         private bool _sentKeptKeyFrame;
         private long _dropped;
+
+        /// <summary>
+        /// Pictures not sent because the client had no way to decode them.
+        /// </summary>
+        /// <remarks>
+        /// Deliberate, and nothing to do with whether the client is keeping up - see the drop
+        /// reporting below, which is about a client that is not.
+        /// </remarks>
+        private long _withheld;
         private long _reportedDrops;
         private long _queuedBytes;
 
@@ -386,10 +395,12 @@ namespace SharpRTSPServer
 
             if (frame.Kind == TrackType.Video && !HoldsBackPicture(frame, ref askForKeyFrame))
             {
-                // Not dropped so much as not worth sending: nothing downstream could decode it.
-                // Counted all the same, because it is still media the client did not get.
+                // Not dropped: held back, because nothing downstream could decode it. Counted
+                // apart from the drops, which are the ones a client lost because it could not keep
+                // up - reporting these as those said a client was falling behind when it was
+                // sitting on a still picture waiting for a keyframe, which is the opposite problem.
                 frame.Release();
-                _dropped++;
+                _withheld++;
 
                 // Not necessarily nothing to do, though - holding this one back may have put the
                 // kept keyframe in the queue in its place.
