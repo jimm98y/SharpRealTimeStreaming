@@ -81,6 +81,8 @@ if (string.IsNullOrEmpty(videoUri) && string.IsNullOrEmpty(audioUri))
 
 const string STREAM_ID = "stream1";
 
+bool keepLastKeyFrame = ReadKeepLastKeyFrame(config["KeepLastKeyFrame"]);
+
 using (var server = new RTSPServer(port, ReadUsers(config, "Users")))
 {
     server.AuthenticationScheme = ReadAuthenticationScheme(config["AllowBasicAuthentication"]);
@@ -109,8 +111,10 @@ using (var server = new RTSPServer(port, ReadUsers(config, "Users")))
 
         // A client that arrives mid-group has nothing it can decode until the next keyframe.
         // Keeping the last one means it is given a picture straight away, and held on that
-        // picture until the stream starts a group it can follow properly.
-        streamSource.KeepLastKeyFrame = true;
+        // picture until the stream starts a group it can follow properly. It costs one frame
+        // of memory per stream and starts that client on a picture the live stream has moved
+        // on from, so it can be turned off.
+        streamSource.KeepLastKeyFrame = keepLastKeyFrame;
 
         server.AddStreamSource(streamSource);
 
@@ -185,6 +189,18 @@ static IUserRepository ReadUsers(IConfiguration configuration, string section)
     }
 
     return users.Count > 0 ? users : null;
+}
+
+/// <summary>
+/// Whether to keep the last keyframe of a stream to start a client on, from appsettings.json.
+/// </summary>
+/// <remarks>
+/// On when the setting is missing, which is what this sample has always done. Set it to false to
+/// have a client that joins mid-group wait for the next real keyframe instead.
+/// </remarks>
+static bool ReadKeepLastKeyFrame(string value)
+{
+    return !bool.TryParse(value, out bool keep) || keep;
 }
 
 static RtspAuthenticationScheme ReadAuthenticationScheme(string allowBasicAuthentication)

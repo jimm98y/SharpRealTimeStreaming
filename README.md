@@ -201,6 +201,42 @@ The key lives in that attribute, so the DESCRIBE carrying it has to be encrypted
 path can read the key and, with it, the media. Configure SRTP together with a TLS certificate and
 offer the stream over `rtsps://`; the server logs a warning if you ask for SRTP without one.
 
+### Starting a client that joins mid-stream
+
+A client that arrives in the middle of a group of pictures has nothing it can decode until the next
+keyframe - everything before it refers to frames the client never saw. That can be a second or two
+of sound playing against a blank picture.
+
+Most encoders can be asked for a keyframe on demand, which ends the wait properly and costs nothing.
+Handle `KeyFrameNeeded` and ask yours:
+
+```cs
+server.KeyFrameNeeded += (sender, e) => encoder.RequestKeyFrame();
+```
+
+Where there is nothing to ask, or nothing answers, a stream can instead keep the last keyframe it
+produced and start such a client on that:
+
+```cs
+streamSource.KeepLastKeyFrame = true;
+```
+
+Off by default, and a fallback rather than a first choice. It buys a real picture immediately
+instead of a blank one; it does not buy a clean stream, because the live pictures that follow refer
+to frames between that keyframe and now which the client still never saw, so it decodes them
+imperfectly until a real keyframe comes round. It costs one frame of memory per stream, whatever the
+audience, and it makes the stream packetise even with nobody attached so that a producer which
+starts on demand does not lose its first keyframe.
+
+`KeyFrameWait` is how long a client goes without a picture before the server gives up waiting and
+sends what it has. The sample servers expose the whole thing in `appsettings.json`:
+
+```json
+{
+  "KeepLastKeyFrame": true
+}
+```
+
 ### Multicast
 
 Multicast is **off** by default. A group is not a client: once one is open the media goes onto the
