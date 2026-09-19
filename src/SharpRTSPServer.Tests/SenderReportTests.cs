@@ -85,7 +85,7 @@ namespace SharpRTSPServer.Tests
         public void OneReportStartsTheStreamAndThenTheyAreRare()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, "admin", "password")
+            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"))
             {
                 // far longer than this test runs, so only the opening report should appear
                 RtcpSenderReportInterval = TimeSpan.FromMinutes(5)
@@ -107,7 +107,7 @@ namespace SharpRTSPServer.Tests
         public void TheOpeningReportIsSentStraightAway()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, "admin", "password")
+            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"))
             {
                 RtcpSenderReportInterval = TimeSpan.FromMinutes(5)
             };
@@ -130,7 +130,7 @@ namespace SharpRTSPServer.Tests
         public void ReportsComeRoundAgainOnTheInterval()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, "admin", "password")
+            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"))
             {
                 RtcpSenderReportInterval = TimeSpan.FromMilliseconds(200)
             };

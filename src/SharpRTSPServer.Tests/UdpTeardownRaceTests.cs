@@ -119,9 +119,9 @@ namespace SharpRTSPServer.Tests
             int port = TestPorts.FindFree();
 
             using var server = protect
-                ? new RTSPServer(port, "admin", "password", false, null,
+                ? new RTSPServer(port, new InMemoryUserRepository("admin", "password"), false, null,
                     SrtpCryptoSuites.AES_CM_128_HMAC_SHA1_80, logs)
-                : new RTSPServer(port, "admin", "password", false, null, logs);
+                : new RTSPServer(port, new InMemoryUserRepository("admin", "password"), false, null, logs);
 
             server.SetRtpPortRange(53000, 53400);
 
@@ -212,7 +212,7 @@ namespace SharpRTSPServer.Tests
         public void ThePortsStillComeBackAtOnce()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, "admin", "password");
+            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
 
             // one pair, so a second SETUP can only succeed if the first one's pair came back
             server.SetRtpPortRange(53400, 53402);

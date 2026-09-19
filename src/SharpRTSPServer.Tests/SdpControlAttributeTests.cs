@@ -93,7 +93,7 @@ namespace SharpRTSPServer.Tests
         public void SetupFindsATrackByItsOwnControlAttribute()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, "admin", "password");
+            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
 
             var source = NewSource(AudioFirstSdp);
             var videoTrack = VideoOf(source);
@@ -123,7 +123,7 @@ namespace SharpRTSPServer.Tests
         public void RtpInfoNamesTheControlUrlTheSdpAdvertised()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, "admin", "password");
+            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
 
             var source = NewSource(AudioFirstSdp);
             VideoOf(source).Start();
@@ -152,7 +152,7 @@ namespace SharpRTSPServer.Tests
         public void CryptoGoesIntoTheSectionThatBelongsToTheTrack()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, "admin", "password", false, null,
+            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"), false, null,
                 SrtpCryptoSuites.AES_CM_128_HMAC_SHA1_80, null);
 
             var source = new RTSPStreamSource("stream1",

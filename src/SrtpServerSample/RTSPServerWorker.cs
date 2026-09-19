@@ -296,6 +296,38 @@ namespace SrtpServerSample
         /// <summary>
         /// Basic sends the password in a reversible form, so it stays off unless the config asks for it.
         /// </summary>
+    /// <summary>
+    /// The users this server will authenticate, read from the Users section of appsettings.json.
+    /// </summary>
+    /// <remarks>
+    /// A name and a password apiece, so a server can have several. An empty or missing section
+    /// means no repository at all, which is a server that does not authenticate - only appropriate
+    /// on a trusted network.
+    /// </remarks>
+    private static IUserRepository ReadUsers(IConfiguration configuration, string section)
+    {
+        // Binds straight onto UserInfo, so the section is a list of the same shape the repository
+        // hands back: a UserName and a Password apiece.
+        UserInfo[] configured = configuration.GetSection(section).Get<UserInfo[]>();
+
+        if (configured == null)
+        {
+            return null;
+        }
+
+        var users = new InMemoryUserRepository();
+
+        foreach (UserInfo user in configured)
+        {
+            if (!string.IsNullOrEmpty(user?.UserName) && !string.IsNullOrEmpty(user.Password))
+            {
+                users.Add(user.UserName, user.Password);
+            }
+        }
+
+        return users.Count > 0 ? users : null;
+    }
+
         private static RtspAuthenticationScheme ReadAuthenticationScheme(string allowBasicAuthentication)
         {
             return bool.TryParse(allowBasicAuthentication, out bool allowBasic) && allowBasic
@@ -318,8 +350,6 @@ namespace SrtpServerSample
 
             var hostName = _configuration["RTSPServerApp:HostName"];
             var port = ushort.Parse(_configuration["RTSPServerApp:Port"]);
-            var userName = _configuration["RTSPServerApp:UserName"];
-            var password = _configuration["RTSPServerApp:Password"];
 
             MediaFile[] mediaFiles = _configuration.GetSection("RTSPServerApp:Media").Get<MediaFile[]>();
             if (mediaFiles == null)
@@ -333,10 +363,9 @@ namespace SrtpServerSample
                 DateTime.UtcNow.AddDays(-1),
                 DateTime.UtcNow.AddDays(30));
             _server = new RTSPServer(
-                port, 
-                userName,
-                password, 
-                false, 
+                port,
+                ReadUsers(_configuration, "RTSPServerApp:Users"),
+                false,
                 serverCertificate, // use RTSPS (RTSP over TLS)
                 SrtpCryptoSuites.AES_CM_128_HMAC_SHA1_80, // use SAVP to protect the RTP/RTCP (SRTP using AES_CM_128_HMAC_SHA1_80)
                 _loggerFactory);
@@ -646,7 +675,7 @@ namespace SrtpServerSample
                 mediaFileReader.VideoTimer?.Start();
                 mediaFileReader.AudioTimer?.Start();
 
-                _logger.LogInformation($"RTSP URL is rtsps://{userName}:{password}@{hostName}:{port}/{mediaFileReader.StreamID}");
+                _logger.LogInformation($"RTSP URL is rtsps://{hostName}:{port}/{mediaFileReader.StreamID} - authenticate as one of the configured users");
             }
 
             return Task.CompletedTask;

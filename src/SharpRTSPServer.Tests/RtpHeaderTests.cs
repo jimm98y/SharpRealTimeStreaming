@@ -93,7 +93,7 @@ namespace SharpRTSPServer.Tests
         public void VideoAndAudioAreSentUnderTheirOwnSsrc()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, "admin", "password");
+            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
 
             var videoTrack = new H264Track(Sps, Pps);
             var audioTrack = new AACTrack(new byte[] { 0x12, 0x10 }, 44100, 2);
@@ -120,7 +120,7 @@ namespace SharpRTSPServer.Tests
         public void TheSetupReplyAnnouncesTheSsrcTheRtpCarries()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, "admin", "password");
+            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
 
             var videoTrack = new H264Track(Sps, Pps);
             var audioTrack = new AACTrack(new byte[] { 0x12, 0x10 }, 44100, 2);
@@ -156,7 +156,7 @@ namespace SharpRTSPServer.Tests
         public void AProxyTrackInPassthroughForwardsTheSourceSsrcAndSequenceNumbers()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, "admin", "password");
+            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
 
             var videoTrack = new ProxyTrack(TrackType.Video) { PreserveSourceHeaders = true };
             var audioTrack = new ProxyTrack(TrackType.Audio) { PreserveSourceHeaders = true };
@@ -184,7 +184,7 @@ namespace SharpRTSPServer.Tests
         public void AProxyTrackWithoutPassthroughIsStillRestamped()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, "admin", "password");
+            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
 
             var videoTrack = new ProxyTrack(TrackType.Video);
             var audioTrack = new ProxyTrack(TrackType.Audio);

@@ -252,13 +252,17 @@ namespace SharpRTSPServer
         private bool _disposed;
         private Task _listenThread;
         private Timer _reaperTimer;
-        private readonly NetworkCredential _credentials;
+        private readonly IUserRepository _users;
 
         // Newest first. The first is what clients are challenged with; the rest are nonces that have
         // just been rotated out and are still accepted, so that rotating does not fail a request that
         // was already on its way. Replaced wholesale, and read from the RTSP receive threads, which
         // take one copy per message - so a change never leaves a request half checked.
-        private volatile Authentication[] _authentications = new Authentication[0];
+        //
+        // Nonces rather than whole challenges, because a challenge is per user now: it is checked by
+        // rebuilding the one the client answered from the password of whichever user it named. Empty
+        // means the server has no user repository and does not authenticate at all.
+        private volatile string[] _nonces = new string[0];
         private RtspAuthenticationScheme _authenticationScheme = RtspAuthenticationScheme.Digest;
         private Timer _nonceTimer;
 
@@ -647,57 +651,62 @@ namespace SharpRTSPServer
         /// Initializes a new instance of the <see cref="RTSPServer"/> class.
         /// </summary>
         /// <param name="portNumber">Port number.</param>
-        /// <param name="userName">User name.</param>
-        /// <param name="password">Password.</param>
+        /// <param name="users">
+        /// Where the server looks a user up, or null for a server that does not authenticate at all
+        /// - which is only appropriate on a trusted network.
+        /// </param>
         public RTSPServer(
             int portNumber,
-            string userName,
-            string password)
-            : this(portNumber, userName, password, (ILoggerFactory)null)
+            IUserRepository users)
+            : this(portNumber, users, (ILoggerFactory)null)
         { }
 
         /// <summary>
         /// Initializes a new instance of the <see cref="RTSPServer"/> class.
         /// </summary>
         /// <param name="portNumber">Port number.</param>
-        /// <param name="userName">User name.</param>
-        /// <param name="password">Password.</param>
+        /// <param name="users">
+        /// Where the server looks a user up, or null for a server that does not authenticate at all
+        /// - which is only appropriate on a trusted network.
+        /// </param>
         /// <param name="loggerFactory">Logger factory.</param>
         public RTSPServer(
             int portNumber,
-            string userName,
-            string password,
+            IUserRepository users,
             ILoggerFactory loggerFactory)
-            : this(portNumber, userName, password, false, null, loggerFactory)
+            : this(portNumber, users, false, null, loggerFactory)
         { }
 
         /// <summary>
         /// Initializes a new instance of the <see cref="RTSPServer"/> class.
         /// </summary>
         /// <param name="portNumber">Port number.</param>
-        /// <param name="userName">User name.</param>
-        /// <param name="password">Password.</param>
+        /// <param name="users">
+        /// Where the server looks a user up, or null for a server that does not authenticate at all
+        /// - which is only appropriate on a trusted network.
+        /// </param>
         /// <param name="useHttpTunnel">RTSP over HTTP.</param>
         /// <param name="tlsCertificate">TLS certificate used for RTSPS and HTTPS.</param>
         /// <param name="loggerFactory">Logger factory.</param>
         /// <param name="userCertificateValidationCallback">Certificate validation callback.</param>
         public RTSPServer(
             int portNumber,
-            string userName,
-            string password,
+            IUserRepository users,
             bool useHttpTunnel,
             X509Certificate2 tlsCertificate,
             ILoggerFactory loggerFactory,
             RemoteCertificateValidationCallback userCertificateValidationCallback = null)
-            : this(portNumber, userName, password, useHttpTunnel, tlsCertificate, null, loggerFactory, userCertificateValidationCallback)
+            : this(portNumber, users, useHttpTunnel, tlsCertificate, null, loggerFactory, userCertificateValidationCallback)
         { }
 
         /// <summary>
         /// Initializes a new instance of the <see cref="RTSPServer"/> class.
         /// </summary>
         /// <param name="portNumber">Port number.</param>
-        /// <param name="userName">User name.</param>
-        /// <param name="password">Password.</param>
+        /// <param name="users">
+        /// Where the server looks a user up, or null for a server that does not authenticate at all
+        /// - which is only appropriate on a trusted network.
+        /// </param>
         /// <param name="useHttpTunnel">RTSP over HTTP.</param>
         /// <param name="tlsCertificate">TLS certificate used for RTSPS and HTTPS.</param>
         /// <param name="srtpCryptoSuite">SRTP crypto suite <see cref="SrtpCryptoSuites"/>.</param>
@@ -705,8 +714,7 @@ namespace SharpRTSPServer
         /// <param name="userCertificateValidationCallback">Certificate validation callback.</param>
         public RTSPServer(
             int portNumber,
-            string userName,
-            string password,
+            IUserRepository users,
             bool useHttpTunnel,
             X509Certificate2 tlsCertificate,
             string srtpCryptoSuite,
@@ -731,9 +739,7 @@ namespace SharpRTSPServer
             this.TlsCertificate = tlsCertificate;
             this.SrtpCryptoSuite = srtpCryptoSuite;
 
-            _credentials = !string.IsNullOrEmpty(userName) && !string.IsNullOrEmpty(password)
-                ? new NetworkCredential(userName, password)
-                : new NetworkCredential();
+            _users = users;
 
             ResetAuthentication();
 
@@ -764,30 +770,157 @@ namespace SharpRTSPServer
         }
 
         /// <summary>
-        /// Builds the challenge for the given scheme, or null when no credentials were configured
-        /// and the server is therefore open.
+        /// A credential to build a challenge from, which needs a realm and a nonce and nothing else.
         /// </summary>
-        private Authentication CreateAuthentication(RtspAuthenticationScheme scheme)
+        /// <remarks>
+        /// The WWW-Authenticate header says what to answer and where, not who is answering, so the
+        /// user in it is never read. Validation builds its own from the user the request named.
+        /// </remarks>
+        private static readonly NetworkCredential ChallengeCredential = new NetworkCredential(string.Empty, string.Empty);
+
+        /// <summary>
+        /// The WWW-Authenticate header clients are challenged with.
+        /// </summary>
+        private string BuildChallenge(string nonce)
         {
-            if (string.IsNullOrEmpty(_credentials?.UserName) || string.IsNullOrEmpty(_credentials.Password))
+            if (_authenticationScheme == RtspAuthenticationScheme.Basic)
+            {
+                return new AuthenticationBasic(ChallengeCredential, AUTHENTICATION_REALM).GetServerResponse();
+            }
+
+            return new AuthenticationDigest(ChallengeCredential, AUTHENTICATION_REALM, nonce, string.Empty).GetServerResponse();
+        }
+
+        /// <summary>
+        /// Says once that Basic without TLS sends the password in a reversible form.
+        /// </summary>
+        private void WarnIfBasicIsInTheClear()
+        {
+            if (_authenticationScheme != RtspAuthenticationScheme.Basic || TlsCertificate != null || _users == null)
+            {
+                return;
+            }
+
+            _logger.LogWarning(
+                "Basic authentication is enabled without a TLS certificate. The user name and password " +
+                "will be sent in a reversible form and can be read off the network. Use Digest, or " +
+                "configure a TLS certificate so the connection is encrypted.");
+        }
+
+        /// <summary>
+        /// The user name a request offers, which is unverified - it is whatever the client put in
+        /// the header, and says only which user to check the rest of it against.
+        /// </summary>
+        private static string OfferedUserName(string authorization)
+        {
+            if (string.IsNullOrEmpty(authorization))
             {
                 return null;
             }
 
-            if (scheme == RtspAuthenticationScheme.Basic)
+            if (authorization.StartsWith("Basic ", StringComparison.OrdinalIgnoreCase))
             {
-                if (TlsCertificate == null)
+                try
                 {
-                    _logger.LogWarning(
-                        "Basic authentication is enabled without a TLS certificate. The user name and password " +
-                        "will be sent in a reversible form and can be read off the network. Use Digest, or " +
-                        "configure a TLS certificate so the connection is encrypted.");
-                }
+                    // "user:password", base64 encoded, and a password may itself contain a colon
+                    string pair = Encoding.UTF8.GetString(Convert.FromBase64String(authorization.Substring(6).Trim()));
+                    int separator = pair.IndexOf(':');
 
-                return new AuthenticationBasic(_credentials, AUTHENTICATION_REALM);
+                    return separator < 0 ? pair : pair.Substring(0, separator);
+                }
+                catch (Exception)
+                {
+                    // not base64, or not a pair - which is a malformed header rather than a user
+                    return null;
+                }
             }
 
-            return new AuthenticationDigest(_credentials, AUTHENTICATION_REALM, RandomGenerator.NextHexToken(NONCE_BYTES), string.Empty);
+            Match userName = Regex.Match(authorization, "username=\"([^\"]*)\"");
+
+            return userName.Success ? userName.Groups[1].Value : null;
+        }
+
+        /// <summary>
+        /// The user a request names, or null where there is no such user.
+        /// </summary>
+        private UserInfo LookUpUser(RtspRequest message)
+        {
+            if (!message.Headers.TryGetValue("Authorization", out string authorization))
+            {
+                return null;
+            }
+
+            string offered = OfferedUserName(authorization);
+
+            if (string.IsNullOrEmpty(offered))
+            {
+                return null;
+            }
+
+            try
+            {
+                return _users.GetUser(offered);
+            }
+            catch (Exception ex)
+            {
+                // The repository is someone else's code and is on the path of every request. One
+                // that throws must not be a way in, and must not take the connection with it.
+                _logger.LogError(ex, "The user repository threw looking up {userName}", offered);
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Whether a request answered the challenge correctly, and as whom.
+        /// </summary>
+        /// <remarks>
+        /// The answer is checked by rebuilding the challenge the client saw from the password of the
+        /// user it named. Only someone who knows that password can produce an answer that fits, so
+        /// naming a user is not evidence of being one.
+        /// </remarks>
+        private bool TryAuthenticate(RtspRequest message, string[] nonces, out string userName)
+        {
+            userName = null;
+
+            UserInfo user = LookUpUser(message);
+
+            if (user == null || string.IsNullOrEmpty(user.Password))
+            {
+                return false;
+            }
+
+            var credential = new NetworkCredential(user.UserName, user.Password);
+
+            try
+            {
+                if (_authenticationScheme == RtspAuthenticationScheme.Basic)
+                {
+                    // no nonce in Basic, so there is one answer and it does not go stale
+                    if (!new AuthenticationBasic(credential, AUTHENTICATION_REALM).IsValid(message))
+                    {
+                        return false;
+                    }
+
+                    userName = user.UserName;
+                    return true;
+                }
+
+                // The one being handed out, and any just rotated out of it.
+                foreach (string nonce in nonces)
+                {
+                    if (new AuthenticationDigest(credential, AUTHENTICATION_REALM, nonce, string.Empty).IsValid(message))
+                    {
+                        userName = user.UserName;
+                        return true;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Could not check the Authorization header from a client");
+            }
+
+            return false;
         }
 
         /// <summary>
@@ -818,9 +951,20 @@ namespace SharpRTSPServer
                 return false;
             }
 
+            UserInfo user = LookUpUser(message);
+
+            if (user == null || string.IsNullOrEmpty(user.Password))
+            {
+                // no such user, so it is not a good answer under an old nonce either
+                return false;
+            }
+
             try
             {
-                var asTheClientSawIt = new AuthenticationDigest(_credentials, AUTHENTICATION_REALM, nonce.Groups[1].Value, string.Empty);
+                var asTheClientSawIt = new AuthenticationDigest(
+                    new NetworkCredential(user.UserName, user.Password),
+                    AUTHENTICATION_REALM, nonce.Groups[1].Value, string.Empty);
+
                 return asTheClientSawIt.IsValid(message);
             }
             catch (Exception ex)
@@ -835,8 +979,8 @@ namespace SharpRTSPServer
         /// </summary>
         private void ResetAuthentication()
         {
-            Authentication authentication = CreateAuthentication(_authenticationScheme);
-            _authentications = authentication == null ? new Authentication[0] : new[] { authentication };
+            _nonces = _users == null ? new string[0] : new[] { RandomGenerator.NextHexToken(NONCE_BYTES) };
+            WarnIfBasicIsInTheClear();
         }
 
         /// <summary>
@@ -853,22 +997,22 @@ namespace SharpRTSPServer
                     return;
                 }
 
-                Authentication fresh = CreateAuthentication(RtspAuthenticationScheme.Digest);
-                if (fresh == null)
+                string[] previous = _nonces;
+
+                if (previous.Length == 0)
                 {
-                    // no credentials configured, so the server is open and there is nothing to rotate
+                    // no user repository, so the server is open and there is nothing to rotate
                     return;
                 }
 
-                Authentication[] previous = _authentications;
-                var rotated = new List<Authentication>(NONCE_GRACE_COUNT + 1) { fresh };
+                var rotated = new List<string>(NONCE_GRACE_COUNT + 1) { RandomGenerator.NextHexToken(NONCE_BYTES) };
 
                 for (int i = 0; i < previous.Length && rotated.Count <= NONCE_GRACE_COUNT; i++)
                 {
                     rotated.Add(previous[i]);
                 }
 
-                _authentications = rotated.ToArray();
+                _nonces = rotated.ToArray();
                 _logger.LogDebug("Rotated the authentication nonce, {count} still accepted", rotated.Count);
             }
             catch (Exception ex)
@@ -1517,33 +1661,33 @@ namespace SharpRTSPServer
             _logger.LogDebug("RTSP {method} {uri} received from {remoteEndPoint}",
                 message.RequestTyped, message.RtspUri, listener.RemoteEndPoint);
 
-            // Check if the RTSP Message has valid authentication (validating against username,password,realm and nonce).
-            // One snapshot for the whole check, so a scheme change cannot validate against one scheme
-            // and then challenge with the other.
-            Authentication[] authentications = _authentications;
+            // Check if the RTSP Message has valid authentication (validating the answer against the
+            // password of whichever user it named, and the realm and nonce).
+            // One snapshot for the whole check, so a rotation cannot validate against one nonce and
+            // then challenge with another.
+            string[] nonces = _nonces;
 
-            // Null on a server with no credentials configured, which is one that does not
-            // authenticate at all. Otherwise it is the user the request proved it is, which is the
-            // only thing about the client worth handing to an authorization handler.
+            // Null on a server with no user repository, which is one that does not authenticate at
+            // all. Otherwise it is the user the request proved it is - not the one it claimed -
+            // which is the only thing about the client worth handing to an authorization handler.
             string authenticatedUser = null;
             string throttleKey = AuthenticationThrottle.KeyFor(listener.RemoteEndPoint);
 
-            if (authentications.Length > 0)
+            if (nonces.Length > 0)
             {
                 // Challenge with the newest, but accept any that is still within its grace period.
-                Authentication authentication = authentications[0];
+                string challenge = BuildChallenge(nonces[0]);
 
                 if (message.Headers.ContainsKey("Authorization"))
                 {
                     // The Header contained Authorization. A correct answer lets the request
                     // through; a wrong one costs the client its connection, and a merely expired
                     // nonce gets a fresh challenge on the connection it already has.
-                    if (authentications.Any(candidate => candidate.IsValid(message)))
+                    if (TryAuthenticate(message, nonces, out authenticatedUser))
                     {
                         // It got the password right, so it starts clean again - an honest client
                         // that mistyped once is not left being answered slowly.
                         _authenticationThrottle.Succeeded(throttleKey);
-                        authenticatedUser = _credentials?.UserName;
                     }
                     else
                     {
@@ -1563,7 +1707,7 @@ namespace SharpRTSPServer
                         }
 
                         RtspResponse authorizationResponse = message.CreateResponse();
-                        authorizationResponse.AddHeader("WWW-Authenticate: " + authentication.GetServerResponse()
+                        authorizationResponse.AddHeader("WWW-Authenticate: " + challenge
                             + (staleNonce ? ", stale=\"true\"" : string.Empty));
                         authorizationResponse.ReturnCode = 401;
                         listener.SendMessage(authorizationResponse);
@@ -1602,7 +1746,7 @@ namespace SharpRTSPServer
                     // Send a 401 Authentication Failed, with the challenge in WWW-Authenticate
                     //  so the client knows which scheme and realm to authenticate against
                     RtspResponse authorizationResponse = message.CreateResponse();
-                    authorizationResponse.AddHeader("WWW-Authenticate: " + authentication.GetServerResponse());
+                    authorizationResponse.AddHeader("WWW-Authenticate: " + challenge);
                     authorizationResponse.ReturnCode = 401;
                     listener.SendMessage(authorizationResponse);
                     return;
@@ -1980,11 +2124,11 @@ namespace SharpRTSPServer
             // says how. Anything else is final and does not.
             if (args.DeniedStatusCode == 401)
             {
-                Authentication[] authentications = _authentications;
+                string[] nonces = _nonces;
 
-                if (authentications.Length > 0)
+                if (nonces.Length > 0)
                 {
-                    denied.AddHeader("WWW-Authenticate: " + authentications[0].GetServerResponse());
+                    denied.AddHeader("WWW-Authenticate: " + BuildChallenge(nonces[0]));
                 }
             }
 

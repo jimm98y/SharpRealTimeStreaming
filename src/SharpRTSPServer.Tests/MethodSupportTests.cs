@@ -41,7 +41,7 @@ namespace SharpRTSPServer.Tests
 
         private static RTSPServer NewServer(int port)
         {
-            var server = new RTSPServer(port, "admin", "password");
+            var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
             server.AddStreamSource(new RTSPStreamSource("stream1", new H264Track(Sps, Pps), null));
             server.StartListen();
             return server;

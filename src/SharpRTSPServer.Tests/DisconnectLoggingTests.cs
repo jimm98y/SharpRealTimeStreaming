@@ -97,7 +97,7 @@ namespace SharpRTSPServer.Tests
             var logs = new CapturingLoggerFactory();
 
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, "admin", "password", false, null, logs);
+            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"), false, null, logs);
             var videoTrack = new H264Track(Sps, Pps);
             server.AddStreamSource(new RTSPStreamSource("stream1", videoTrack, null));
             server.StartListen();
@@ -155,7 +155,7 @@ namespace SharpRTSPServer.Tests
             var logs = new CapturingLoggerFactory();
 
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, "admin", "password", false, null, logs);
+            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"), false, null, logs);
             var videoTrack = new H264Track(Sps, Pps);
             server.AddStreamSource(new RTSPStreamSource("stream1", videoTrack, null));
             server.StartListen();

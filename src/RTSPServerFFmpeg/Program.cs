@@ -34,8 +34,6 @@ using System.Threading.Tasks;
 IConfiguration config = new ConfigurationBuilder().AddJsonFile("appsettings.json").Build();
 string hostName = config["HostName"];
 ushort port = ushort.Parse(config["Port"]);
-string userName = config["UserName"];
-string password = config["Password"];
 
 string ffmpegPath = config["FFmpegPath"]; // path to ffmpeg.exe
 string ffmpegArgs = config["FFmpegArgs"]; // Arguments that will be passed to the ffmpeg process
@@ -83,7 +81,7 @@ if (string.IsNullOrEmpty(videoUri) && string.IsNullOrEmpty(audioUri))
 
 const string STREAM_ID = "stream1";
 
-using (var server = new RTSPServer(port, userName, password))
+using (var server = new RTSPServer(port, ReadUsers(config, "Users")))
 {
     server.AuthenticationScheme = ReadAuthenticationScheme(config["AllowBasicAuthentication"]);
 
@@ -128,7 +126,7 @@ using (var server = new RTSPServer(port, userName, password))
             Console.WriteLine(ex.ToString());
         }
 
-        Console.WriteLine($"RTSP URL is rtsp://{userName}:{password}@{hostName}:{port}/{STREAM_ID}");
+        Console.WriteLine($"RTSP URL is rtsp://{hostName}:{port}/{STREAM_ID} - authenticate as one of the configured users");
 
         Console.WriteLine("Press any key to exit");
         // Asking whether a key has been pressed throws outright when there is no console, or when
@@ -157,6 +155,38 @@ using (var server = new RTSPServer(port, userName, password))
 }
 
 // Basic sends the password in a reversible form, so it stays off unless the config asks for it.
+/// <summary>
+/// The users this server will authenticate, read from the Users section of appsettings.json.
+/// </summary>
+/// <remarks>
+/// A name and a password apiece, so a server can have several. An empty or missing section means no
+/// repository at all, which is a server that does not authenticate - only appropriate on a trusted
+/// network.
+/// </remarks>
+static IUserRepository ReadUsers(IConfiguration configuration, string section)
+{
+    // Binds straight onto UserInfo, so the section is a list of the same shape the repository
+    // hands back: a UserName and a Password apiece.
+    UserInfo[] configured = configuration.GetSection(section).Get<UserInfo[]>();
+
+    if (configured == null)
+    {
+        return null;
+    }
+
+    var users = new InMemoryUserRepository();
+
+    foreach (UserInfo user in configured)
+    {
+        if (!string.IsNullOrEmpty(user?.UserName) && !string.IsNullOrEmpty(user.Password))
+        {
+            users.Add(user.UserName, user.Password);
+        }
+    }
+
+    return users.Count > 0 ? users : null;
+}
+
 static RtspAuthenticationScheme ReadAuthenticationScheme(string allowBasicAuthentication)
 {
     return bool.TryParse(allowBasicAuthentication, out bool allowBasic) && allowBasic

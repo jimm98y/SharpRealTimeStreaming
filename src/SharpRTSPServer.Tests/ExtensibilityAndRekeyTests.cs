@@ -35,7 +35,7 @@ namespace SharpRTSPServer.Tests
         public void AsecondDescribeAdvertisesTheSameKeys()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, "admin", "password", false, null,
+            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"), false, null,
                 SrtpCryptoSuites.AES_CM_128_HMAC_SHA1_80, null);
 
             var videoTrack = new H264Track(Sps, Pps) { RtpProfile = RtpProfiles.SAVP };
@@ -95,7 +95,7 @@ namespace SharpRTSPServer.Tests
         public void AThrowingMessageHandlerDoesNotFailTheRequest()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, "admin", "password");
+            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
             server.AddStreamSource(new RTSPStreamSource("stream1", new H264Track(Sps, Pps), null));
 
             int calls = 0;

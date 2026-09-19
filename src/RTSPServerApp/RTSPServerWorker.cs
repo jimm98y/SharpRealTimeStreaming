@@ -176,6 +176,38 @@ internal class RTSPServerWorker : BackgroundService
     /// <summary>
     /// Basic sends the password in a reversible form, so it stays off unless the config asks for it.
     /// </summary>
+    /// <summary>
+    /// The users this server will authenticate, read from the Users section of appsettings.json.
+    /// </summary>
+    /// <remarks>
+    /// A name and a password apiece, so a server can have several. An empty or missing section
+    /// means no repository at all, which is a server that does not authenticate - only appropriate
+    /// on a trusted network.
+    /// </remarks>
+    private static IUserRepository ReadUsers(IConfiguration configuration, string section)
+    {
+        // Binds straight onto UserInfo, so the section is a list of the same shape the repository
+        // hands back: a UserName and a Password apiece.
+        UserInfo[] configured = configuration.GetSection(section).Get<UserInfo[]>();
+
+        if (configured == null)
+        {
+            return null;
+        }
+
+        var users = new InMemoryUserRepository();
+
+        foreach (UserInfo user in configured)
+        {
+            if (!string.IsNullOrEmpty(user?.UserName) && !string.IsNullOrEmpty(user.Password))
+            {
+                users.Add(user.UserName, user.Password);
+            }
+        }
+
+        return users.Count > 0 ? users : null;
+    }
+
     private static RtspAuthenticationScheme ReadAuthenticationScheme(string allowBasicAuthentication)
     {
         return bool.TryParse(allowBasicAuthentication, out bool allowBasic) && allowBasic
@@ -198,14 +230,12 @@ internal class RTSPServerWorker : BackgroundService
 
         var hostName = _configuration["RTSPServerApp:HostName"];
         var port = ushort.Parse(_configuration["RTSPServerApp:Port"]);
-        var userName = _configuration["RTSPServerApp:UserName"];
-        var password = _configuration["RTSPServerApp:Password"];
 
         MediaFile[] mediaFiles = _configuration.GetSection("RTSPServerApp:Media").Get<MediaFile[]>();
         if (mediaFiles == null)
             return Task.CompletedTask;
 
-        _server = new RTSPServer(port, userName, password, _loggerFactory);
+        _server = new RTSPServer(port, ReadUsers(_configuration, "RTSPServerApp:Users"), _loggerFactory);
         _server.AuthenticationScheme = ReadAuthenticationScheme(_configuration["RTSPServerApp:AllowBasicAuthentication"]);
         List<MediaFileReader> mediaFileReaders = new List<MediaFileReader>();
 
@@ -511,7 +541,7 @@ internal class RTSPServerWorker : BackgroundService
             mediaFileReader.VideoTimer?.Start();
             mediaFileReader.AudioTimer?.Start();
 
-            _logger.LogInformation($"RTSP URL is rtsp://{userName}:{password}@{hostName}:{port}/{mediaFileReader.StreamID}");
+            _logger.LogInformation($"RTSP URL is rtsp://{hostName}:{port}/{mediaFileReader.StreamID} - authenticate as one of the configured users");
         }
 
         return Task.CompletedTask;

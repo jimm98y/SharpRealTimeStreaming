@@ -82,7 +82,7 @@ namespace SharpRTSPServer.Tests
         public void G726IsDescribedAndCarried()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, "admin", "password");
+            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
 
             var audio = new G726Track(G726BitRate.Rate24);
             server.AddStreamSource(new RTSPStreamSource("stream1", new H264Track(Sps, Pps), audio));
@@ -106,7 +106,7 @@ namespace SharpRTSPServer.Tests
         public void AmrIsDescribedAndCarried()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, "admin", "password");
+            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
 
             var audio = new AMRTrack();
             server.AddStreamSource(new RTSPStreamSource("stream1", new H264Track(Sps, Pps), audio));
@@ -136,7 +136,7 @@ namespace SharpRTSPServer.Tests
         public void Mp4vIsDescribedAndCarried()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, "admin", "password");
+            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
 
             byte[] config = { 0x00, 0x00, 0x01, 0xB0, 0xF3, 0x00, 0x00, 0x01, 0xB5 };
             var video = new MP4VTrack(config);

@@ -91,7 +91,7 @@ namespace SharpRTSPServer.Tests
         public void TheTwoTracksAgreeOnWhereTheyAreInTime()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, "admin", "password");
+            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
 
             // A report on every frame, so the test does not have to run for half a minute to see one.
             server.RtcpSenderReportInterval = TimeSpan.FromMilliseconds(1);

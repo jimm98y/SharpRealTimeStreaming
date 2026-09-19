@@ -94,7 +94,7 @@ namespace SharpRTSPServer.Tests
             }
 
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, "admin", "password");
+            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
             server.AddStreamSource(new RTSPStreamSource("stream1", new H264Track(Sps, Pps), null));
             server.StartListen();
 
@@ -127,7 +127,7 @@ namespace SharpRTSPServer.Tests
             }
 
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, "admin", "password");
+            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
             server.SetRtpPortRange(55200, 55400);
 
             var videoTrack = new H264Track(Sps, Pps);

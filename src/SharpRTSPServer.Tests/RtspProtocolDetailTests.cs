@@ -35,7 +35,7 @@ namespace SharpRTSPServer.Tests
 
         private static RTSPServer NewServer(int port, bool withAudio)
         {
-            var server = new RTSPServer(port, "admin", "password");
+            var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
             var audio = withAudio ? new AACTrack(new byte[] { 0x12, 0x10 }, 44100, 2) : null;
             server.AddStreamSource(new RTSPStreamSource("stream1", new H264Track(Sps, Pps), audio));
             server.StartListen();
@@ -162,7 +162,7 @@ namespace SharpRTSPServer.Tests
         public void MediaFedTheMomentPlayIsAnsweredStillReachesTheClient()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, "admin", "password");
+            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
             var videoTrack = new H264Track(Sps, Pps);
             server.AddStreamSource(new RTSPStreamSource("stream1", videoTrack, null));
             server.StartListen();

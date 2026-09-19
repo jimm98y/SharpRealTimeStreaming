@@ -86,7 +86,7 @@ namespace SharpRTSPClient.Tests
         {
             int port = FreePort();
 
-            using var server = new SharpRTSPServer.RTSPServer(port, "admin", "password");
+            using var server = new SharpRTSPServer.RTSPServer(port, new SharpRTSPServer.InMemoryUserRepository("admin", "password"));
             var video = new SharpRTSPServer.H265Track(Vps, Sps, Pps);
             server.AddStreamSource(new SharpRTSPServer.RTSPStreamSource("stream1", video, null));
             server.StartListen();

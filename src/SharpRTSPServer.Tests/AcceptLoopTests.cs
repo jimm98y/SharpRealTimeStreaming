@@ -62,7 +62,7 @@ namespace SharpRTSPServer.Tests
         public void AFailedTlsHandshakeDoesNotStopTheServerAccepting()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, "admin", "password", false, ServerCertificate(), null);
+            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"), false, ServerCertificate(), null);
             server.AddStreamSource(new RTSPStreamSource("stream1", new H264Track(Sps, Pps), null));
             server.StartListen();
 
@@ -82,7 +82,7 @@ namespace SharpRTSPServer.Tests
         public void RepeatedBadHandshakesDoNotStopTheServerAccepting()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, "admin", "password", false, ServerCertificate(), null);
+            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"), false, ServerCertificate(), null);
             server.AddStreamSource(new RTSPStreamSource("stream1", new H264Track(Sps, Pps), null));
             server.StartListen();
 
@@ -101,7 +101,7 @@ namespace SharpRTSPServer.Tests
         public void ConnectionsThatNeverSpeakDoNotStopOtherClientsGettingIn()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, "admin", "password", false, ServerCertificate(), null);
+            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"), false, ServerCertificate(), null);
             server.AddStreamSource(new RTSPStreamSource("stream1", new H264Track(Sps, Pps), null));
             server.StartListen();
 
@@ -144,7 +144,7 @@ namespace SharpRTSPServer.Tests
         public void AClientThatConnectsAndLeavesDoesNotStopTheServerAccepting()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, "admin", "password");
+            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
             server.AddStreamSource(new RTSPStreamSource("stream1", new H264Track(Sps, Pps), null));
             server.StartListen();
 

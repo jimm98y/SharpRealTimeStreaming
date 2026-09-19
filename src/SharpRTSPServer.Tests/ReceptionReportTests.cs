@@ -71,7 +71,7 @@ namespace SharpRTSPServer.Tests
             var session = new Session();
 
             int port = TestPorts.FindFree();
-            session.Server = new RTSPServer(port, "admin", "password");
+            session.Server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
             session.Server.SetRtpPortRange(58000, 58200);
 
             session.Video = new H264Track(Sps, Pps);

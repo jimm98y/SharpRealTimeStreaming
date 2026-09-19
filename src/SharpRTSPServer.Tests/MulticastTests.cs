@@ -54,7 +54,7 @@ namespace SharpRTSPServer.Tests
 
         private static RTSPServer NewServer(int port, out H264Track videoTrack, int multicastPortStart, int ttl = 0)
         {
-            var server = new RTSPServer(port, "admin", "password")
+            var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"))
             {
                 MulticastEnabled = true, // not the default: a group is published to the whole segment
                 MulticastAddress = Group,
@@ -449,7 +449,7 @@ namespace SharpRTSPServer.Tests
         public void MulticastCanBeTurnedOff()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, "admin", "password") { MulticastEnabled = false };
+            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password")) { MulticastEnabled = false };
             server.AddStreamSource(new RTSPStreamSource("stream1", new H264Track(Sps, Pps), null));
             server.StartListen();
 
@@ -470,7 +470,7 @@ namespace SharpRTSPServer.Tests
         {
             int port = TestPorts.FindFree();
 
-            using var server = new RTSPServer(port, "admin", "password", false, null,
+            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"), false, null,
                 SrtpCryptoSuites.AES_CM_128_HMAC_SHA1_80, null)
             {
                 MulticastEnabled = true, // not the default: a group is published to the whole segment

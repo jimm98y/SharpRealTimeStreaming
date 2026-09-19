@@ -67,7 +67,7 @@ namespace SharpRTSPClient.Tests
         {
             int port = FreePort();
 
-            using var server = new SharpRTSPServer.RTSPServer(port, "admin", "password");
+            using var server = new SharpRTSPServer.RTSPServer(port, new SharpRTSPServer.InMemoryUserRepository("admin", "password"));
             var video = new SharpRTSPServer.H264Track(Sps, Pps);
             server.AddStreamSource(new SharpRTSPServer.RTSPStreamSource("stream1", video, null));
             server.StartListen();
@@ -151,7 +151,7 @@ namespace SharpRTSPClient.Tests
             {
                 int port = FreePort();
 
-                using var server = new SharpRTSPServer.RTSPServer(port, "admin", "password");
+                using var server = new SharpRTSPServer.RTSPServer(port, new SharpRTSPServer.InMemoryUserRepository("admin", "password"));
                 // H265, because that is the parser which reports every NAL at trace level.
                 var video = new SharpRTSPServer.H265Track(HevcVps, HevcSps, HevcPps);
                 server.AddStreamSource(new SharpRTSPServer.RTSPStreamSource("stream1", video, null));

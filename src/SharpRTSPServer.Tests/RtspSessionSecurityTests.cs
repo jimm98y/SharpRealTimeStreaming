@@ -50,7 +50,7 @@ namespace SharpRTSPServer.Tests
         public RtspSessionSecurityTests()
         {
             _port = TestPorts.FindFree();
-            _server = new RTSPServer(_port, UserName, Password);
+            _server = new RTSPServer(_port, new InMemoryUserRepository(UserName, Password));
             _server.AddStreamSource(new RTSPStreamSource(StreamId, new H264Track(Sps, Pps), null));
             _server.StartListen();
         }
@@ -220,7 +220,7 @@ namespace SharpRTSPServer.Tests
             string firstChallenge = first.Send("OPTIONS", BaseUri).Match("nonce=\"([^\"]+)\"");
 
             int otherPort = TestPorts.FindFree();
-            using (var otherServer = new RTSPServer(otherPort, UserName, Password))
+            using (var otherServer = new RTSPServer(otherPort, new InMemoryUserRepository(UserName, Password)))
             {
                 otherServer.AddStreamSource(new RTSPStreamSource(StreamId, new H264Track(Sps, Pps), null));
                 otherServer.StartListen();
