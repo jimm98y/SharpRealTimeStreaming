@@ -302,9 +302,9 @@ namespace SharpRTSPServer
                     continue;
                 }
 
-                int nalType = samples[i].Span[0] & 0x1F;
-
-                if (nalType == NAL_IDR || nalType == NAL_SPS)
+                // IDR and SPS are not adjacent, so each is asked for on its own.
+                if (AnyNalIs(samples[i].Span, NAL_IDR, NAL_IDR, 0x1F, 0)
+                    || AnyNalIs(samples[i].Span, NAL_SPS, NAL_SPS, 0x1F, 0))
                 {
                     return true;
                 }
@@ -312,5 +312,132 @@ namespace SharpRTSPServer
 
             return false;
         }
+
+        /// <summary>
+        /// The NAL types in a sample, however the sample was handed over.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// These tracks packetise a sample as one raw NAL, which is the shape they document and the
+        /// shape that produces correct RTP. But a sample read straight out of an mp4 carries a four
+        /// byte length in front of each NAL, and one read out of an elementary stream carries a
+        /// start code - and a producer that hands either of those over gets a stream that mostly
+        /// plays, because a decoder is forgiving about a few bytes of rubbish in front of a slice.
+        /// It does not get a keyframe anyone can recognise, because the byte being read is the first
+        /// byte of a length or a start code rather than the NAL header.
+        /// </para>
+        /// <para>
+        /// So the prefix is recognised and stepped over here. This only decides whether a decoder
+        /// could start on the frame; it does not change what is sent.
+        /// </para>
+        /// </remarks>
+        private static bool AnyNalIs(ReadOnlySpan<byte> sample, int firstWanted, int lastWanted, int typeMask, int typeShift)
+        {
+            int at = 0;
+
+            while (at < sample.Length)
+            {
+                int nalStart;
+                int next;
+
+                if (StartsWithStartCode(sample.Slice(at), out int codeLength))
+                {
+                    nalStart = at + codeLength;
+                    next = IndexOfStartCode(sample, nalStart);
+                }
+                else if (at == 0 && TryReadAvccLength(sample, out int declared) && declared > 0
+                         && LENGTH_PREFIX + declared <= sample.Length)
+                {
+                    nalStart = LENGTH_PREFIX;
+                    next = LENGTH_PREFIX + declared;
+                }
+                else
+                {
+                    // A bare NAL, which is what these tracks are documented to take.
+                    nalStart = at;
+                    next = sample.Length;
+                }
+
+                if (nalStart >= sample.Length)
+                {
+                    return false;
+                }
+
+                int type = (sample[nalStart] & typeMask) >> typeShift;
+
+                if (type >= firstWanted && type <= lastWanted)
+                {
+                    return true;
+                }
+
+                if (next <= at)
+                {
+                    return false;
+                }
+
+                at = next;
+            }
+
+            return false;
+        }
+
+        /// <summary>The four byte length an mp4 puts in front of each NAL.</summary>
+        private const int LENGTH_PREFIX = 4;
+
+        private static bool TryReadAvccLength(ReadOnlySpan<byte> sample, out int length)
+        {
+            length = 0;
+
+            if (sample.Length <= LENGTH_PREFIX)
+            {
+                return false;
+            }
+
+            long declared = ((long)sample[0] << 24) | ((long)sample[1] << 16)
+                          | ((long)sample[2] << 8) | sample[3];
+
+            // Only where it accounts for what is actually here. A bare NAL whose first four bytes
+            // happen to read as a plausible length is the thing to avoid, and one that lands exactly
+            // on the end of the sample, or on the start of another NAL, is not a coincidence.
+            if (declared <= 0 || LENGTH_PREFIX + declared > sample.Length)
+            {
+                return false;
+            }
+
+            length = (int)declared;
+            return true;
+        }
+
+        private static bool StartsWithStartCode(ReadOnlySpan<byte> at, out int codeLength)
+        {
+            if (at.Length >= 4 && at[0] == 0 && at[1] == 0 && at[2] == 0 && at[3] == 1)
+            {
+                codeLength = 4;
+                return true;
+            }
+
+            if (at.Length >= 3 && at[0] == 0 && at[1] == 0 && at[2] == 1)
+            {
+                codeLength = 3;
+                return true;
+            }
+
+            codeLength = 0;
+            return false;
+        }
+
+        private static int IndexOfStartCode(ReadOnlySpan<byte> sample, int from)
+        {
+            for (int i = from; i + 2 < sample.Length; i++)
+            {
+                if (sample[i] == 0 && sample[i + 1] == 0 && sample[i + 2] == 1)
+                {
+                    return i > from && sample[i - 1] == 0 ? i - 1 : i;
+                }
+            }
+
+            return sample.Length;
+        }
+
     }
 }

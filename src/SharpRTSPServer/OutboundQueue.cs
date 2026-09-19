@@ -219,6 +219,34 @@ namespace SharpRTSPServer
         /// </para>
         /// </remarks>
         internal Func<bool> IsReady { get; set; }
+
+        /// <summary>
+        /// The last picture this stream produced that a decoder could start on, if one is being kept.
+        /// </summary>
+        /// <remarks>
+        /// Asked for only when the wait for a live one has run out - see <see cref="HoldsBackPicture"/>.
+        /// </remarks>
+        internal Func<QueuedFrame> LastKeyFrame { get; set; }
+
+        /// <summary>
+        /// Whether this stream has ever produced a picture a decoder could start on.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Holding pictures back is worth doing only where the thing being waited for is known to
+        /// happen. Whether a frame can be started on is read out of the bytes, and a producer may
+        /// hand over something no track here can read that way - in which case every picture looks
+        /// undecodable, every client waits, and the wait ends only when it times out. That turns a
+        /// stream that used to start immediately and imperfectly into one that starts imperfectly
+        /// and late, which is worse in both directions.
+        /// </para>
+        /// <para>
+        /// So nothing is held back until the stream has shown at least once that it produces
+        /// something to hold out for. A stream whose keyframes cannot be recognised behaves exactly
+        /// as it did before any of this existed, immediately rather than after a timeout.
+        /// </para>
+        /// </remarks>
+        internal Func<bool> StreamProducesKeyFrames { get; set; }
         private readonly string _describedAs;
         private readonly RtpWriterPool _pool;
 
@@ -442,6 +470,23 @@ namespace SharpRTSPServer
                 return true;
             }
 
+            // Never seen one on this stream, so there is nothing to wait for and waiting would only
+            // delay a picture that was going to be imperfect either way.
+            if (StreamProducesKeyFrames != null && !StreamProducesKeyFrames())
+            {
+                return true;
+            }
+
+            // One was kept, so the client can be given a real picture now rather than nothing for as
+            // long as the next live one takes. Straight away, not after the wait: the whole cost of
+            // waiting is the picture the client does not have, and where the kept frame is recent -
+            // a stream that has only just started, say - what follows it refers to very little the
+            // client missed.
+            if (SendKeptKeyFrame())
+            {
+                return true;
+            }
+
             if (DateTime.UtcNow - _midGroupSince < _keyFrameWait)
             {
                 if (!_askedForKeyFrame)
@@ -453,9 +498,6 @@ namespace SharpRTSPServer
                 return false;
             }
 
-            // Nothing that looks like a keyframe has come along in all that time, so either this
-            // stream has an enormous group of pictures or nothing here can tell. Either way, sending
-            // an undecodable picture beats sending none.
             if (!_gaveUpWaiting)
             {
                 _gaveUpWaiting = true;
@@ -472,6 +514,37 @@ namespace SharpRTSPServer
                     + "the samples are not in the shape this track reads",
                     _describedAs, _keyFrameWait.TotalSeconds, FirstPayloadBytes(frame));
             }
+
+            _midGroup = false;
+            return true;
+        }
+
+        /// <summary>
+        /// Puts the last keyframe this stream kept in front of the picture in hand, if there is one.
+        /// </summary>
+        /// <remarks>
+        /// It is not the frame the live stream is at, so what follows refers to pictures between the
+        /// two that this client never saw, and it decodes them imperfectly until a live keyframe
+        /// comes round. That is the trade the stream opted into by keeping one: a real picture now,
+        /// imperfect for a while, against nothing at all for as long as the next keyframe takes.
+        /// <para>
+        /// Called with <see cref="_gate"/> held.
+        /// </para>
+        /// </remarks>
+        private bool SendKeptKeyFrame()
+        {
+            QueuedFrame kept = LastKeyFrame?.Invoke();
+
+            if (kept == null)
+            {
+                return false;
+            }
+
+            kept.AddRef();
+            _frames.AddLast(kept);
+            _queuedBytes += kept.Bytes;
+
+            _logger.LogDebug("Starting {connection} on the last keyframe kept for its stream", _describedAs);
 
             _midGroup = false;
             return true;

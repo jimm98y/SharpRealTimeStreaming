@@ -42,6 +42,26 @@ namespace SharpRTSPServer.Tests
 
         private const int NAL_IDR = 5;
 
+        /// <summary>
+        /// A client already watching, so that the stream is running rather than starting.
+        /// </summary>
+        /// <remarks>
+        /// Nothing reads from it. Its queue is bounded and drops what it cannot take, which is what
+        /// a client that stops reading does anyway.
+        /// </remarks>
+        private static RtspTestClient Playing(int port, string baseUri)
+        {
+            var client = new RtspTestClient(port, "admin", "password");
+            client.Send("OPTIONS", baseUri);
+            client.Send("DESCRIBE", baseUri, "Accept: application/sdp");
+
+            var setup = client.Send("SETUP", baseUri + "/trackID=0",
+                "Transport: RTP/AVP/TCP;unicast;interleaved=0-1");
+            client.Send("PLAY", baseUri, "Session: " + setup.Session);
+
+            return client;
+        }
+
         [TestMethod]
         public void TheFirstPictureAClientGetsIsOneItCanDecode()
         {
@@ -59,6 +79,15 @@ namespace SharpRTSPServer.Tests
 
             string baseUri = $"rtsp://127.0.0.1:{port}/stream1";
 
+            // Somebody is already watching, which is what makes this a running stream rather than
+            // one that starts when the client below asks for it.
+            using var watching = Playing(port, baseUri);
+
+            // And a keyframe has gone by before the client below turns up: that is what says this is
+            // a stream with keyframes worth waiting for.
+            video.FeedInRawSamples(3750, Idr());
+            Thread.Sleep(20);
+
             using var client = new RtspTestClient(port, "admin", "password");
             client.Send("OPTIONS", baseUri);
             client.Send("DESCRIBE", baseUri, "Accept: application/sdp");
@@ -67,7 +96,7 @@ namespace SharpRTSPServer.Tests
                 "Transport: RTP/AVP/TCP;unicast;interleaved=0-1");
             Assert.AreEqual(200, client.Send("PLAY", baseUri, "Session: " + setup.Session).StatusCode);
 
-            // Joined just after a keyframe, which is the common case and the worst one: a whole
+            // Joined just after that keyframe, which is the common case and the worst one: a whole
             // group of predicted pictures before the next one it could start on.
             for (int i = 0; i < 40; i++)
             {
@@ -235,6 +264,197 @@ namespace SharpRTSPServer.Tests
                 "the first frame of a stream started on PLAY did not reach the client");
         }
 
+        /// <summary>
+        /// The picture kept from earlier, for a client that would otherwise see nothing.
+        /// </summary>
+        /// <remarks>
+        /// A client joining mid-group has nothing it can decode until the next keyframe. Asking the
+        /// encoder for one ends that properly; where there is nothing to ask, or nothing answers,
+        /// the last keyframe the stream produced at least gives it a real picture to show. What
+        /// follows still decodes imperfectly until a live keyframe arrives - this buys something
+        /// visible rather than a clean stream.
+        /// </remarks>
+        [TestMethod]
+        public void AClientWithNothingToShowIsSentTheLastKeyFrameKept()
+        {
+            int port = TestPorts.FindFree();
+            using var server = new RTSPServer(port, "admin", "password");
+
+            // Short, because the fallback is what happens when this runs out.
+            server.KeyFrameWait = TimeSpan.FromMilliseconds(200);
+
+            var video = new H264Track(Sps, Pps);
+            var source = new RTSPStreamSource("stream1", video, null);
+            source.KeepLastKeyFrame = true;
+
+            server.AddStreamSource(source);
+            server.StartListen();
+
+            string baseUri = $"rtsp://127.0.0.1:{port}/stream1";
+
+            using var setupOnly = new RtspTestClient(port, "admin", "password");
+            setupOnly.Send("OPTIONS", baseUri);
+            setupOnly.Send("DESCRIBE", baseUri, "Accept: application/sdp");
+
+            // The stream runs for a while, with its keyframe well in the past by the time the client
+            // below arrives.
+            video.FeedInRawSamples(3750, Idr());
+
+            for (int i = 0; i < 5; i++)
+            {
+                video.FeedInRawSamples((uint)((i + 2) * 3750), Predicted());
+            }
+
+            using var client = new RtspTestClient(port, "admin", "password");
+            client.Send("OPTIONS", baseUri);
+            client.Send("DESCRIBE", baseUri, "Accept: application/sdp");
+
+            var setup = client.Send("SETUP", baseUri + "/trackID=0",
+                "Transport: RTP/AVP/TCP;unicast;interleaved=0-1");
+            Assert.AreEqual(200, client.Send("PLAY", baseUri, "Session: " + setup.Session).StatusCode);
+
+            // Nothing but predicted pictures from here, so the only keyframe that can arrive is the
+            // one that was kept.
+            for (int i = 0; i < 30; i++)
+            {
+                video.FeedInRawSamples((uint)((i + 20) * 3750), Predicted());
+                Thread.Sleep(20);
+            }
+
+            byte[] firstPicture = null;
+
+            for (int i = 0; i < 20 && firstPicture == null; i++)
+            {
+                var frame = client.ReadInterleaved();
+
+                if (frame.Channel == 0)
+                {
+                    firstPicture = frame.Payload;
+                }
+            }
+
+            Assert.IsNotNull(firstPicture, "no picture arrived at all");
+
+            Assert.AreEqual(NAL_IDR, NalTypeOf(firstPicture),
+                "the client was started on a picture it could not decode, with a keyframe kept");
+        }
+
+        /// <summary>
+        /// The keyframe a stream produces before anyone has connected to it.
+        /// </summary>
+        /// <remarks>
+        /// A producer that starts its stream when the first client asks for it hands the keyframe
+        /// over while that client is still connecting - and a stream that only produces once
+        /// somebody is attached is a stream whose very first keyframe is always the one that got
+        /// away, leaving the client to wait a whole group for the next.
+        /// </remarks>
+        [TestMethod]
+        public void AKeyFrameProducedBeforeAnyoneConnectsIsStillThereForTheFirstClient()
+        {
+            int port = TestPorts.FindFree();
+            using var server = new RTSPServer(port, "admin", "password");
+            server.KeyFrameWait = TimeSpan.FromMinutes(5);
+
+            var video = new H264Track(Sps, Pps);
+            var source = new RTSPStreamSource("stream1", video, null);
+            source.KeepLastKeyFrame = true;
+
+            server.AddStreamSource(source);
+            server.StartListen();
+
+            // Nobody has connected yet. This is the beginning of the file.
+            video.FeedInRawSamples(3750, Idr());
+
+            for (int i = 0; i < 3; i++)
+            {
+                video.FeedInRawSamples((uint)((i + 2) * 3750), Predicted());
+            }
+
+            string baseUri = $"rtsp://127.0.0.1:{port}/stream1";
+
+            using var client = new RtspTestClient(port, "admin", "password");
+            client.Send("OPTIONS", baseUri);
+            client.Send("DESCRIBE", baseUri, "Accept: application/sdp");
+
+            var setup = client.Send("SETUP", baseUri + "/trackID=0",
+                "Transport: RTP/AVP/TCP;unicast;interleaved=0-1");
+            Assert.AreEqual(200, client.Send("PLAY", baseUri, "Session: " + setup.Session).StatusCode);
+
+            // Only predicted pictures from here, so the keyframe can only be the one kept.
+            for (int i = 0; i < 20; i++)
+            {
+                video.FeedInRawSamples((uint)((i + 10) * 3750), Predicted());
+                Thread.Sleep(10);
+            }
+
+            byte[] firstPicture = null;
+
+            for (int i = 0; i < 20 && firstPicture == null; i++)
+            {
+                var frame = client.ReadInterleaved();
+
+                if (frame.Channel == 0)
+                {
+                    firstPicture = frame.Payload;
+                }
+            }
+
+            Assert.IsNotNull(firstPicture, "no picture arrived at all");
+
+            Assert.AreEqual(NAL_IDR, NalTypeOf(firstPicture),
+                "the keyframe the stream opened with was gone by the time the first client arrived");
+        }
+
+        /// <summary>
+        /// A stream whose keyframes cannot be recognised is not held up waiting for one.
+        /// </summary>
+        /// <remarks>
+        /// Whether a frame can be started on is read out of the bytes, and a producer may hand over
+        /// something no track here reads that way. Waiting then means every client starts late and
+        /// still imperfectly, which is worse in both directions than not waiting at all.
+        /// </remarks>
+        [TestMethod]
+        public void AStreamWithNoRecognisableKeyFrameIsNotHeldUp()
+        {
+            int port = TestPorts.FindFree();
+            using var server = new RTSPServer(port, "admin", "password");
+
+            // Far longer than this test runs: if anything waits, nothing arrives.
+            server.KeyFrameWait = TimeSpan.FromMinutes(5);
+
+            var video = new H264Track(Sps, Pps);
+            server.AddStreamSource(new RTSPStreamSource("stream1", video, null));
+            server.StartListen();
+
+            string baseUri = $"rtsp://127.0.0.1:{port}/stream1";
+
+            using var client = new RtspTestClient(port, "admin", "password");
+            client.Send("OPTIONS", baseUri);
+            client.Send("DESCRIBE", baseUri, "Accept: application/sdp");
+
+            var setup = client.Send("SETUP", baseUri + "/trackID=0",
+                "Transport: RTP/AVP/TCP;unicast;interleaved=0-1");
+            Assert.AreEqual(200, client.Send("PLAY", baseUri, "Session: " + setup.Session).StatusCode);
+
+            byte[] arrived = null;
+
+            for (int i = 0; i < 30 && arrived == null; i++)
+            {
+                video.FeedInRawSamples((uint)((i + 1) * 3750), Predicted());
+                Thread.Sleep(10);
+
+                var frame = client.ReadInterleaved();
+
+                if (frame.Channel == 0)
+                {
+                    arrived = frame.Payload;
+                }
+            }
+
+            Assert.IsNotNull(arrived,
+                "nothing arrived: a stream whose keyframes cannot be recognised was held up for one");
+        }
+
         [TestMethod]
         public void TheEncoderIsAskedForAPictureTheClientCanStartOn()
         {
@@ -254,6 +474,12 @@ namespace SharpRTSPServer.Tests
             server.StartListen();
 
             string baseUri = $"rtsp://127.0.0.1:{port}/stream1";
+
+            // A stream already running, with a keyframe behind it - there is no sense asking an
+            // encoder for something this stream has never been seen to produce.
+            using var watching = Playing(port, baseUri);
+            video.FeedInRawSamples(3750, Idr());
+            Thread.Sleep(20);
 
             using var client = new RtspTestClient(port, "admin", "password");
             client.Send("OPTIONS", baseUri);

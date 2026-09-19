@@ -1567,6 +1567,17 @@ namespace SharpRTSPServer
                             listener.SendMessage(playResponse);
                         }
 
+                        // Only now is it known which stream this connection is watching, so this is
+                        // where it learns what that stream can be expected to produce and what it
+                        // may fall back on.
+                        RTSPStreamSource watching = streamSource;
+                        connection.Outbound.StreamProducesKeyFrames = () => watching.HasProducedKeyFrame;
+
+                        if (streamSource.KeepLastKeyFrame)
+                        {
+                            connection.Outbound.LastKeyFrame = () => watching.LastKeyFrameOrNull();
+                        }
+
                         // Whatever was produced while this client was still setting up has been
                         // waiting on its queue rather than being thrown away. It can go now, after
                         // the reply and the flag so that it cannot overtake the response.
@@ -3838,7 +3849,18 @@ namespace SharpRTSPServer
                 // the first client asks for it hands over the keyframe while that client is still
                 // saying SETUP and PLAY, and turning it away then meant the one frame the client
                 // actually needed was the one frame never made.
-                return streamSource.ConnectionList.Count > 0;
+                if (streamSource.ConnectionList.Count > 0)
+                {
+                    return true;
+                }
+
+                // And with nobody attached at all, where the stream keeps its last keyframe. A
+                // producer that starts on demand hands that frame over before the client it started
+                // for has finished connecting, so a stream that only starts producing once somebody
+                // is attached is a stream whose first keyframe is always the one that got away.
+                // The cost is packetising for a client that may never come; not keeping one puts
+                // that back to nothing.
+                return streamSource.KeepLastKeyFrame;
             }
         }
 
@@ -3947,6 +3969,20 @@ namespace SharpRTSPServer
                 // Carried with the frame so that a queue which has to throw something away knows
                 // what it would be throwing: sound and pictures are not equal claims on one budget.
                 frame.Kind = track.Kind;
+
+                if (frame.Kind == TrackType.Video && frame.IsKeyFrame)
+                {
+                    // Noted so that connections know holding a picture back is waiting for something
+                    // that actually happens on this stream.
+                    streamSource.HasProducedKeyFrame = true;
+
+                    // Kept before it goes anywhere, so that a client with nothing to show has
+                    // something to fall back on. One frame, replacing the one before it.
+                    if (streamSource.KeepLastKeyFrame)
+                    {
+                        streamSource.KeepAsLastKeyFrame(frame);
+                    }
+                }
 
                 // A copy, so the list itself can change while we write - into a borrowed array rather
                 // than a new one, since this is every frame of every stream and the copy is thrown

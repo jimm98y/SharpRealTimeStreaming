@@ -157,6 +157,95 @@ namespace SharpRTSPServer
         public string Sdp { get; private set; } = null;
 
         public HashSet<RTSPConnection> ConnectionList { get; } = new HashSet<RTSPConnection>(); // list of RTSP Listeners
+
+        /// <summary>
+        /// Whether this stream has ever produced a picture a decoder could start on.
+        /// </summary>
+        /// <remarks>
+        /// Read by every connection watching, to decide whether holding a picture back is waiting
+        /// for something that happens or just waiting. Set once and never cleared: a stream that has
+        /// produced one keyframe produces more.
+        /// </remarks>
+        internal bool HasProducedKeyFrame { get; set; }
+
+        /// <summary>
+        /// Whether to keep the last picture a decoder could start on, to show a client that would
+        /// otherwise have nothing.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Off by default, and a fallback rather than a first choice. A client joining a stream
+        /// mid-group has nothing it can decode until the next keyframe; asking the encoder for one
+        /// - see <see cref="RTSPServer.KeyFrameNeeded"/> - ends that wait properly and at no cost.
+        /// This is for when there is nothing to ask, or nothing answers: after
+        /// <see cref="RTSPServer.KeyFrameWait"/> has passed with no live keyframe, the client is
+        /// sent the last one this stream produced.
+        /// </para>
+        /// <para>
+        /// What it buys is a real picture immediately instead of a blank one. What it does not buy
+        /// is a clean stream: the live pictures that follow it refer to ones between that keyframe
+        /// and now, which the client still never saw, so it decodes them imperfectly until a real
+        /// keyframe comes round. That is the trade - something wrong-but-visible against nothing at
+        /// all - and it is why this is a choice rather than the behaviour.
+        /// </para>
+        /// <para>
+        /// Costs one frame of memory per stream, whatever the audience.
+        /// </para>
+        /// </remarks>
+        public bool KeepLastKeyFrame { get; set; }
+
+        /// <summary>
+        /// The last picture a decoder could start on, held for <see cref="KeepLastKeyFrame"/>.
+        /// </summary>
+        private QueuedFrame _lastKeyFrame;
+
+        private readonly object _lastKeyFrameGate = new object();
+
+        /// <summary>
+        /// Keeps this frame as the one to fall back on, letting go of the one before it.
+        /// </summary>
+        internal void KeepAsLastKeyFrame(QueuedFrame frame)
+        {
+            frame.AddRef();
+
+            QueuedFrame previous;
+
+            lock (_lastKeyFrameGate)
+            {
+                previous = _lastKeyFrame;
+                _lastKeyFrame = frame;
+            }
+
+            previous?.Release();
+        }
+
+        /// <summary>
+        /// A share of the last picture a decoder could start on, or null if none is being kept.
+        /// </summary>
+        /// <remarks>
+        /// The caller claims its own share; this one belongs to the stream until something replaces
+        /// it.
+        /// </remarks>
+        internal QueuedFrame LastKeyFrameOrNull()
+        {
+            lock (_lastKeyFrameGate)
+            {
+                return _lastKeyFrame;
+            }
+        }
+
+        internal void ForgetLastKeyFrame()
+        {
+            QueuedFrame previous;
+
+            lock (_lastKeyFrameGate)
+            {
+                previous = _lastKeyFrame;
+                _lastKeyFrame = null;
+            }
+
+            previous?.Release();
+        }
         /// <summary>
         /// Where a track has got to on its own RTP clock, if it has had anything to send.
         /// </summary>
@@ -660,6 +749,10 @@ namespace SharpRTSPServer
                     }
 
                     _tracks.Clear();
+
+                    // The frame kept to fall back on holds pooled buffers, which are nobody's until
+                    // it lets go of them.
+                    ForgetLastKeyFrame();
                 }
 
                 _disposedValue = true;
