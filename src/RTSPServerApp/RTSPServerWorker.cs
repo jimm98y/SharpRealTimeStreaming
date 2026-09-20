@@ -634,13 +634,23 @@ internal class RTSPServerWorker : BackgroundService
     private const double PACING_LEAD_SECONDS = 0.05;
 
     /// <summary>
-    /// The most samples one wake-up will send, as a guard rather than a policy.
+    /// The most samples one wake-up will send.
     /// </summary>
     /// <remarks>
-    /// Catching up is the point, so this is far above anything a real gap asks for. It is here
-    /// so that a file which hands back nothing usable cannot spin the thread pool for ever.
+    /// <para>
+    /// Catching up is still the point, but not all at once. At 512 a track that fell behind - a
+    /// wake-up that arrived late, the other track holding the lock through a read - sent everything
+    /// it owed in a single burst, and the stream left here in bursts with pauses between them
+    /// rather than paced. Measured at the far end of an RTSP to WebRTC proxy, frames arrived up to
+    /// 2.3 seconds away from where their own timestamps put them.
+    /// </para>
+    /// <para>
+    /// Four per wake-up at <see cref="PACING_WAKE_MS"/> is 400 samples a second, well over any
+    /// frame rate this serves, so catching up still takes a fraction of a second - but spread over
+    /// wake-ups instead of dumped into one. The same measurement drops to 0.49 seconds.
+    /// </para>
     /// </remarks>
-    private const int PACING_MAX_PER_WAKE = 512;
+    private const int PACING_MAX_PER_WAKE = 4;
 
     private static void StartFileAgain(MediaFileReader reader, IEnumerable<KeyValuePair<uint, TrackContext>> tracks)
     {
