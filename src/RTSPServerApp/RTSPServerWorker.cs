@@ -383,6 +383,7 @@ internal class RTSPServerWorker : BackgroundService
                                     // playout - which stops being the same thing once the file has been
                                     // round more than once.
                                     double videoSeconds = (double)sample.PTS / sourceVideoTimescale;
+                                    double videoDecodeSeconds = (double)sample.DTS / sourceVideoTimescale;
                                     if (mediaFileReader.VideoRewinding)
                                     {
                                         // Near the beginning of the file, not merely earlier than before.
@@ -407,7 +408,7 @@ internal class RTSPServerWorker : BackgroundService
                                     mediaFileReader.FurthestSeconds = Math.Max(
                                         mediaFileReader.FurthestSeconds, videoSeconds + videoSampleSeconds);
                                     mediaFileReader.VideoSentThroughSeconds =
-                                        mediaFileReader.LoopOffsetSeconds + videoSeconds + videoSampleSeconds;
+                                        mediaFileReader.LoopOffsetSeconds + videoDecodeSeconds + videoSampleSeconds;
 
                                     long videoPts = (long)((mediaFileReader.LoopOffsetSeconds + videoSeconds) * VIDEO_RTP_CLOCK);
                                     rtspVideoTrack.FeedInRawSamples((uint)unchecked(mediaFileReader.VideoRtpBaseTime + videoPts), units.Select(u => (ReadOnlyMemory<byte>)u).ToList());
