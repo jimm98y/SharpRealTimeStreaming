@@ -231,13 +231,16 @@ namespace SrtpServerSample
         private const double PACING_LEAD_SECONDS = 0.05;
 
         /// <summary>
-        /// The most samples one wake-up will send, as a guard rather than a policy.
+        /// The most samples one wake-up will send.
         /// </summary>
         /// <remarks>
-        /// Catching up is the point, so this is far above anything a real gap asks for. It is here
-        /// so that a file which hands back nothing usable cannot spin the thread pool for ever.
+        /// Catching up is still the point, but not all at once: whenever a track has fallen behind -
+        /// at startup, after a loop, after any stall - sending everything it owes in one go leaves
+        /// here as a burst rather than as a paced stream. Four at the wake-up rate is still 400
+        /// samples a second, far above any frame rate this serves, so a real gap is made up in a
+        /// fraction of a second, just spread over wake-ups.
         /// </remarks>
-        private const int PACING_MAX_PER_WAKE = 512;
+        private const int PACING_MAX_PER_WAKE = 4;
 
         private static void StartFileAgain(MediaFileReader reader, IEnumerable<KeyValuePair<uint, TrackContext>> tracks)
         {
@@ -511,6 +514,18 @@ namespace SrtpServerSample
                                         // Where this sample sits in the file, and where that is in the playout -
                                         // which stops being the same thing once the file has been round more than once.
                                         double videoSeconds = (double)sample.PTS / sourceVideoTimescale;
+
+                                        // When to send this frame, as opposed to when it is to be
+                                        //  shown. Samples come back in decode order, and with B
+                                        //  frames that is not presentation order: the PTS of what
+                                        //  comes back next can be earlier than the one before it.
+                                        //  Pacing on PTS read that as the stream having fallen
+                                        //  behind and sent a burst to catch up, then found the next
+                                        //  PTS far ahead and sent nothing for a while. DTS is what
+                                        //  the sending clock wants; PTS still goes on the wire as
+                                        //  the RTP timestamp and still drives the loop offset,
+                                        //  which is a question about presentation.
+                                        double videoDecodeSeconds = (double)sample.DTS / sourceVideoTimescale;
                                         if (mediaFileReader.VideoRewinding)
                                         {
                                             // Near the beginning of the file, not merely earlier than before.
@@ -534,7 +549,7 @@ namespace SrtpServerSample
                                         mediaFileReader.FurthestSeconds = Math.Max(
                                             mediaFileReader.FurthestSeconds, videoSeconds + videoSampleSeconds);
                                         mediaFileReader.VideoSentThroughSeconds =
-                                            mediaFileReader.LoopOffsetSeconds + videoSeconds + videoSampleSeconds;
+                                            mediaFileReader.LoopOffsetSeconds + videoDecodeSeconds + videoSampleSeconds;
 
                                         long videoPts = (long)((mediaFileReader.LoopOffsetSeconds + videoSeconds) * videoRtpClock);
                                         rtspVideoTrack.FeedInRawSamples((uint)unchecked(mediaFileReader.VideoRtpBaseTime + videoPts), units.Select(u => (ReadOnlyMemory<byte>)u).ToList());
