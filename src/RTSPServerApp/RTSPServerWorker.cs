@@ -347,6 +347,8 @@ internal class RTSPServerWorker : BackgroundService
                         mediaFileReader.VideoTimer = new Timer(PACING_WAKE_MS);
                         mediaFileReader.VideoTimer.Elapsed += (s, e) =>
                         {
+                            var pending = new List<(uint Pts, List<ReadOnlyMemory<byte>> Units)>();
+
                             lock (_syncRoot)
                             {
                                 // Send what the clock says is due, not one sample per wake-up. See
@@ -411,8 +413,22 @@ internal class RTSPServerWorker : BackgroundService
                                         mediaFileReader.LoopOffsetSeconds + videoDecodeSeconds + videoSampleSeconds;
 
                                     long videoPts = (long)((mediaFileReader.LoopOffsetSeconds + videoSeconds) * VIDEO_RTP_CLOCK);
-                                    rtspVideoTrack.FeedInRawSamples((uint)unchecked(mediaFileReader.VideoRtpBaseTime + videoPts), units.Select(u => (ReadOnlyMemory<byte>)u).ToList());
+
+                                    // Held back until the lock is off. This hands the sample to the
+                                    //  server, which writes it to the client, and a client slow to
+                                    //  read blocks the write - so doing it under the lock stops
+                                    //  every other track dead. One lock covers both tracks of every
+                                    //  stream this worker serves, so that is a wide blast radius
+                                    //  for a write that has nothing to do with the reader the lock
+                                    //  is there to guard.
+                                    pending.Add(((uint)unchecked(mediaFileReader.VideoRtpBaseTime + videoPts),
+                                        units.Select(u => (ReadOnlyMemory<byte>)u).ToList()));
                                 }
+                            }
+
+                            foreach (var (pts, units) in pending)
+                            {
+                                rtspVideoTrack.FeedInRawSamples(pts, units);
                             }
                         };
 
@@ -447,6 +463,8 @@ internal class RTSPServerWorker : BackgroundService
                         mediaFileReader.AudioTimer = new Timer(PACING_WAKE_MS);
                         mediaFileReader.AudioTimer.Elapsed += (s, e) =>
                         {
+                            var pending = new List<(uint Pts, List<ReadOnlyMemory<byte>> Units)>();
+
                             lock (_syncRoot)
                             {
                                 // The same clock as the picture, which is the whole point - see
@@ -502,8 +520,15 @@ internal class RTSPServerWorker : BackgroundService
                                         mediaFileReader.LoopOffsetSeconds + audioSeconds + audioSampleSeconds;
 
                                     long audioPts = (long)((mediaFileReader.LoopOffsetSeconds + audioSeconds) * audioRtpClock);
-                                    rtspAudioTrack.FeedInRawSamples((uint)unchecked(mediaFileReader.AudioRtpBaseTime + audioPts), units.Select(u => (ReadOnlyMemory<byte>)u).ToList());
+                                    // See the picture track: the send waits until the lock is off.
+                                    pending.Add(((uint)unchecked(mediaFileReader.AudioRtpBaseTime + audioPts),
+                                        units.Select(u => (ReadOnlyMemory<byte>)u).ToList()));
                                 }
+                            }
+
+                            foreach (var (pts, units) in pending)
+                            {
+                                rtspAudioTrack.FeedInRawSamples(pts, units);
                             }
                         };
 

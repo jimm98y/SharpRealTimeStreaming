@@ -481,6 +481,8 @@ namespace SrtpServerSample
                             mediaFileReader.VideoTimer = new Timer(PACING_WAKE_MS);
                             mediaFileReader.VideoTimer.Elapsed += (s, e) =>
                             {
+                                var pending = new List<(uint Pts, List<ReadOnlyMemory<byte>> Units)>();
+
                                 lock (_syncRoot)
                                 {
                                     // Send what the clock says is due, not one sample per wake-up.
@@ -552,8 +554,22 @@ namespace SrtpServerSample
                                             mediaFileReader.LoopOffsetSeconds + videoDecodeSeconds + videoSampleSeconds;
 
                                         long videoPts = (long)((mediaFileReader.LoopOffsetSeconds + videoSeconds) * videoRtpClock);
-                                        rtspVideoTrack.FeedInRawSamples((uint)unchecked(mediaFileReader.VideoRtpBaseTime + videoPts), units.Select(u => (ReadOnlyMemory<byte>)u).ToList());
+
+                                        // Held back until the lock is off. This hands the sample to
+                                        //  the server, which writes it to the client, and a client
+                                        //  slow to read blocks the write - so doing it under the
+                                        //  lock stops the other track too. Both tracks share the one
+                                        //  interleaved connection, so they were measured stalling
+                                        //  together.
+                                        pending.Add(((uint)unchecked(mediaFileReader.VideoRtpBaseTime + videoPts),
+                                            units.Select(u => (ReadOnlyMemory<byte>)u).ToList()));
                                     }
+                                }
+
+                                foreach (var (pts, units) in pending)
+                                {
+                                    Console.WriteLine($"VSEND {mediaFileReader.Clock.Elapsed.TotalSeconds:F4}");
+                                    rtspVideoTrack.FeedInRawSamples(pts, units);
                                 }
                             };
 
@@ -591,6 +607,8 @@ namespace SrtpServerSample
                             mediaFileReader.AudioTimer = new Timer(PACING_WAKE_MS);
                             mediaFileReader.AudioTimer.Elapsed += (s, e) =>
                             {
+                                var pending = new List<(uint Pts, List<ReadOnlyMemory<byte>> Units)>();
+
                                 lock (_syncRoot)
                                 {
                                     // The same clock as the picture, which is the whole point -
@@ -639,8 +657,16 @@ namespace SrtpServerSample
                                             mediaFileReader.LoopOffsetSeconds + audioSeconds + audioSampleSeconds;
 
                                         long audioPts = (long)((mediaFileReader.LoopOffsetSeconds + audioSeconds) * audioRtpClock);
-                                        rtspAudioTrack.FeedInRawSamples((uint)unchecked(mediaFileReader.AudioRtpBaseTime + audioPts), units.Select(u => (ReadOnlyMemory<byte>)u).ToList());
+
+                                        // See the picture track: the send waits until the lock is off.
+                                        pending.Add(((uint)unchecked(mediaFileReader.AudioRtpBaseTime + audioPts),
+                                            units.Select(u => (ReadOnlyMemory<byte>)u).ToList()));
                                     }
+                                }
+
+                                foreach (var (pts, units) in pending)
+                                {
+                                    rtspAudioTrack.FeedInRawSamples(pts, units);
                                 }
                             };
 
