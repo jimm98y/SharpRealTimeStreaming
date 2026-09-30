@@ -76,6 +76,12 @@ namespace SharpRTSPClient.Tests
         /// <summary>Refuse every answer, and never call it stale - what a wrong password looks like.</summary>
         public bool AlwaysRefuse { get; set; }
 
+        /// <summary>Method that is received but never answered, as a hung server would.</summary>
+        public string IgnoreMethod { get; set; }
+
+        /// <summary>Method after whose reply the server closes the connection.</summary>
+        public string CloseAfter { get; set; }
+
         /// <summary>How many times a request was refused because its nonce had gone stale.</summary>
         public int StaleChallenges => _staleChallenges;
 
@@ -106,7 +112,8 @@ namespace SharpRTSPClient.Tests
                         {
                             string request = pending.Substring(0, end);
                             pending = pending.Substring(end + 4);
-                            Respond(stream, request);
+                            if (!Respond(stream, request))
+                                return;
                         }
 
                         buffer.Clear();
@@ -120,7 +127,8 @@ namespace SharpRTSPClient.Tests
             }
         }
 
-        private void Respond(NetworkStream stream, string request)
+        /// <summary>Answers one request. False when the server is to close the connection.</summary>
+        private bool Respond(NetworkStream stream, string request)
         {
             string method = request.Split(' ')[0];
             string cseq = Match(request, @"CSeq:\s*(\d+)") ?? "1";
@@ -131,6 +139,11 @@ namespace SharpRTSPClient.Tests
                 _requests.Add(method);
             }
 
+            if (IgnoreMethod != null && IgnoreMethod == method)
+            {
+                return true;
+            }
+
             if (RequireAuthentication)
             {
                 string authorization = Match(request, @"Authorization:\s*(.+)");
@@ -138,13 +151,13 @@ namespace SharpRTSPClient.Tests
                 if (authorization == null)
                 {
                     SendUnauthorized(stream, cseq, stale: false);
-                    return;
+                    return true;
                 }
 
                 if (AlwaysRefuse)
                 {
                     SendUnauthorized(stream, cseq, stale: false);
-                    return;
+                    return true;
                 }
 
                 string presented = Match(authorization, "nonce=\"([^\"]+)\"");
@@ -153,7 +166,7 @@ namespace SharpRTSPClient.Tests
                     // the password was right, the nonce simply outlived the session
                     Interlocked.Increment(ref _staleChallenges);
                     SendUnauthorized(stream, cseq, stale: true);
-                    return;
+                    return true;
                 }
             }
 
@@ -186,6 +199,8 @@ namespace SharpRTSPClient.Tests
             {
                 Nonce = Guid.NewGuid().ToString("N");
             }
+
+            return CloseAfter == null || CloseAfter != method;
         }
 
         private void SendUnauthorized(NetworkStream stream, string cseq, bool stale)

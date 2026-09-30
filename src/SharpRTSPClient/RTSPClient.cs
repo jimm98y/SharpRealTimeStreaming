@@ -49,7 +49,7 @@ namespace SharpRTSPClient
     /// <summary>
     /// RTSP client.
     /// </summary>
-    public class RTSPClient : IDisposable
+    public partial class RTSPClient : IDisposable
     {
         /// <summary>
         /// Source of the SSRCs this client reports under.
@@ -732,15 +732,16 @@ namespace SharpRTSPClient
             // Connect to a RTSP Server. The RTSP session is a TCP connection
             _rtspSocketStatus = RtspStatus.Connecting;
 
+            TcpClient connection;
             try
             {
-                _rtspSocket = Rtsp.RtspUtils.CreateRtspTransportFromUrl(_uri, _credentials, _userCertificateSelectionCallback);
+                _rtspSocket = CreateRtspTransport(out connection);
             }
-            catch
+            catch (Exception ex)
             {
                 _rtspSocketStatus = RtspStatus.ConnectFailed;
                 _logger.LogWarning("Error - did not connect");
-                Stopped?.Invoke(this, new StoppedEventArgs(StoppedReason.ConnectionFailed));
+                Stopped?.Invoke(this, new StoppedEventArgs(ex is TimeoutException ? StoppedReason.ConnectTimeout : StoppedReason.ConnectionFailed));
                 return;
             }
 
@@ -752,16 +753,31 @@ namespace SharpRTSPClient
                 return;
             }
 
-            _rtspSocketStatus = RtspStatus.Connected;
-
             // Connect a RTSP Listener to the RTSP Socket (or other Stream) to send RTSP messages and listen for RTSP replies
-            _rtspClient = new RtspListener(_rtspSocket, _loggerFactory.CreateLogger<RtspListener>())
+            try
             {
-                AutoReconnect = _autoReconnect
-            };
+                _rtspClient = new RtspListener(_rtspSocket, _loggerFactory.CreateLogger<RtspListener>())
+                {
+                    AutoReconnect = _autoReconnect
+                };
+            }
+            catch (IOException ex) when (IsSocketTimeout(ex))
+            {
+                // an rtsps handshake that did not finish within ConnectTimeout
+                _rtspSocket.Close();
+                _rtspSocket = null;
+                _rtspSocketStatus = RtspStatus.ConnectFailed;
+                _logger.LogWarning("Error - the TLS handshake timed out");
+                Stopped?.Invoke(this, new StoppedEventArgs(StoppedReason.ConnectTimeout));
+                return;
+            }
+
+            AfterConnected(connection);
+            _rtspSocketStatus = RtspStatus.Connected;
 
             _rtspClient.MessageReceived += RtspMessageReceived;
             _rtspClient.Start(); // start listening for messages from the server (messages fire the MessageReceived event)
+            StartWatchdog();
 
             // Transports are made when the description says how many tracks there are, rather than
             // two of them here on the assumption that a stream is one video and one audio.
@@ -782,7 +798,7 @@ namespace SharpRTSPClient
                 RtspUri = _uri
             };
 
-            _rtspClient.SendMessage(optionsMessage);
+            SendRequest(_rtspClient, optionsMessage);
         }
 
         /// <summary>
@@ -889,7 +905,9 @@ namespace SharpRTSPClient
                 Session = _session
             };
             pause_message.AddAuthorization(_authentication, _uri, _rtspSocket.NextCommandIndex());
-            _rtspClient?.SendMessage(pause_message);
+            // no media is due from here on, however long the reply takes
+            _mediaExpected = false;
+            SendRequest(_rtspClient, pause_message);
         }
 
         /// <summary>
@@ -915,7 +933,7 @@ namespace SharpRTSPClient
                 playMessage.AddRequireOnvifRequest();
                 playMessage.AddRateControlOnvifRequest(false);
             }
-            _rtspClient?.SendMessage(playMessage);
+            SendRequest(_rtspClient, playMessage);
         }
 
         /// <summary>
@@ -937,7 +955,7 @@ namespace SharpRTSPClient
                 playMessage.AddRequireOnvifRequest();
                 playMessage.AddRateControlOnvifRequest(false);
             }
-            _rtspClient?.SendMessage(playMessage);
+            SendRequest(_rtspClient, playMessage);
         }
 
         /// <summary>
@@ -962,7 +980,7 @@ namespace SharpRTSPClient
                 playMessage.AddRequireOnvifRequest();
                 playMessage.AddRateControlOnvifRequest(false);
             }
-            _rtspClient?.SendMessage(playMessage);
+            SendRequest(_rtspClient, playMessage);
         }
 
         /// <summary>
@@ -987,7 +1005,7 @@ namespace SharpRTSPClient
                     Session = _session
                 };
                 teardown_message.AddAuthorization(_authentication, _uri, _rtspSocket?.NextCommandIndex() ?? 0);
-                _rtspClient?.SendMessage(teardown_message);
+                SendRequest(_rtspClient, teardown_message);
             }
 
             TeardownClient();
@@ -995,6 +1013,9 @@ namespace SharpRTSPClient
 
         private void TeardownClient()
         {
+            // before the connection is closed below, which the watchdog would otherwise report as lost
+            StopWatchdog();
+
             _rtspSocketStatus = RtspStatus.WaitingToConnect;
 
             // a reconnect gets a new stream, so the SSRC we learned no longer applies
@@ -1236,6 +1257,8 @@ namespace SharpRTSPClient
         /// </remarks>
         private void RtpDataReceived(ClientTrack track, RtspDataEventArgs e)
         {
+            MediaReceived();
+
             // Inside the using, not before it: returning here handed the payload back to nobody,
             // when every other path in this method takes ownership of it.
             using (var data = e.Data)
@@ -1574,6 +1597,8 @@ namespace SharpRTSPClient
             if (!(e.Message is RtspResponse message))
                 return;
 
+            ResponseReceived(message);
+
             // RTSP Messages are OPTIONS, DESCRIBE, SETUP, PLAY etc
             _logger.LogDebug("Received RTSP response to message {originalRequest}", message.OriginalRequest);
 
@@ -1610,7 +1635,7 @@ namespace SharpRTSPClient
                         if (message.OriginalRequest?.Clone() is RtspRequest staleRetry)
                         {
                             staleRetry.AddAuthorization(_authentication, _uri, _rtspSocket?.NextCommandIndex() ?? 0);
-                            _rtspClient?.SendMessage(staleRetry);
+                            SendRequest(_rtspClient, staleRetry);
                             return;
                         }
                     }
@@ -1638,7 +1663,7 @@ namespace SharpRTSPClient
                     if (message.OriginalRequest?.Clone() is RtspRequest resendMessage)
                     {
                         resendMessage.AddAuthorization(_authentication, _uri, _rtspSocket?.NextCommandIndex() ?? 0);
-                        _rtspClient?.SendMessage(resendMessage);
+                        SendRequest(_rtspClient, resendMessage);
                         return;
                     }
                 }
@@ -1673,7 +1698,7 @@ namespace SharpRTSPClient
                         Headers = { { "Accept", "application/sdp" } },
                     };
                     describeMessage.AddAuthorization(_authentication, _uri, _rtspSocket.NextCommandIndex());
-                    _rtspClient?.SendMessage(describeMessage);
+                    SendRequest(_rtspClient, describeMessage);
                 }
                 else
                 {
@@ -1786,7 +1811,7 @@ namespace SharpRTSPClient
                 {
                     // send the next SETUP message, after adding in the 'session'
                     nextSetup.Session = _session;
-                    _rtspClient?.SendMessage(nextSetup);
+                    SendRequest(_rtspClient, nextSetup);
                 }
                 else
                 {
@@ -2361,7 +2386,7 @@ namespace SharpRTSPClient
             }
 
             // Send the FIRST SETUP message and remove it from the list of Setup Messages
-            _rtspClient?.SendMessage(firstSetup);
+            SendRequest(_rtspClient, firstSetup);
         }
 
         /// <summary>
@@ -2710,7 +2735,7 @@ namespace SharpRTSPClient
                 }
 
                 keepAliveMessage.AddAuthorization(_authentication, uri, rtspSocket.NextCommandIndex());
-                rtspClient.SendMessage(keepAliveMessage);
+                SendRequest(rtspClient, keepAliveMessage);
             }
             catch (Exception ex)
             {
@@ -2774,6 +2799,26 @@ namespace SharpRTSPClient
         /// use, so it stopped rather than carry on and accept the media unencrypted.
         /// </summary>
         EncryptionUnavailable,
+
+        /// <summary>
+        /// No connection within <see cref="RTSPClient.ConnectTimeout"/>.
+        /// </summary>
+        ConnectTimeout,
+
+        /// <summary>
+        /// A request went unanswered for longer than <see cref="RTSPClient.ResponseTimeout"/>.
+        /// </summary>
+        ResponseTimeout,
+
+        /// <summary>
+        /// No media arrived for longer than <see cref="RTSPClient.ReceiveTimeout"/> while playing.
+        /// </summary>
+        ReceiveTimeout,
+
+        /// <summary>
+        /// The server closed the RTSP connection, or it broke.
+        /// </summary>
+        ConnectionLost,
     }
 
     public class StoppedEventArgs : EventArgs
