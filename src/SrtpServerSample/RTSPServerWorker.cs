@@ -568,7 +568,7 @@ namespace SrtpServerSample
 
                                 foreach (var (pts, units) in pending)
                                 {
-                                    Console.WriteLine($"VSEND {mediaFileReader.Clock.Elapsed.TotalSeconds:F4}");
+                                    //Console.WriteLine($"VSEND {mediaFileReader.Clock.Elapsed.TotalSeconds:F4}");
                                     rtspVideoTrack.FeedInRawSamples(pts, units);
                                 }
                             };
