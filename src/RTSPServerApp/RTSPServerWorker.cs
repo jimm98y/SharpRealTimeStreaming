@@ -326,6 +326,11 @@ internal class RTSPServerWorker : BackgroundService
                             av1Track.SetOBUs(videoUnits.ToList());
                             rtspVideoTrack = av1Track;
                         }
+                        else if (inputTrack is SharpMP4.Tracks.VP9Track)
+                        {
+                            // Nothing out of band: what a decoder needs is in each key frame's header.
+                            rtspVideoTrack = new SharpRTSPServer.VP9Track();
+                        }
                         else
                         {
                             continue;
@@ -379,7 +384,7 @@ internal class RTSPServerWorker : BackgroundService
                                         break;
                                     }
 
-                                    IEnumerable<byte[]> units = inputReader.ParseSample(inputTrack.TrackID, sample.Data);
+                                    IEnumerable<ArraySegment<byte>> units = inputReader.ParseSample(inputTrack.TrackID, sample.Data);
 
                                     // Where this sample sits in the file, and where that is in the
                                     // playout - which stops being the same thing once the file has been
@@ -421,8 +426,10 @@ internal class RTSPServerWorker : BackgroundService
                                     //  stream this worker serves, so that is a wide blast radius
                                     //  for a write that has nothing to do with the reader the lock
                                     //  is there to guard.
+                                    // Copied, because what the reader hands back is a view of a buffer
+                                    //  it reads the next sample into.
                                     pending.Add(((uint)unchecked(mediaFileReader.VideoRtpBaseTime + videoPts),
-                                        units.Select(u => (ReadOnlyMemory<byte>)u).ToList()));
+                                        units.Select(u => (ReadOnlyMemory<byte>)u.ToArray()).ToList()));
                                 }
                             }
 
@@ -491,7 +498,7 @@ internal class RTSPServerWorker : BackgroundService
                                         break;
                                     }
 
-                                    IEnumerable<byte[]> units = inputReader.ParseSample(inputTrack.TrackID, sample.Data);
+                                    IEnumerable<ArraySegment<byte>> units = inputReader.ParseSample(inputTrack.TrackID, sample.Data);
                                     // As the video above: the file's units are not the clock the SDP
                                     // declares. For audio the two usually agree, which is why this went
                                     // unnoticed, but a file that counts otherwise should still play.
@@ -520,9 +527,10 @@ internal class RTSPServerWorker : BackgroundService
                                         mediaFileReader.LoopOffsetSeconds + audioSeconds + audioSampleSeconds;
 
                                     long audioPts = (long)((mediaFileReader.LoopOffsetSeconds + audioSeconds) * audioRtpClock);
-                                    // See the picture track: the send waits until the lock is off.
+                                    // See the picture track: the send waits until the lock is off, and
+                                    // the units are copied out of the reader's buffer.
                                     pending.Add(((uint)unchecked(mediaFileReader.AudioRtpBaseTime + audioPts),
-                                        units.Select(u => (ReadOnlyMemory<byte>)u).ToList()));
+                                        units.Select(u => (ReadOnlyMemory<byte>)u.ToArray()).ToList()));
                                 }
                             }
 

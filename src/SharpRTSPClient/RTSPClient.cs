@@ -1924,6 +1924,9 @@ namespace SharpRTSPClient
                             case "AV1":
                                 videoTrack.Processor = new AV1Payload(_loggerFactory.CreateLogger<AV1Payload>());
                                 break;
+                            case "VP9":
+                                videoTrack.Processor = new VP9Payload(_loggerFactory.CreateLogger<VP9Payload>());
+                                break;
                             case "JPEG":
                                 videoTrack.Processor = new JPEGPayload();
                                 break;

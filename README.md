@@ -4,7 +4,7 @@ This is a thin wrapper around the fantastic SharpRTSP, mostly based off their sa
 > **Upgrading from 0.7.x?** See [doc/migration.md](doc/migration.md).
 
 ## SharpRTSPClient
-Simple RTSP client that supports MJPEG, H264, H265, H266, AV1 for video and AAC, Opus, PCMU and PCMA for audio.
+Simple RTSP client that supports MJPEG, H264, H265, H266, AV1, VP9 for video and AAC, Opus, PCMU and PCMA for audio.
 
 [![NuGet version](https://img.shields.io/nuget/v/SharpRTSPClient.svg?style=flat-square)](https://www.nuget.org/packages/SharpRTSPClient)
 
@@ -114,7 +114,7 @@ The `Stopped` event reports a `StoppedReason` so you can decide whether reconnec
 Retrying is only worthwhile for `ConnectionFailed`, `RtcpBye` and sometimes `ServerError`; the rest will fail again the same way.
 
 ## SharpRTSPServer
-Simple RTSP server that supports MJPEG, H264, H265, H266, AV1 for video and AAC, Opus, PCMU and PCMA for audio. 
+Simple RTSP server that supports MJPEG, H264, H265, H266, AV1, VP9 for video and AAC, Opus, PCMU and PCMA for audio. 
 
 [![NuGet version](https://img.shields.io/nuget/v/SharpRTSPServer.svg?style=flat-square)](https://www.nuget.org/packages/SharpRTSPServer)
 
@@ -165,7 +165,7 @@ aacTrack.FeedInRawSamples(rtpAudioBaseTime + audioPTS, new List<byte[]> { aacFra
 
 | Video | Audio |
 | --- | --- |
-| `H264Track`, `H265Track`, `H266Track`, `AV1Track`, `MJpegTrack` | `AACTrack`, `OpusTrack`, `PCMATrack`, `PCMUTrack` |
+| `H264Track`, `H265Track`, `H266Track`, `AV1Track`, `VP9Track`, `MJpegTrack` | `AACTrack`, `OpusTrack`, `PCMATrack`, `PCMUTrack` |
 
 `ProxyTrack` forwards RTP that has already been packetized elsewhere, which is what the FFmpeg and PCAPNG samples use. Pair it with `RTSPStreamSource.OverrideSDP` to supply the SDP yourself.
 

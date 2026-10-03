@@ -97,6 +97,7 @@ namespace SharpRTSPClient.Tests
         [DataRow("m=video 0 RTP/AVP 96\r\na=control:trackID=0\r\na=rtpmap:96 H265/90000\r\n", "H265")]
         [DataRow("m=video 0 RTP/AVP 96\r\na=control:trackID=0\r\na=rtpmap:96 H266/90000\r\n", "H266")]
         [DataRow("m=video 0 RTP/AVP 96\r\na=control:trackID=0\r\na=rtpmap:96 AV1/90000\r\n", "AV1")]
+        [DataRow("m=video 0 RTP/AVP 96\r\na=control:trackID=0\r\na=rtpmap:96 VP9/90000\r\na=fmtp:96 profile-id=0\r\n", "VP9")]
         [DataRow("m=video 0 RTP/AVP 96\r\na=control:trackID=0\r\na=rtpmap:96 JPEG/90000\r\n", "JPEG")]
         public void DynamicVideoPayloadIsResolvedFromTheRtpMap(string media, string expectedCodec)
         {

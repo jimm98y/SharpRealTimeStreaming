@@ -161,6 +161,33 @@ namespace SharpRTSPServer.Tests
         }
 
         [TestMethod]
+        public void Vp9IsDescribedAndCarried()
+        {
+            int port = TestPorts.FindFree();
+            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
+
+            var video = new VP9Track();
+
+            server.AddStreamSource(new RTSPStreamSource("stream1", video, null));
+            server.StartListen();
+
+            byte[] frame = VP9TrackTests.KeyFrame(640, 360, 400);
+
+            var played = Play(server, port, trackId: 0,
+                feed: () => video.FeedInRawSamples(3000, new List<ReadOnlyMemory<byte>>
+                {
+                    new ReadOnlyMemory<byte>(frame),
+                }));
+
+            Assert.Contains("VP9/90000", played.Sdp, played.Sdp);
+
+            // the descriptor with picture ID and scalability structure, then the frame as it was
+            Assert.AreEqual(0x8E, played.FirstPacket[12], "I, B, E and V on a key frame in one packet");
+            CollectionAssert.AreEqual(frame, played.FirstPacket.Skip(20).ToArray(),
+                "a frame within the MTU should arrive in one piece and unchanged");
+        }
+
+        [TestMethod]
         public void AProxyTrackSaysWhyItCannotDescribeItself()
         {
             var proxy = new ProxyTrack(TrackType.Video);

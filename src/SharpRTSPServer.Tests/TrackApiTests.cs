@@ -55,7 +55,7 @@ namespace SharpRTSPServer.Tests
             {
                 "AACTrack", "AMRTrack", "AV1Track", "G726Track", "H264Track", "H265Track",
                 "H266Track", "MetadataTrack", "MJpegTrack", "MP4VTrack", "OpusTrack", "PCMATrack",
-                "PCMUTrack", "ProxyTrack",
+                "PCMUTrack", "ProxyTrack", "VP9Track",
             };
 
             var actual = PublicTracks().Select(t => t.Name).ToArray();
@@ -69,6 +69,7 @@ namespace SharpRTSPServer.Tests
             new object[] { new H265Track(), "H265" },
             new object[] { new H266Track(), "H266" },
             new object[] { new AV1Track(), "AV1" },
+            new object[] { new VP9Track(), "VP9" },
             new object[] { new MJpegTrack(), "JPEG" },
             new object[] { new OpusTrack(), "opus" },
             new object[] { new PCMATrack(), "PCMA" },
