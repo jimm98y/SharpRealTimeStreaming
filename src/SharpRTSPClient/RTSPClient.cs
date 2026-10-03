@@ -1973,59 +1973,80 @@ namespace SharpRTSPClient
 
                     try
                     {
-                        if (videoTrack.Processor is H264Payload && fmtp?.FormatParameter != null)
+                        // Every codec below reports a configuration even without an fmtp: the RFCs
+                        // say what to assume for a parameter that is not given, and the parameter
+                        // sets, where there are any, can still arrive in the stream itself.
+                        if (videoTrack.Processor is H264Payload)
                         {
-                            // If the rtpmap contains H264 then split the fmtp to get the sprop-parameter-sets which hold the SPS and PPS in base64
-                            var param = H264Parameters.Parse(fmtp.FormatParameter);
-                            var spsPps = param.SpropParameterSets;
-                            if (spsPps.Count >= 2)
+                            var configuration = H264StreamConfigurationData.Parse(fmtp?.FormatParameter);
+
+                            if (fmtp?.FormatParameter != null)
                             {
-                                byte[] sps = spsPps[0];
-                                byte[] pps = spsPps[1];
-                                streamConfigurationData = new H264StreamConfigurationData(sps, pps);
+                                // sprop-parameter-sets holds the SPS and PPS in base64
+                                var param = H264Parameters.Parse(fmtp.FormatParameter);
+                                var spsPps = param.SpropParameterSets;
+                                if (spsPps.Count >= 2)
+                                {
+                                    configuration.SPS = spsPps[0];
+                                    configuration.PPS = spsPps[1];
+                                }
                             }
+
+                            streamConfigurationData = configuration;
                         }
-                        else if (videoTrack.Processor is H265Payload && fmtp?.FormatParameter != null)
+                        else if (videoTrack.Processor is H265Payload)
                         {
-                            // If the rtpmap contains H265 then split the fmtp to get the sprop-vps, sprop-sps and sprop-pps
-                            // The RFC makes the VPS, SPS and PPS OPTIONAL so they may not be present. In which we pass back NULL values
-                            var param = H265Parameters.Parse(fmtp.FormatParameter);
-                            var vpsSpsPps = param.SpropParameterSets;
-                            if (vpsSpsPps.Count >= 3)
+                            var configuration = H265StreamConfigurationData.Parse(fmtp?.FormatParameter);
+
+                            if (fmtp?.FormatParameter != null)
                             {
-                                byte[] vps = vpsSpsPps[0];
-                                byte[] sps = vpsSpsPps[1];
-                                byte[] pps = vpsSpsPps[2];
-                                streamConfigurationData = new H265StreamConfigurationData(vps, sps, pps);
+                                // The RFC makes the VPS, SPS and PPS OPTIONAL so they may not be present, in which case they stay null
+                                var param = H265Parameters.Parse(fmtp.FormatParameter);
+                                var vpsSpsPps = param.SpropParameterSets;
+                                if (vpsSpsPps.Count >= 3)
+                                {
+                                    configuration.VPS = vpsSpsPps[0];
+                                    configuration.SPS = vpsSpsPps[1];
+                                    configuration.PPS = vpsSpsPps[2];
+                                }
+                                else if (vpsSpsPps.Count >= 2)
+                                {
+                                    // some implementations only send SPS and PPS, e.g. some HikVision cameras
+                                    configuration.SPS = vpsSpsPps[0];
+                                    configuration.PPS = vpsSpsPps[1];
+                                }
                             }
-                            else if (vpsSpsPps.Count >= 2)
-                            {
-                                // some implementations only send SPS and PPS, e.g. some HikVision cameras
-                                byte[] sps = vpsSpsPps[0];
-                                byte[] pps = vpsSpsPps[1];
-                                streamConfigurationData = new H265StreamConfigurationData(null, sps, pps);
-                            }
+
+                            streamConfigurationData = configuration;
                         }
-                        else if (videoTrack.Processor is H266Payload && fmtp?.FormatParameter != null)
+                        else if (videoTrack.Processor is H266Payload)
                         {
-                            // If the rtpmap contains H266 then split the fmtp to get the sprop-dci, sprop-vps, sprop-sps, sprop-pps and sprop-sei
-                            // The RFC makes the DCI, VPS, SPS and PPS OPTIONAL so they may not be present. In which we pass back NULL values
-                            var param = H266Parameters.Parse(fmtp.FormatParameter);
-                            var vpsSpsPps = param.SpropParameterSets;
-                            if (vpsSpsPps.Count >= 5)
+                            var configuration = H266StreamConfigurationData.Parse(fmtp?.FormatParameter);
+
+                            if (fmtp?.FormatParameter != null)
                             {
-                                byte[] dci = vpsSpsPps[0];
-                                byte[] vps = vpsSpsPps[1];
-                                byte[] sps = vpsSpsPps[2];
-                                byte[] pps = vpsSpsPps[3];
-                                byte[] sei = vpsSpsPps[4];
-                                streamConfigurationData = new H266StreamConfigurationData(dci, vps, sps, pps, sei);
+                                // The RFC makes the DCI, VPS, SPS and PPS OPTIONAL so they may not be present, in which case they stay null
+                                var param = H266Parameters.Parse(fmtp.FormatParameter);
+                                var vpsSpsPps = param.SpropParameterSets;
+                                if (vpsSpsPps.Count >= 5)
+                                {
+                                    configuration.DCI = vpsSpsPps[0];
+                                    configuration.VPS = vpsSpsPps[1];
+                                    configuration.SPS = vpsSpsPps[2];
+                                    configuration.PPS = vpsSpsPps[3];
+                                    configuration.SEI = vpsSpsPps[4];
+                                }
                             }
+
+                            streamConfigurationData = configuration;
                         }
-                        else if (videoTrack.Processor is AV1Payload && fmtp?.FormatParameter != null)
+                        else if (videoTrack.Processor is AV1Payload)
                         {
-                            var param = AV1Parameters.Parse(fmtp.FormatParameter);
-                            // TODO: the rtpmap contains AV1
+                            streamConfigurationData = AV1StreamConfigurationData.Parse(fmtp?.FormatParameter);
+                        }
+                        else if (videoTrack.Processor is VP9Payload)
+                        {
+                            streamConfigurationData = VP9StreamConfigurationData.Parse(fmtp?.FormatParameter);
                         }
 
                         }
@@ -2038,7 +2059,12 @@ namespace SharpRTSPClient
                             _logger.LogWarning(ex,
                                 "Ignoring the format parameters of the video stream, they could not be read: {formatParameter}",
                                 fmtp?.FormatParameter);
-                            streamConfigurationData = null;
+
+                            // Only the fmtp as it was written: the codec's own configuration would claim
+                            // defaults for what the SDP did give.
+                            streamConfigurationData = fmtp?.FormatParameter != null
+                                ? new UnparsedStreamConfigurationData(fmtp.FormatParameter)
+                                : null;
                         }
 
                     // Kept because a sender report is useless without it: it says when a given RTP
@@ -2175,6 +2201,20 @@ namespace SharpRTSPClient
                                 break;
                             case "OPUS":
                                 audioTrack.Processor = new OpusPayload();
+
+                                try
+                                {
+                                    // Even without an fmtp: whether it is stereo has a default too.
+                                    streamConfigurationData = OpusStreamConfigurationData.Parse(fmtp?.FormatParameter);
+                                }
+                                catch (FormatException ex)
+                                {
+                                    // As for the video: a malformed fmtp is no reason not to play the stream.
+                                    _logger.LogWarning(ex,
+                                        "Ignoring the format parameters of the audio stream, they could not be read: {formatParameter}",
+                                        fmtp?.FormatParameter);
+                                    streamConfigurationData = new UnparsedStreamConfigurationData(fmtp?.FormatParameter);
+                                }
                                 break;
                             case "G726-16":
                             case "G726-24":
@@ -2200,6 +2240,7 @@ namespace SharpRTSPClient
 
                             streamConfigurationData = new AACStreamConfigurationData()
                             {
+                                Fmtp = fmtp?.FormatParameter,
                                 ObjectType = aacPayloadProcessor.ObjectType,
                                 FrequencyIndex = aacPayloadProcessor.FrequencyIndex,
                                 SamplingFrequency = samplingFrequency,
@@ -2747,7 +2788,17 @@ namespace SharpRTSPClient
     }
 
     public interface IStreamConfigurationData
-    { }
+    {
+        /// <summary>
+        /// The fmtp's format parameters as the SDP wrote them, without the "a=fmtp:&lt;payload type&gt; "
+        /// in front; null where the SDP has no fmtp for the stream.
+        /// </summary>
+        /// <remarks>
+        /// For what the parsed properties do not cover. Where the fmtp could not be read the stream
+        /// has an <see cref="UnparsedStreamConfigurationData"/>, which carries this and nothing else.
+        /// </remarks>
+        string Fmtp { get; }
+    }
 
     public enum StoppedReason
     {

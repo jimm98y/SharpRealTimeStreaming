@@ -11,6 +11,7 @@ Everything that changed shape, and what to write instead.
 - [The server takes a user repository, not one user name and password](#the-server-takes-a-user-repository-not-one-user-name-and-password)
 - [Logging belongs to the client or server, not the process](#logging-belongs-to-the-client-or-server-not-the-process)
 - [Multicast is off by default](#multicast-is-off-by-default)
+- [A stream's configuration does not mean it has parameter sets](#a-streams-configuration-does-not-mean-it-has-parameter-sets)
 
 ---
 
@@ -304,3 +305,44 @@ server.MulticastEnabled = true;   // where that is the intent
 
 Pair it with `SAVP` and `RTSPStreamSource.SharedSrtpKey` so only clients that were given the key can
 read what the group carries.
+
+---
+
+## A stream's configuration does not mean it has parameter sets
+
+`NewTrackEventArgs.StreamConfigurationData` used to be null for H264, H265 and H266 unless the SDP
+carried the parameter sets, and was always null for AV1 and Opus. It is now there for every H264,
+H265, H266, AV1, VP9 and Opus track, because it also carries what the fmtp says about the profile,
+level and the like - and where the fmtp says nothing, the defaults the payload format sets.
+
+| Class | New |
+| --- | --- |
+| `H264StreamConfigurationData` | `ProfileLevelId`, `PacketizationMode` |
+| `H265StreamConfigurationData` | `ProfileSpace`, `ProfileId`, `TierFlag`, `LevelId`, `MaxDonDiff` |
+| `H266StreamConfigurationData` | `ProfileId`, `TierFlag`, `LevelId`, `MaxDonDiff` |
+| `AV1StreamConfigurationData` | new: `Profile`, `LevelIdx`, `Tier` |
+| `VP9StreamConfigurationData` | new: `ProfileId` |
+| `OpusStreamConfigurationData` | new: `SpropStereo`, `Stereo`, `UseInbandFec`, `UseDtx`, `SpropMaxCaptureRate` |
+| every one of them, `AACStreamConfigurationData` too | `Fmtp` |
+
+`Fmtp` is the fmtp's format parameters as the SDP wrote them (null where it has none), for whatever
+the parsed properties do not cover. It is on `IStreamConfigurationData` as well, so it can be read
+without knowing the codec - which also means a class of your own that implements the interface has
+to add it.
+
+Code that took a configuration to mean the parameter sets are known has to look at them instead:
+
+```cs
+// before
+if (e.StreamConfigurationData is H264StreamConfigurationData config)
+    WriteParameterSets(config.SPS, config.PPS);
+
+// after
+if (e.StreamConfigurationData is H264StreamConfigurationData config && config.SPS != null && config.PPS != null)
+    WriteParameterSets(config.SPS, config.PPS);
+```
+
+Where the fmtp is there but cannot be read, such as a `profile-level-id` that is not six hex
+digits, the configuration is an `UnparsedStreamConfigurationData` holding only `Fmtp`, rather than
+the codec's own class claiming defaults the SDP contradicts. It used to be null. The track itself is
+set up all the same.

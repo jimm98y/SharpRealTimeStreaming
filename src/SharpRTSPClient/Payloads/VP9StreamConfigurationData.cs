@@ -19,9 +19,20 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+using System;
+
 namespace SharpRTSPClient
 {
-    public class AACStreamConfigurationData : IStreamConfigurationData
+    /// <summary>
+    /// What the SDP says about a VP9 stream.
+    /// </summary>
+    /// <remarks>
+    /// There are no parameter sets to carry, since each key frame's header holds what a decoder
+    /// needs; what is left is the profile, which a receiver has to know before it picks a decoder -
+    /// a WebRTC peer, for one, negotiates it.
+    /// <see href="https://datatracker.ietf.org/doc/html/rfc9628#section-6" />
+    /// </remarks>
+    public class VP9StreamConfigurationData : IStreamConfigurationData
     {
         /// <summary>
         /// The fmtp's format parameters as the SDP wrote them, without the "a=fmtp:&lt;payload type&gt; "
@@ -29,42 +40,32 @@ namespace SharpRTSPClient
         /// </summary>
         public string Fmtp { get; set; }
 
-        public AACStreamConfigurationData()
+        /// <summary>
+        /// The profile, 0 to 3. 0 where the SDP gives none, as RFC 9628 says it is to be taken.
+        /// </summary>
+        public int ProfileId { get; set; }
+
+        public VP9StreamConfigurationData()
         { }
 
-        public AACStreamConfigurationData(int objectType, int frequencyIndex, int samplingFrequency, int channelConfiguration)
+        public VP9StreamConfigurationData(int profileId)
         {
-            ObjectType = objectType;
-            FrequencyIndex = frequencyIndex;
-            SamplingFrequency = samplingFrequency;
-            ChannelConfiguration = channelConfiguration;
+            ProfileId = profileId;
         }
 
-        public int ObjectType { get; set; }
-        public int FrequencyIndex { get; set; }
-        public int SamplingFrequency { get; set; }
-        public int ChannelConfiguration { get; set; }
-
         /// <summary>
-        /// Sampling frequencies indexed by the samplingFrequencyIndex of an AudioSpecificConfig,
-        /// as defined by ISO/IEC 14496-3. Index 13 and 14 are reserved, 15 means the frequency is
-        /// written out explicitly instead of indexed.
+        /// Reads the profile out of the fmtp's format parameters, which may be null or empty.
         /// </summary>
-        private static readonly int[] SamplingFrequencies =
+        /// <exception cref="FormatException">The profile-id is there but is not one of 0 to 3.</exception>
+        public static VP9StreamConfigurationData Parse(string formatParameter)
         {
-            96000, 88200, 64000, 48000, 44100, 32000,
-            24000, 22050, 16000, 12000, 11025, 8000, 7350,
-        };
+            var parameters = FormatParameters.Parse(formatParameter);
+            return new VP9StreamConfigurationData(parameters.GetInt("profile-id", 0, 0, 3)) { Fmtp = formatParameter };
+        }
 
-        /// <summary>
-        /// Translates a samplingFrequencyIndex into the frequency in Hz, or 0 when the index does
-        /// not name one.
-        /// </summary>
-        public static int GetSamplingFrequency(int frequencyIndex)
+        public override string ToString()
         {
-            return frequencyIndex >= 0 && frequencyIndex < SamplingFrequencies.Length
-                ? SamplingFrequencies[frequencyIndex]
-                : 0;
+            return $"Profile: {ProfileId}";
         }
     }
 }

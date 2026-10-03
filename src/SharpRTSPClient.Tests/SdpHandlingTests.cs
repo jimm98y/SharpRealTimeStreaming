@@ -155,6 +155,203 @@ namespace SharpRTSPClient.Tests
         }
 
         [TestMethod]
+        [DataRow("a=fmtp:96 profile-id=2\r\n", 2)]
+        [DataRow("a=fmtp:96 max-fr=30; profile-id=1\r\n", 1)]
+        [DataRow("a=fmtp:96 max-fr=30\r\n", 0)]
+        [DataRow("", 0)] // no fmtp at all is profile 0 as well
+        public void VP9ProfileIsTakenFromTheFmtp(string fmtp, int expectedProfile)
+        {
+            string sdp =
+                "m=video 0 RTP/AVP 96\r\n" +
+                "a=control:trackID=0\r\n" +
+                "a=rtpmap:96 VP9/90000\r\n" +
+                fmtp;
+
+            var configuration = Assert.IsInstanceOfType<VP9StreamConfigurationData>(Describe(sdp).VideoConfiguration);
+
+            Assert.AreEqual(expectedProfile, configuration.ProfileId);
+        }
+
+        private static string Video(string codec, string fmtp)
+        {
+            return "m=video 0 RTP/AVP 96\r\n" +
+                "a=control:trackID=0\r\n" +
+                $"a=rtpmap:96 {codec}/90000\r\n" +
+                (fmtp == null ? "" : $"a=fmtp:96 {fmtp}\r\n");
+        }
+
+        [TestMethod]
+        [DataRow("H264", "profile-level-id=64001E;packetization-mode=1;x-google-custom=7")]
+        [DataRow("H265", "profile-id=1;level-id=120;sprop-max-don-diff=0")]
+        [DataRow("H266", "profile-id=1;level-id=51")]
+        [DataRow("AV1", "profile=0;level-idx=8;tier=0")]
+        [DataRow("VP9", "profile-id=2;max-fr=30")]
+        public void TheVideoFmtpIsKeptAsWritten(string codec, string fmtp)
+        {
+            // what the parsed properties leave out, such as x-google-custom, is still there to read
+            Assert.AreEqual(fmtp, Describe(Video(codec, fmtp)).VideoConfiguration.Fmtp);
+        }
+
+        [TestMethod]
+        [DataRow("H264")]
+        [DataRow("H265")]
+        [DataRow("H266")]
+        [DataRow("AV1")]
+        [DataRow("VP9")]
+        public void WithoutAnFmtpTheRawFmtpIsNull(string codec)
+        {
+            Assert.IsNull(Describe(Video(codec, null)).VideoConfiguration.Fmtp);
+        }
+
+        [TestMethod]
+        [DataRow("opus/48000/2", "sprop-stereo=1;maxplaybackrate=24000")]
+        [DataRow("mpeg4-generic/44100/2", "streamtype=5;profile-level-id=1;mode=AAC-hbr;sizelength=13;indexlength=3;indexdeltalength=3;config=1210")]
+        public void TheAudioFmtpIsKeptAsWritten(string rtpmap, string fmtp)
+        {
+            string sdp =
+                "m=video 0 RTP/AVP 96\r\na=control:trackID=0\r\na=rtpmap:96 H264/90000\r\n" +
+                $"m=audio 0 RTP/AVP 97\r\na=control:trackID=1\r\na=rtpmap:97 {rtpmap}\r\na=fmtp:97 {fmtp}\r\n";
+
+            Assert.AreEqual(fmtp, Describe(sdp).AudioConfiguration.Fmtp);
+        }
+
+        [TestMethod]
+        public void H264ProfileAndPacketizationModeAreTakenFromTheFmtp()
+        {
+            var configuration = Assert.IsInstanceOfType<H264StreamConfigurationData>(
+                Describe(Video("H264", "profile-level-id=64001E; packetization-mode=1")).VideoConfiguration);
+
+            Assert.AreEqual("64001E", configuration.ProfileLevelId);
+            Assert.AreEqual(1, configuration.PacketizationMode);
+            Assert.IsNull(configuration.SPS);
+            Assert.IsNull(configuration.PPS);
+        }
+
+        [TestMethod]
+        public void H264WithoutAnFmtpStillHasAConfiguration()
+        {
+            // The parameter sets arrive in the stream; the profile is the SPS's to say.
+            var configuration = Assert.IsInstanceOfType<H264StreamConfigurationData>(Describe(Video("H264", null)).VideoConfiguration);
+
+            Assert.IsNull(configuration.ProfileLevelId);
+            Assert.AreEqual(0, configuration.PacketizationMode);
+            Assert.IsNull(configuration.SPS);
+        }
+
+        [TestMethod]
+        [DataRow("profile-level-id=64001")]
+        [DataRow("profile-level-id=xyz123")]
+        [DataRow("packetization-mode=3")]
+        public void AMalformedH264FmtpIsReportedUnparsedAndKeepsTheTrack(string fmtp)
+        {
+            var result = Describe(Video("H264", fmtp));
+
+            Assert.AreEqual("H264", result.VideoCodec);
+            var configuration = Assert.IsInstanceOfType<UnparsedStreamConfigurationData>(result.VideoConfiguration);
+            Assert.AreEqual(fmtp, configuration.Fmtp);
+        }
+
+        [TestMethod]
+        public void H265ProfileTierLevelAndDonAreTakenFromTheFmtp()
+        {
+            var configuration = Assert.IsInstanceOfType<H265StreamConfigurationData>(
+                Describe(Video("H265", "profile-id=2; tier-flag=1; level-id=153; sprop-max-don-diff=2")).VideoConfiguration);
+
+            Assert.AreEqual(2, configuration.ProfileId);
+            Assert.AreEqual(1, configuration.TierFlag);
+            Assert.AreEqual(153, configuration.LevelId);
+            Assert.AreEqual(2, configuration.MaxDonDiff);
+        }
+
+        [TestMethod]
+        public void H265WithoutAnFmtpHasTheRfcDefaults()
+        {
+            var configuration = Assert.IsInstanceOfType<H265StreamConfigurationData>(Describe(Video("H265", null)).VideoConfiguration);
+
+            Assert.AreEqual(0, configuration.ProfileSpace);
+            Assert.AreEqual(1, configuration.ProfileId);
+            Assert.AreEqual(0, configuration.TierFlag);
+            Assert.AreEqual(93, configuration.LevelId);
+            Assert.AreEqual(0, configuration.MaxDonDiff);
+            Assert.IsNull(configuration.SPS);
+        }
+
+        [TestMethod]
+        public void H266ProfileTierAndLevelAreTakenFromTheFmtp()
+        {
+            var configuration = Assert.IsInstanceOfType<H266StreamConfigurationData>(
+                Describe(Video("H266", "profile-id=17; tier-flag=1; level-id=83")).VideoConfiguration);
+
+            Assert.AreEqual(17, configuration.ProfileId);
+            Assert.AreEqual(1, configuration.TierFlag);
+            Assert.AreEqual(83, configuration.LevelId);
+            Assert.AreEqual(0, configuration.MaxDonDiff);
+        }
+
+        [TestMethod]
+        [DataRow("profile=1; level-idx=8; tier=1", 1, 8, 1)]
+        [DataRow(null, 0, 5, 0)] // the defaults of the AV1 payload format
+        public void AV1ProfileLevelAndTierAreTakenFromTheFmtp(string fmtp, int profile, int levelIdx, int tier)
+        {
+            var configuration = Assert.IsInstanceOfType<AV1StreamConfigurationData>(Describe(Video("AV1", fmtp)).VideoConfiguration);
+
+            Assert.AreEqual(profile, configuration.Profile);
+            Assert.AreEqual(levelIdx, configuration.LevelIdx);
+            Assert.AreEqual(tier, configuration.Tier);
+        }
+
+        [TestMethod]
+        [DataRow("a=fmtp:97 sprop-stereo=1; useinbandfec=1\r\n", true, true)]
+        [DataRow("a=fmtp:97 useinbandfec=0\r\n", false, false)]
+        [DataRow("", false, false)]
+        public void OpusStereoIsTakenFromTheFmtp(string fmtp, bool spropStereo, bool useInbandFec)
+        {
+            string sdp =
+                "m=video 0 RTP/AVP 96\r\na=control:trackID=0\r\na=rtpmap:96 H264/90000\r\n" +
+                "m=audio 0 RTP/AVP 97\r\na=control:trackID=1\r\na=rtpmap:97 opus/48000/2\r\n" + fmtp;
+
+            var result = Describe(sdp);
+
+            Assert.AreEqual("OPUS", result.AudioCodec);
+            var configuration = Assert.IsInstanceOfType<OpusStreamConfigurationData>(result.AudioConfiguration);
+            Assert.AreEqual(spropStereo, configuration.SpropStereo);
+            Assert.AreEqual(useInbandFec, configuration.UseInbandFec);
+        }
+
+        [TestMethod]
+        public void AMalformedOpusFmtpIsReportedUnparsedAndKeepsTheTrack()
+        {
+            string sdp =
+                "m=video 0 RTP/AVP 96\r\na=control:trackID=0\r\na=rtpmap:96 H264/90000\r\n" +
+                "m=audio 0 RTP/AVP 97\r\na=control:trackID=1\r\na=rtpmap:97 opus/48000/2\r\na=fmtp:97 sprop-stereo=yes\r\n";
+
+            var result = Describe(sdp);
+
+            Assert.AreEqual("OPUS", result.AudioCodec);
+            var configuration = Assert.IsInstanceOfType<UnparsedStreamConfigurationData>(result.AudioConfiguration);
+            Assert.AreEqual("sprop-stereo=yes", configuration.Fmtp);
+        }
+
+        [TestMethod]
+        [DataRow("4")]
+        [DataRow("-1")]
+        [DataRow("two")]
+        public void AnUnknownVP9ProfileIsReportedUnparsedAndKeepsTheTrack(string profile)
+        {
+            string sdp =
+                "m=video 0 RTP/AVP 96\r\n" +
+                "a=control:trackID=0\r\n" +
+                "a=rtpmap:96 VP9/90000\r\n" +
+                $"a=fmtp:96 profile-id={profile}\r\n";
+
+            var result = Describe(sdp);
+
+            Assert.AreEqual("VP9", result.VideoCodec);
+            var configuration = Assert.IsInstanceOfType<UnparsedStreamConfigurationData>(result.VideoConfiguration);
+            Assert.AreEqual($"profile-id={profile}", configuration.Fmtp);
+        }
+
+        [TestMethod]
         public void AacConfigurationIsDecodedFromTheFmtp()
         {
             string sdp =
