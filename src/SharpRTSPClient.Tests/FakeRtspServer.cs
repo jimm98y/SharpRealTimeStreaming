@@ -88,48 +88,90 @@ namespace SharpRTSPClient.Tests
         /// <summary>Method after whose reply the server closes the connection.</summary>
         public string CloseAfter { get; set; }
 
+        /// <summary>
+        /// A session does not outlive its connection, as on many cameras: a request naming one on a
+        /// later connection, before a SETUP there, is answered 454.
+        /// </summary>
+        public bool ForgetSessions { get; set; }
+
+        private bool _setUpHere;
+
         /// <summary>How many times a request was refused because its nonce had gone stale.</summary>
         public int StaleChallenges => _staleChallenges;
 
         private int _staleChallenges;
 
+        /// <summary>How many connections the server has accepted.</summary>
+        public int Connections => _connections;
+
+        private int _connections;
+        private volatile TcpClient _client;
+
+        /// <summary>Closes the connection being served, as a server that goes away would; the next is accepted.</summary>
+        public void DropConnection()
+        {
+            _client?.Close();
+        }
+
         private void Serve()
         {
-            try
+            // one connection at a time, and another after it: a client that reconnects is served again
+            while (!_stopping.IsCancellationRequested)
             {
-                using (var client = _listener.AcceptTcpClient())
-                using (var stream = client.GetStream())
+                TcpClient client;
+                try
                 {
-                    var buffer = new StringBuilder();
-                    var chunk = new byte[4096];
+                    client = _listener.AcceptTcpClient();
+                }
+                catch (Exception)
+                {
+                    return; // stopped
+                }
 
-                    while (!_stopping.IsCancellationRequested)
+                Interlocked.Increment(ref _connections);
+                _client = client;
+                _setUpHere = false;
+                try
+                {
+                    using (client)
+                    using (var stream = client.GetStream())
                     {
-                        int read = stream.Read(chunk, 0, chunk.Length);
-                        if (read == 0)
-                            break;
-
-                        buffer.Append(Encoding.ASCII.GetString(chunk, 0, read));
-
-                        // requests here never carry a body, so the blank line ends each one
-                        string pending = buffer.ToString();
-                        int end;
-                        while ((end = pending.IndexOf("\r\n\r\n", StringComparison.Ordinal)) >= 0)
-                        {
-                            string request = pending.Substring(0, end);
-                            pending = pending.Substring(end + 4);
-                            if (!Respond(stream, request))
-                                return;
-                        }
-
-                        buffer.Clear();
-                        buffer.Append(pending);
+                        ServeConnection(stream);
                     }
                 }
+                catch (Exception)
+                {
+                    // the client closing mid-dialog is a normal end to a test
+                }
             }
-            catch (Exception)
+        }
+
+        private void ServeConnection(NetworkStream stream)
+        {
+            var buffer = new StringBuilder();
+            var chunk = new byte[4096];
+
+            while (!_stopping.IsCancellationRequested)
             {
-                // the client closing mid-dialog is a normal end to a test
+                int read = stream.Read(chunk, 0, chunk.Length);
+                if (read == 0)
+                    break;
+
+                buffer.Append(Encoding.ASCII.GetString(chunk, 0, read));
+
+                // requests here never carry a body, so the blank line ends each one
+                string pending = buffer.ToString();
+                int end;
+                while ((end = pending.IndexOf("\r\n\r\n", StringComparison.Ordinal)) >= 0)
+                {
+                    string request = pending.Substring(0, end);
+                    pending = pending.Substring(end + 4);
+                    if (!Respond(stream, request))
+                        return;
+                }
+
+                buffer.Clear();
+                buffer.Append(pending);
             }
         }
 
@@ -147,6 +189,16 @@ namespace SharpRTSPClient.Tests
 
             if (IgnoreMethod != null && IgnoreMethod == method)
             {
+                return true;
+            }
+
+            if (method == "SETUP")
+            {
+                _setUpHere = true;
+            }
+            else if (ForgetSessions && session != null && !_setUpHere)
+            {
+                SendStatus(stream, cseq, "454 Session Not Found");
                 return true;
             }
 
@@ -225,6 +277,13 @@ namespace SharpRTSPClient.Tests
             stream.Flush();
         }
 
+        private static void SendStatus(NetworkStream stream, string cseq, string status)
+        {
+            byte[] head = Encoding.ASCII.GetBytes($"RTSP/1.0 {status}\r\nCSeq: {cseq}\r\n\r\n");
+            stream.Write(head, 0, head.Length);
+            stream.Flush();
+        }
+
         private static void Send(NetworkStream stream, string cseq, params string[] headers)
         {
             Send(stream, cseq, headers, null);
@@ -285,6 +344,7 @@ namespace SharpRTSPClient.Tests
         {
             _stopping.Cancel();
             try { _listener.Stop(); } catch (SocketException) { }
+            DropConnection();
             _thread.Join(2000);
             _stopping.Dispose();
         }

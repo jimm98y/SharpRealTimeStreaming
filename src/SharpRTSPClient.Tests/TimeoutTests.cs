@@ -287,5 +287,211 @@ namespace SharpRTSPClient.Tests
                 Assert.AreEqual(RTSPClient.RtspStatus.WaitingToConnect, client.GetRtspStatus());
             }
         }
+
+        [TestMethod]
+        public void AStoppedHandlerMayStopAndConnectAgain()
+        {
+            // Stopped is raised on the watchdog's thread once the teardown is done, so a handler that
+            // calls back into the client from another thread and waits for it, as one handing the
+            // work to a UI thread does, finds no lock held
+            using var hung = new FakeRtspServer(Sdp) { IgnoreMethod = "DESCRIBE" };
+            using var answering = new FakeRtspServer(Sdp);
+            using var client = new RTSPClient { ResponseTimeout = TimeSpan.FromMilliseconds(300) };
+            client.AcceptTrack = t => t.Kind == TrackKind.Video;
+
+            int handled = 0;
+            using var returned = new ManualResetEventSlim();
+            client.Stopped += (s, e) =>
+            {
+                if (Interlocked.Exchange(ref handled, 1) != 0)
+                    return;
+                // a thread of its own: a task waited for may be run on the waiting thread itself
+                var other = new Thread(() =>
+                {
+                    client.Stop();
+                    client.Connect(answering.BaseUri, RTPTransport.TCP);
+                });
+                other.Start();
+                if (other.Join(3000))
+                    returned.Set();
+            };
+
+            client.Connect(hung.BaseUri, RTPTransport.TCP);
+            Assert.IsTrue(returned.Wait(5000), "the Stopped handler never returned");
+            Assert.IsTrue(answering.WaitForRequest("PLAY"));
+        }
+
+        private static int Count(FakeRtspServer server, string method)
+        {
+            int count = 0;
+            foreach (string sent in server.Requests)
+            {
+                if (sent == method)
+                    count++;
+            }
+            return count;
+        }
+
+        private static bool WaitForCount(FakeRtspServer server, string method, int count, int timeoutMs)
+        {
+            var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
+            while (Count(server, method) < count)
+            {
+                if (DateTime.UtcNow > deadline)
+                    return false;
+                Thread.Sleep(20);
+            }
+            return true;
+        }
+
+        private static bool WaitForPlays(FakeRtspServer server, int plays, int timeoutMs) =>
+            WaitForCount(server, "PLAY", plays, timeoutMs);
+
+        /// <summary>Plays from a server, then has the server drop the connection.</summary>
+        private static void PlayThenDrop(FakeRtspServer server, RTSPClient client, RTPTransport transport = RTPTransport.TCP)
+        {
+            client.Connect(server.BaseUri, transport, autoReconnect: true);
+            Assert.IsTrue(server.WaitForRequest("PLAY"));
+            Thread.Sleep(300); // the reply to PLAY handled: the session is playing
+            server.DropConnection();
+        }
+
+        [TestMethod]
+        public void AutoReconnectSetsTheSessionUpAgain()
+        {
+            using var server = new FakeRtspServer(Sdp);
+            var stops = new BlockingCollection<StoppedReason>();
+            using var client = NewClient(stops);
+
+            PlayThenDrop(server, client);
+
+            Assert.IsTrue(WaitForPlays(server, 2, 5000), string.Join(", ", server.Requests));
+            Assert.AreEqual(2, server.Connections);
+            Assert.IsNull(WaitForStop(stops, 500));
+        }
+
+        [TestMethod]
+        public void AutoReconnectReachesAnIPv6Server()
+        {
+            // the reconnect is made as the first connection is, IPv6 alike - SharpRTSP's own was
+            // IPv4 only on .NET Framework
+            using var server = new FakeRtspServer(Sdp, System.Net.IPAddress.IPv6Loopback);
+            var stops = new BlockingCollection<StoppedReason>();
+            using var client = NewClient(stops);
+
+            PlayThenDrop(server, client);
+
+            Assert.IsTrue(WaitForPlays(server, 2, 5000), string.Join(", ", server.Requests));
+            Assert.IsNull(WaitForStop(stops, 500));
+        }
+
+        [TestMethod]
+        public void AFailedReconnectIsReported()
+        {
+            var server = new FakeRtspServer(Sdp);
+            var stops = new BlockingCollection<StoppedReason>();
+            using var client = NewClient(stops);
+
+            client.Connect(server.BaseUri, RTPTransport.TCP, autoReconnect: true);
+            Assert.IsTrue(server.WaitForRequest("PLAY"));
+            Thread.Sleep(300);
+            server.Dispose(); // gone, and nothing listens any more
+
+            Assert.AreEqual(StoppedReason.ConnectionFailed, WaitForStop(stops, 5000));
+        }
+
+        [TestMethod]
+        public void AutoReconnectDoesNotReconnectASessionThatNeverPlayed()
+        {
+            // a server that drops every connection during the handshake would be reconnected to
+            // for ever
+            using var server = new FakeRtspServer(Sdp) { CloseAfter = "DESCRIBE" };
+            var stops = new BlockingCollection<StoppedReason>();
+            using var client = NewClient(stops);
+
+            client.Connect(server.BaseUri, RTPTransport.TCP, autoReconnect: true);
+
+            Assert.AreEqual(StoppedReason.ConnectionLost, WaitForStop(stops, 5000));
+            Thread.Sleep(500);
+            Assert.AreEqual(1, server.Connections);
+        }
+
+        [TestMethod]
+        public void StoppingAsTheConnectionIsLostStaysStopped()
+        {
+            foreach (RTPTransport transport in new[] { RTPTransport.TCP, RTPTransport.UDP })
+            {
+                using var server = new FakeRtspServer(Sdp);
+                var stops = new BlockingCollection<StoppedReason>();
+                using var client = NewClient(stops);
+
+                PlayThenDrop(server, client, transport);
+                client.Stop();
+
+                Thread.Sleep(1000);
+                Assert.AreEqual(1, server.Connections, transport.ToString());
+                Assert.AreEqual(RTSPClient.RtspStatus.WaitingToConnect, client.GetRtspStatus(), transport.ToString());
+                Assert.IsNull(WaitForStop(stops, 0), transport.ToString());
+            }
+        }
+
+        [TestMethod]
+        public void AUdpSessionCarriesOnOverANewConnection()
+        {
+            // the media did not come over the connection, and the server still has the session:
+            // asked after on a new connection, it carries on - no handshake, no tracks again
+            using var server = new FakeRtspServer(Sdp);
+            var stops = new BlockingCollection<StoppedReason>();
+            using var client = NewClient(stops);
+            int tracks = 0;
+            client.NewTrack += (s, e) => Interlocked.Increment(ref tracks);
+
+            PlayThenDrop(server, client, RTPTransport.UDP);
+
+            Assert.IsTrue(WaitForCount(server, "GET_PARAMETER", 1, 5000), string.Join(", ", server.Requests));
+            Thread.Sleep(500);
+            Assert.AreEqual(2, server.Connections);
+            Assert.AreEqual(1, Count(server, "DESCRIBE"), string.Join(", ", server.Requests));
+            Assert.AreEqual(1, Count(server, "PLAY"));
+            Assert.AreEqual(1, tracks);
+            Assert.AreEqual(RTSPClient.RtspStatus.Connected, client.GetRtspStatus());
+            Assert.IsNull(WaitForStop(stops, 0));
+        }
+
+        [TestMethod]
+        public void AUdpSessionTheServerForgotIsSetUpAnew()
+        {
+            using var server = new FakeRtspServer(Sdp) { ForgetSessions = true };
+            var stops = new BlockingCollection<StoppedReason>();
+            using var client = NewClient(stops);
+            int tracks = 0;
+            client.NewTrack += (s, e) => Interlocked.Increment(ref tracks);
+
+            PlayThenDrop(server, client, RTPTransport.UDP);
+
+            Assert.IsTrue(WaitForPlays(server, 2, 5000), string.Join(", ", server.Requests));
+            Assert.AreEqual(1, Count(server, "GET_PARAMETER"), string.Join(", ", server.Requests));
+            Assert.AreEqual(2, Count(server, "DESCRIBE"));
+            Assert.AreEqual(2, tracks);
+            Assert.IsNull(WaitForStop(stops, 500));
+        }
+
+        [TestMethod]
+        public void ACarriedOnSessionLostBeforeTheServerAnswersIsReported()
+        {
+            // not reconnected to again until the server has said it still has the session: one
+            // that drops every connection would otherwise be reconnected to for ever
+            using var server = new FakeRtspServer(Sdp) { IgnoreMethod = "GET_PARAMETER" };
+            var stops = new BlockingCollection<StoppedReason>();
+            using var client = NewClient(stops);
+
+            PlayThenDrop(server, client, RTPTransport.UDP);
+            Assert.IsTrue(server.WaitForRequest("GET_PARAMETER"));
+            server.DropConnection();
+
+            Assert.AreEqual(StoppedReason.ConnectionLost, WaitForStop(stops, 5000));
+            Thread.Sleep(500);
+            Assert.AreEqual(2, server.Connections);
+        }
     }
 }

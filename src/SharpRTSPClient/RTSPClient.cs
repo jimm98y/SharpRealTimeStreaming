@@ -27,6 +27,7 @@ using Rtsp.Rtp;
 using Rtsp.Sdp;
 using SharpSRTP.SRTP;
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -35,7 +36,10 @@ using System.Net;
 using System.Net.Sockets;
 using System.Net.Security;
 using System.Numerics;
+using System.Runtime.CompilerServices;
 using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace SharpRTSPClient
 {
@@ -49,7 +53,7 @@ namespace SharpRTSPClient
     /// <summary>
     /// RTSP client.
     /// </summary>
-    public partial class RTSPClient : IDisposable
+    public class RTSPClient : IDisposable
     {
         /// <summary>
         /// Source of the SSRCs this client reports under.
@@ -642,7 +646,12 @@ namespace SharpRTSPClient
         /// <param name="password">Password.</param>
         /// <param name="playbackSession">Playback session.</param>
         /// <param name="userCertificateSelectionCallback">Callback for user certificate selection.</param>
-        /// <param name="autoReconnect">Automatically try to reconnect after losing the connection.</param>
+        /// <param name="autoReconnect">
+        /// When the connection to a session that was playing is lost, connect again. With media over
+        /// UDP or multicast the session carries on, if the server still has it; otherwise it is set
+        /// up anew, tracks announced again. Once for each loss; if it fails, <see cref="Stopped"/>
+        /// says why.
+        /// </param>
         /// <remarks>
         /// Which of the offered tracks are set up is <see cref="AcceptTrack"/>, set before this is
         /// called. It used to be a mediaRequest parameter here, which could say only which kinds.
@@ -671,7 +680,12 @@ namespace SharpRTSPClient
         /// <param name="password">Password.</param>
         /// <param name="playbackSession">Playback session.</param>
         /// <param name="userCertificateSelectionCallback">Callback for user certificate selection.</param>
-        /// <param name="autoReconnect">Automatically try to reconnect after losing the connection.</param>
+        /// <param name="autoReconnect">
+        /// When the connection to a session that was playing is lost, connect again. With media over
+        /// UDP or multicast the session carries on, if the server still has it; otherwise it is set
+        /// up anew, tracks announced again. Once for each loss; if it fails, <see cref="Stopped"/>
+        /// says why.
+        /// </param>
         public void Connect(
             Uri uri,
             RTPTransport rtpTransport,
@@ -698,7 +712,12 @@ namespace SharpRTSPClient
         /// <param name="credentials">Network credentials.</param>
         /// <param name="playbackSession">Playback session.</param>
         /// <param name="userCertificateSelectionCallback">Callback for user certificate selection.</param>
-        /// <param name="autoReconnect">Automatically try to reconnect after losing the connection.</param>
+        /// <param name="autoReconnect">
+        /// When the connection to a session that was playing is lost, connect again. With media over
+        /// UDP or multicast the session carries on, if the server still has it; otherwise it is set
+        /// up anew, tracks announced again. Once for each loss; if it fails, <see cref="Stopped"/>
+        /// says why.
+        /// </param>
         public void Connect(
             Uri uri,
             RTPTransport rtpTransport,
@@ -706,6 +725,18 @@ namespace SharpRTSPClient
             bool playbackSession = false,
             RemoteCertificateValidationCallback userCertificateSelectionCallback = null,
             bool autoReconnect = false)
+        {
+            _stopRequested = false;
+            Open(uri, rtpTransport, credentials, playbackSession, userCertificateSelectionCallback, autoReconnect);
+        }
+
+        private void Open(
+            Uri uri,
+            RTPTransport rtpTransport,
+            NetworkCredential credentials,
+            bool playbackSession,
+            RemoteCertificateValidationCallback userCertificateSelectionCallback,
+            bool autoReconnect)
         {
             if (_rtspClient != null)
                 throw new InvalidOperationException("You must first call Stop() before re-connecting!");
@@ -729,54 +760,13 @@ namespace SharpRTSPClient
                 _setupMessages.Clear();
             }
 
-            // Connect to a RTSP Server. The RTSP session is a TCP connection
-            _rtspSocketStatus = RtspStatus.Connecting;
-
-            TcpClient connection;
-            try
+            StoppedReason? failed = OpenConnection();
+            if (failed != null)
             {
-                _rtspSocket = CreateRtspTransport(out connection);
-            }
-            catch (Exception ex)
-            {
-                _rtspSocketStatus = RtspStatus.ConnectFailed;
-                _logger.LogWarning("Error - did not connect");
-                Stopped?.Invoke(this, new StoppedEventArgs(ex is TimeoutException ? StoppedReason.ConnectTimeout : StoppedReason.ConnectionFailed));
+                Stopped?.Invoke(this, new StoppedEventArgs(failed.Value));
                 return;
             }
 
-            if (!_rtspSocket.Connected)
-            {
-                _rtspSocketStatus = RtspStatus.ConnectFailed;
-                _logger.LogWarning("Error - did not connect");
-                Stopped?.Invoke(this, new StoppedEventArgs(StoppedReason.ConnectionFailed));
-                return;
-            }
-
-            // Connect a RTSP Listener to the RTSP Socket (or other Stream) to send RTSP messages and listen for RTSP replies
-            try
-            {
-                _rtspClient = new RtspListener(_rtspSocket, _loggerFactory.CreateLogger<RtspListener>())
-                {
-                    AutoReconnect = _autoReconnect
-                };
-            }
-            catch (IOException ex) when (IsSocketTimeout(ex))
-            {
-                // an rtsps handshake that did not finish within ConnectTimeout
-                _rtspSocket.Close();
-                _rtspSocket = null;
-                _rtspSocketStatus = RtspStatus.ConnectFailed;
-                _logger.LogWarning("Error - the TLS handshake timed out");
-                Stopped?.Invoke(this, new StoppedEventArgs(StoppedReason.ConnectTimeout));
-                return;
-            }
-
-            AfterConnected(connection);
-            _rtspSocketStatus = RtspStatus.Connected;
-
-            _rtspClient.MessageReceived += RtspMessageReceived;
-            _rtspClient.Start(); // start listening for messages from the server (messages fire the MessageReceived event)
             StartWatchdog();
 
             // Transports are made when the description says how many tracks there are, rather than
@@ -799,6 +789,62 @@ namespace SharpRTSPClient
             };
 
             SendRequest(_rtspClient, optionsMessage);
+        }
+
+        /// <summary>
+        /// The RTSP connection made, and a listener started on it for the server's messages.
+        /// </summary>
+        /// <returns>Null when connected; otherwise why not, for the caller to report.</returns>
+        private StoppedReason? OpenConnection()
+        {
+            // Connect to a RTSP Server. The RTSP session is a TCP connection
+            _rtspSocketStatus = RtspStatus.Connecting;
+
+            TcpClient connection;
+            try
+            {
+                _rtspSocket = CreateRtspTransport(out connection);
+            }
+            catch (Exception ex)
+            {
+                _rtspSocketStatus = RtspStatus.ConnectFailed;
+                _logger.LogWarning("Error - did not connect");
+                return ex is TimeoutException ? StoppedReason.ConnectTimeout : StoppedReason.ConnectionFailed;
+            }
+
+            if (!_rtspSocket.Connected)
+            {
+                _rtspSocketStatus = RtspStatus.ConnectFailed;
+                _logger.LogWarning("Error - did not connect");
+                return StoppedReason.ConnectionFailed;
+            }
+
+            // Connect a RTSP Listener to the RTSP Socket (or other Stream) to send RTSP messages and listen for RTSP replies
+            try
+            {
+                // Never SharpRTSP's own reconnect: the watchdog notices the connection is gone and,
+                // with auto reconnect, makes it again - see Resume and ConnectAgain
+                _rtspClient = new RtspListener(_rtspSocket, _loggerFactory.CreateLogger<RtspListener>())
+                {
+                    AutoReconnect = false
+                };
+            }
+            catch (IOException ex) when (IsSocketTimeout(ex))
+            {
+                // an rtsps handshake that did not finish within ConnectTimeout
+                _rtspSocket.Close();
+                _rtspSocket = null;
+                _rtspSocketStatus = RtspStatus.ConnectFailed;
+                _logger.LogWarning("Error - the TLS handshake timed out");
+                return StoppedReason.ConnectTimeout;
+            }
+
+            AfterConnected(connection);
+            _rtspSocketStatus = RtspStatus.Connected;
+
+            _rtspClient.MessageReceived += RtspMessageReceived;
+            _rtspClient.Start(); // start listening for messages from the server (messages fire the MessageReceived event)
+            return null;
         }
 
         /// <summary>
@@ -988,6 +1034,7 @@ namespace SharpRTSPClient
         /// </summary>
         public void Stop()
         {
+            _stopRequested = true;
             StopClient();
         }
 
@@ -1014,7 +1061,11 @@ namespace SharpRTSPClient
         private void TeardownClient()
         {
             // one teardown at a time: the watchdog may tear down from its timer thread while Stop() or
-            // the listener does on theirs, and the second finds the transports already released
+            // the listener does on theirs, and the second finds the transports already released.
+            // Nothing done under the lock waits for another thread or calls the caller's code: the
+            // transports and the listener only close their sockets, the timers do not wait for their
+            // callbacks, and the locks taken inside are held for no call. Keep it so, or a thread
+            // that waits here while one waits on it is a deadlock; raise Stopped after, not within.
             lock (_teardownLock)
             {
                 // before the connection is closed below, which the watchdog would otherwise report as lost
@@ -1604,6 +1655,14 @@ namespace SharpRTSPClient
 
             ResponseReceived(message);
 
+            // The answer to whether the server still has the session, asked on a new connection. A
+            // challenge goes the usual way below, the request sent again with credentials asking it.
+            if (message.ReturnCode != 401 && TakeResumeProbe(message.OriginalRequest))
+            {
+                ResumeAnswered(message);
+                return;
+            }
+
             // RTSP Messages are OPTIONS, DESCRIBE, SETUP, PLAY etc
             _logger.LogDebug("Received RTSP response to message {originalRequest}", message.OriginalRequest);
 
@@ -1640,6 +1699,7 @@ namespace SharpRTSPClient
                         if (message.OriginalRequest?.Clone() is RtspRequest staleRetry)
                         {
                             staleRetry.AddAuthorization(_authentication, _uri, _rtspSocket?.NextCommandIndex() ?? 0);
+                            ResendResumeProbe(message.OriginalRequest, staleRetry);
                             SendRequest(_rtspClient, staleRetry);
                             return;
                         }
@@ -1668,6 +1728,7 @@ namespace SharpRTSPClient
                     if (message.OriginalRequest?.Clone() is RtspRequest resendMessage)
                     {
                         resendMessage.AddAuthorization(_authentication, _uri, _rtspSocket?.NextCommandIndex() ?? 0);
+                        ResendResumeProbe(message.OriginalRequest, resendMessage);
                         SendRequest(_rtspClient, resendMessage);
                         return;
                     }
@@ -2700,6 +2761,27 @@ namespace SharpRTSPClient
             }
         }
 
+        /// <summary>
+        /// A keepalive for the session: GET_PARAMETER, or OPTIONS where the server has not offered it.
+        /// </summary>
+        private RtspRequest NewKeepAlive(Uri uri)
+        {
+            if (_serverSupportsGetParameter)
+            {
+                return new RtspRequestGetParameter
+                {
+                    RtspUri = uri,
+                    Session = _session
+                };
+            }
+
+            return new RtspRequestOptions
+            {
+                RtspUri = uri,
+                Session = _session
+            };
+        }
+
         private void SendKeepAlive(object sender, System.Timers.ElapsedEventArgs e)
         {
             // Send Keepalive message
@@ -2721,24 +2803,7 @@ namespace SharpRTSPClient
                     return;
                 }
 
-                RtspRequest keepAliveMessage;
-                if (_serverSupportsGetParameter)
-                {
-                    keepAliveMessage = new RtspRequestGetParameter
-                    {
-                        RtspUri = uri,
-                        Session = _session
-                    };
-                }
-                else
-                {
-                    keepAliveMessage = new RtspRequestOptions
-                    {
-                        RtspUri = uri,
-                        Session = _session
-                    };
-                }
-
+                RtspRequest keepAliveMessage = NewKeepAlive(uri);
                 keepAliveMessage.AddAuthorization(_authentication, uri, rtspSocket.NextCommandIndex());
                 SendRequest(rtspClient, keepAliveMessage);
             }
@@ -2749,6 +2814,571 @@ namespace SharpRTSPClient
             }
         }
 
+        #region Timeouts
+
+        // Connection, response and media timeouts, and noticing the RTSP connection has gone.
+        // Every timeout is off by default, which is how the client always behaved: a server that
+        // never answered left it waiting for good. When one expires the session is torn down and
+        // Stopped says which it was, so the caller can decide whether to reconnect.
+
+        /// <summary>
+        /// How long <see cref="Connect(Uri, RTPTransport, System.Net.NetworkCredential, bool, System.Net.Security.RemoteCertificateValidationCallback, bool)"/>
+        /// waits for the TCP connection, and for rtsps the TLS handshake as well.
+        /// <see cref="Timeout.InfiniteTimeSpan"/> (the default) leaves it to the operating system.
+        /// </summary>
+        /// <remarks>
+        /// Applies to rtsp:// and rtsps://, the connection made again by auto reconnect as well. RTSP
+        /// tunnelled over http(s) connects inside SharpRTSP and is not covered. On expiry
+        /// <see cref="Stopped"/> reports <see cref="StoppedReason.ConnectTimeout"/>.
+        /// </remarks>
+        public TimeSpan ConnectTimeout { get; set; } = Timeout.InfiniteTimeSpan;
+
+        /// <summary>
+        /// How long any request - OPTIONS, DESCRIBE, SETUP, PLAY, PAUSE, keepalives - may go
+        /// unanswered. <see cref="Timeout.InfiniteTimeSpan"/> (the default) waits for ever.
+        /// </summary>
+        /// <remarks>
+        /// Also used as the socket's send timeout, so a write to a server that stopped reading
+        /// cannot block for ever either - of an rtsp:// or rtsps:// connection; not of RTSP tunnelled
+        /// over http(s), whose connections SharpRTSP makes. On expiry <see cref="Stopped"/> reports
+        /// <see cref="StoppedReason.ResponseTimeout"/>.
+        /// </remarks>
+        public TimeSpan ResponseTimeout { get; set; } = Timeout.InfiniteTimeSpan;
+
+        /// <summary>
+        /// How long the client may go without an RTP packet while playing.
+        /// <see cref="Timeout.InfiniteTimeSpan"/> (the default) waits for ever.
+        /// </summary>
+        /// <remarks>
+        /// Counted from the reply to PLAY and suspended by <see cref="Pause"/>, so a paused
+        /// playback session does not time out. On expiry <see cref="Stopped"/> reports
+        /// <see cref="StoppedReason.ReceiveTimeout"/>.
+        /// </remarks>
+        public TimeSpan ReceiveTimeout { get; set; } = Timeout.InfiniteTimeSpan;
+
+        private static readonly TimeSpan WatchdogPeriod = TimeSpan.FromMilliseconds(250);
+
+        /// <summary>Requests still waiting for their reply, and when each was sent.</summary>
+        /// <remarks>
+        /// By reference: SharpRTSP hands back the very instance that was sent as the reply's
+        /// OriginalRequest, and a message's own equality is no business of ours.
+        /// </remarks>
+        private readonly ConcurrentDictionary<RtspRequest, long> _pendingRequests =
+            new ConcurrentDictionary<RtspRequest, long>(ReferenceComparer.Instance);
+
+        private long _lastMediaTimestamp;
+        private volatile bool _mediaExpected;
+        private Timer _watchdog;
+
+        /// <summary>Whether this connection's session got as far as playing, which auto reconnect asks.</summary>
+        private volatile bool _played;
+
+        /// <summary>
+        /// Set by <see cref="Stop"/> and cleared by Connect: a reconnect of the watchdog's own is not
+        /// to undo a stop the caller asked for while the connection was being torn down or made again.
+        /// </summary>
+        private volatile bool _stopRequested;
+
+        /// <summary>
+        /// The session the watchdog watches: a number of its own each time it starts, and a new one
+        /// as it stops, so a check from a session that has ended does nothing.
+        /// </summary>
+        private int _watchdogSession;
+
+        /// <summary>
+        /// Taken by a teardown and by the watchdog's check, which may tear down from its timer
+        /// thread while <see cref="Stop"/> or the listener does on theirs: one at a time, the
+        /// second finding the tracks' transports already released.
+        /// </summary>
+        private readonly object _teardownLock = new object();
+
+        private static bool IsSet(TimeSpan timeout) => timeout > TimeSpan.Zero;
+
+        private static TimeSpan Elapsed(long since, long now) =>
+            TimeSpan.FromSeconds((double)(now - since) / Stopwatch.Frequency);
+
+        /// <summary>
+        /// The RTSP connection, made within <see cref="ConnectTimeout"/> when one is set.
+        /// </summary>
+        /// <param name="connection">
+        /// The TCP connection made here, so its handshake timeout can be lifted once the listener
+        /// is up; null when SharpRTSP made the connection itself.
+        /// </param>
+        /// <exception cref="TimeoutException">No connection within <see cref="ConnectTimeout"/>.</exception>
+        private IRtspTransport CreateRtspTransport(out TcpClient connection)
+        {
+            connection = null;
+
+            // RTSP tunnelled over http(s) makes connections of its own, two of them, inside SharpRTSP
+            bool overTcp = _uri.Scheme == "rtsp" || _uri.Scheme == "rtsps";
+            if (!overTcp)
+            {
+                return RtspUtils.CreateRtspTransportFromUrl(_uri, _credentials, _userCertificateSelectionCallback);
+            }
+
+            TcpClient tcp = ConnectWithin(_uri.Host, _uri.Port, ConnectTimeout);
+
+            // For rtsps the TLS handshake runs synchronously when the listener first asks for the
+            // stream, and a synchronous read honours this. Lifted again once the listener is up.
+            if (IsSet(ConnectTimeout))
+            {
+                tcp.ReceiveTimeout = (int)ConnectTimeout.TotalMilliseconds;
+            }
+
+            connection = tcp;
+            return _uri.Scheme == "rtsps"
+                ? new RtspTcpTlsTransport(tcp, _userCertificateSelectionCallback)
+                : new RtspTcpTransport(tcp);
+        }
+
+        /// <summary>
+        /// A TCP connection to a host, made within a time, or in as long as it takes when none is
+        /// set: its name resolved, then each of its addresses tried in turn - IPv4 and IPv6 alike -
+        /// with what is left of the time, as <c>new TcpClient(host, port)</c> tries them. A
+        /// <see cref="TcpClient"/> made without an address family is IPv4 only on .NET Framework,
+        /// which the netstandard2.0 and net481 builds run on, so a camera with only an IPv6
+        /// address would not be reached there.
+        /// </summary>
+        /// <exception cref="TimeoutException">No connection within <paramref name="timeout"/>.</exception>
+        /// <exception cref="SocketException">The name did not resolve, or every address refused.</exception>
+        private static TcpClient ConnectWithin(string host, int port, TimeSpan timeout)
+        {
+            bool bounded = IsSet(timeout);
+            long deadline = bounded ? Stopwatch.GetTimestamp() + (long)(timeout.TotalSeconds * Stopwatch.Frequency) : 0;
+            TimeSpan Remaining() => bounded ? Elapsed(Stopwatch.GetTimestamp(), deadline) : Timeout.InfiniteTimeSpan;
+            bool Expired() => bounded && Remaining() <= TimeSpan.Zero;
+
+            Task<IPAddress[]> resolving = Dns.GetHostAddressesAsync(host);
+            if (!WaitFor(resolving, Remaining()))
+                throw new TimeoutException($"Could not resolve {host} within {timeout}.");
+            IPAddress[] addresses = resolving.GetAwaiter().GetResult();
+
+            Exception refused = null;
+            foreach (IPAddress address in addresses)
+            {
+                TimeSpan remaining = Remaining();
+                if (bounded && remaining <= TimeSpan.Zero)
+                    break;
+
+                var tcp = new TcpClient(address.AddressFamily);
+                try
+                {
+                    Task connecting = tcp.ConnectAsync(address, port);
+                    if (!WaitFor(connecting, remaining))
+                    {
+                        tcp.Close();
+                        break;
+                    }
+
+                    connecting.GetAwaiter().GetResult();
+                    return tcp;
+                }
+                catch (SocketException ex)
+                {
+                    // this address refused, or is unreachable: the next may not be
+                    tcp.Close();
+                    refused = ex;
+                }
+            }
+
+            if (Expired() || refused == null)
+                throw new TimeoutException($"No connection to {host}:{port} within {timeout}.");
+            throw refused;
+        }
+
+        /// <summary>
+        /// Whether a task completed - successfully or not - within a time. One that did not is left
+        /// to finish on its own, its exception observed so it is not reported as unobserved later.
+        /// </summary>
+        private static bool WaitFor(Task task, TimeSpan timeout)
+        {
+            try
+            {
+                if (task.Wait(timeout))
+                    return true;
+            }
+            catch (AggregateException)
+            {
+                // completed, faulted: the caller gets the exception from the task itself
+                return true;
+            }
+
+            task.ContinueWith(t => _ = t.Exception, TaskContinuationOptions.OnlyOnFaulted);
+            return false;
+        }
+
+        /// <summary>
+        /// Whether an exception is a socket read or write that ran out of time.
+        /// </summary>
+        private static bool IsSocketTimeout(Exception ex)
+        {
+            for (Exception e = ex; e != null; e = e.InnerException)
+            {
+                if (e is SocketException se && se.SocketErrorCode == SocketError.TimedOut)
+                    return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Takes back the timeouts that only the connect was meant to have.
+        /// </summary>
+        private void AfterConnected(TcpClient connection)
+        {
+            if (connection == null)
+                return;
+
+            connection.ReceiveTimeout = 0;
+
+            if (IsSet(ResponseTimeout))
+            {
+                connection.SendTimeout = (int)ResponseTimeout.TotalMilliseconds;
+            }
+        }
+
+        /// <summary>
+        /// Sends a request, noting when it went so the watchdog can tell if it is never answered.
+        /// </summary>
+        private void SendRequest(RtspListener listener, RtspRequest request)
+        {
+            if (listener == null)
+                return;
+
+            if (IsSet(ResponseTimeout))
+            {
+                _pendingRequests[request] = Stopwatch.GetTimestamp();
+            }
+
+            bool sent;
+            try
+            {
+                sent = listener.SendMessage(request);
+            }
+            catch (Exception ex) when (ex is IOException || ex is SocketException || ex is ObjectDisposedException || ex is ArgumentException)
+            {
+                // The connection went as the request was written - SharpRTSP refuses a closed stream
+                // with an ArgumentException - or the write ran out of time. Not for the caller to
+                // catch, Stop() least of all: left waiting, for the response timeout or the
+                // watchdog's lost connection to report.
+                _logger.LogWarning(ex, "Could not send {method}", request.RequestTyped);
+                return;
+            }
+
+            // not sent - the connection is closed, and the listener does not reconnect - so not
+            // waiting for a reply either: the closed connection is what the watchdog reports
+            if (!sent)
+            {
+                _pendingRequests.TryRemove(request, out _);
+            }
+        }
+
+        /// <summary>
+        /// A reply arrived: whatever it answers is no longer waiting.
+        /// </summary>
+        private void ResponseReceived(RtspResponse response)
+        {
+            if (response.OriginalRequest != null)
+            {
+                _pendingRequests.TryRemove(response.OriginalRequest, out _);
+            }
+
+            if (!response.IsOk)
+                return;
+
+            if (response.OriginalRequest is RtspRequestPlay)
+            {
+                // the media clock starts at the reply, not at the first packet, so a PLAY that is
+                // answered but never followed by media still times out
+                Interlocked.Exchange(ref _lastMediaTimestamp, Stopwatch.GetTimestamp());
+                _mediaExpected = true;
+                _played = true;
+            }
+            else if (response.OriginalRequest is RtspRequestPause)
+            {
+                _mediaExpected = false;
+            }
+        }
+
+        private void MediaReceived()
+        {
+            Interlocked.Exchange(ref _lastMediaTimestamp, Stopwatch.GetTimestamp());
+        }
+
+        /// <param name="carryOn">
+        /// A session carried on over a new connection, which is as far along as it was: playing,
+        /// or paused, still - the time without a connection not held against its media.
+        /// </param>
+        private void StartWatchdog(bool carryOn = false)
+        {
+            lock (_teardownLock)
+            {
+                _pendingRequests.Clear();
+                if (carryOn)
+                {
+                    Interlocked.Exchange(ref _lastMediaTimestamp, Stopwatch.GetTimestamp());
+                }
+                else
+                {
+                    _mediaExpected = false;
+                }
+
+                // played on this connection, for auto reconnect to make another: a carried on
+                // session once the server says it still has it, so one dropping every connection
+                // before answering is not reconnected to for ever
+                _played = false;
+                int session = ++_watchdogSession;
+                Interlocked.Exchange(ref _watchdog, new Timer(Watchdog, session, WatchdogPeriod, WatchdogPeriod))?.Dispose();
+            }
+        }
+
+        /// <summary>
+        /// Stops the watchdog, and retires its session: a check of it already running finds the
+        /// session gone and does nothing. First thing in a teardown, so closing the connection on
+        /// purpose is not mistaken for losing it.
+        /// </summary>
+        private void StopWatchdog()
+        {
+            lock (_teardownLock)
+            {
+                _watchdogSession++;
+                Interlocked.Exchange(ref _watchdog, null)?.Dispose();
+                _pendingRequests.Clear();
+                _resumeProbe = null;
+            }
+        }
+
+        private void Watchdog(object state)
+        {
+            // a timer thread: anything escaping here would take the process down
+            try
+            {
+                // Checked and torn down under the lock a teardown takes, and only while the session
+                // it watches is the current one: one torn down meanwhile - by Stop(), or by the
+                // listener on an error, on threads of their own - is neither torn down again nor
+                // reported, and a check still running from before is not either.
+                StoppedReason? reason;
+                bool reconnect, resume;
+                lock (_teardownLock)
+                {
+                    if (_watchdogSession != (int)state)
+                        return;
+
+                    reason = CheckTimeouts();
+                    if (reason == null)
+                        return;
+
+                    // Only a session that got as far as playing: a server that drops the connection
+                    // during the handshake would only drop the next one too, for ever.
+                    reconnect = reason == StoppedReason.ConnectionLost && _autoReconnect && _played;
+
+                    // Media that did not come over the connection may still be coming: the tracks
+                    // are kept, and only the connection is made again
+                    resume = reconnect && _rtpTransport != RTPTransport.TCP && !string.IsNullOrEmpty(_session);
+                    if (resume)
+                    {
+                        CloseConnection();
+                    }
+                    else
+                    {
+                        TeardownClient();
+                    }
+                }
+
+                if (resume)
+                {
+                    Resume();
+                    return;
+                }
+
+                if (reconnect)
+                {
+                    ConnectAgain();
+                    return;
+                }
+
+                Stopped?.Invoke(this, new StoppedEventArgs(reason.Value));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Error in the RTSP watchdog");
+            }
+        }
+
+        /// <summary>
+        /// The lost connection let go of, and nothing else: the tracks, their transports and the
+        /// keepalive timer stay for the session to carry on with.
+        /// </summary>
+        private void CloseConnection()
+        {
+            lock (_teardownLock)
+            {
+                StopWatchdog();
+
+                var rtspClient = _rtspClient;
+                if (rtspClient != null)
+                {
+                    rtspClient.MessageReceived -= RtspMessageReceived;
+                    rtspClient.Stop();
+                    _rtspClient = null;
+                }
+
+                _rtspSocket = null; // closed by rtspClient.Stop()
+                _rtspSocketStatus = RtspStatus.WaitingToConnect;
+            }
+        }
+
+        /// <summary>
+        /// Auto reconnect, the first way: a new connection, on which the server is asked whether it
+        /// still has the session - RTSP sessions are not bound to a connection, and the media came
+        /// over UDP. Answered, the session carries on as it was; refused, it is set up anew.
+        /// </summary>
+        /// <remarks>
+        /// Many servers drop the session with the connection, which the answer says.
+        /// </remarks>
+        private void Resume()
+        {
+            // stopped since the connection was closed: it stays stopped
+            if (_stopRequested)
+            {
+                TeardownClient();
+                return;
+            }
+
+            _logger.LogInformation("The RTSP connection was lost, connecting again to carry on with session {session}", _session);
+            StoppedReason? failed = OpenConnection();
+            if (failed != null)
+            {
+                TeardownClient();
+                Stopped?.Invoke(this, new StoppedEventArgs(failed.Value));
+                return;
+            }
+
+            // stopped while connecting, when there was nothing to stop yet
+            if (_stopRequested)
+            {
+                StopClient();
+                return;
+            }
+
+            StartWatchdog(carryOn: true);
+
+            var rtspSocket = _rtspSocket;
+            var rtspClient = _rtspClient;
+            if (rtspSocket == null || rtspClient == null)
+                return; // stopped meanwhile
+
+            RtspRequest probe = NewKeepAlive(_uri);
+            probe.AddAuthorization(_authentication, _uri, rtspSocket.NextCommandIndex());
+            _resumeProbe = probe;
+            SendRequest(rtspClient, probe);
+        }
+
+        /// <summary>The request asking whether the server still has the session, until it is answered.</summary>
+        private volatile RtspRequest _resumeProbe;
+
+        /// <summary>Whether a request is the one asking after the session; if so, it is no longer awaited.</summary>
+        private bool TakeResumeProbe(RtspRequest request)
+        {
+            return request != null && Interlocked.CompareExchange(ref _resumeProbe, null, request) == request;
+        }
+
+        /// <summary>The request asking after the session, sent again with credentials: the one to await.</summary>
+        private void ResendResumeProbe(RtspRequest original, RtspRequest again)
+        {
+            Interlocked.CompareExchange(ref _resumeProbe, again, original);
+        }
+
+        private void ResumeAnswered(RtspResponse response)
+        {
+            if (response.IsOk)
+            {
+                _logger.LogInformation("Session {session} carries on over the new connection", _session);
+                _played = true;
+                return;
+            }
+
+            _logger.LogInformation("The server no longer has session {session} ({returnCode} {returnMessage}), setting it up anew",
+                _session, response.ReturnCode, response.ReturnMessage);
+            TeardownClient();
+            ConnectAgain();
+        }
+
+        /// <summary>
+        /// Auto reconnect, the second way: the session set up again on a new connection, made as the
+        /// first was - for media that came over the connection, which went with it, or a session the
+        /// server no longer has. Once for each connection lost; if that fails, <see cref="Stopped"/>
+        /// says why, as for any connect.
+        /// </summary>
+        /// <remarks>
+        /// Not SharpRTSP's own reconnect, which remade only the socket - IPv4 only on .NET Framework,
+        /// without the timeouts - and went on with the session whatever had become of it.
+        /// </remarks>
+        private void ConnectAgain()
+        {
+            // stopped since the connection was torn down: it stays stopped
+            if (_stopRequested)
+                return;
+
+            _logger.LogInformation("The RTSP connection was lost, connecting again");
+            Open(_uri, _rtpTransport, _credentials, _playbackSession, _userCertificateSelectionCallback, _autoReconnect);
+
+            // stopped while connecting, when there was nothing to stop yet
+            if (_stopRequested)
+            {
+                StopClient();
+            }
+        }
+
+        private StoppedReason? CheckTimeouts()
+        {
+            IRtspTransport socket = _rtspSocket;
+            if (socket == null)
+                return null;
+
+            if (!socket.Connected)
+            {
+                _logger.LogWarning("The RTSP connection was closed");
+                return StoppedReason.ConnectionLost;
+            }
+
+            long now = Stopwatch.GetTimestamp();
+
+            TimeSpan responseTimeout = ResponseTimeout;
+            if (IsSet(responseTimeout))
+            {
+                foreach (KeyValuePair<RtspRequest, long> pending in _pendingRequests)
+                {
+                    if (Elapsed(pending.Value, now) > responseTimeout)
+                    {
+                        _logger.LogWarning("No reply to {method} within {timeout}", pending.Key.RequestTyped, responseTimeout);
+                        return StoppedReason.ResponseTimeout;
+                    }
+                }
+            }
+
+            TimeSpan receiveTimeout = ReceiveTimeout;
+            if (IsSet(receiveTimeout) && _mediaExpected
+                && Elapsed(Interlocked.Read(ref _lastMediaTimestamp), now) > receiveTimeout)
+            {
+                _logger.LogWarning("No media received within {timeout}", receiveTimeout);
+                return StoppedReason.ReceiveTimeout;
+            }
+
+            return null;
+        }
+
+        private sealed class ReferenceComparer : IEqualityComparer<RtspRequest>
+        {
+            public static readonly ReferenceComparer Instance = new ReferenceComparer();
+
+            public bool Equals(RtspRequest x, RtspRequest y) => ReferenceEquals(x, y);
+
+            public int GetHashCode(RtspRequest obj) => RuntimeHelpers.GetHashCode(obj);
+        }
+
+        #endregion
+
         #region IDisposable
 
         protected virtual void Dispose(bool disposing)
@@ -2757,6 +3387,7 @@ namespace SharpRTSPClient
             {
                 if (disposing)
                 {
+                    _stopRequested = true;
                     StopClient();
                 }
 
