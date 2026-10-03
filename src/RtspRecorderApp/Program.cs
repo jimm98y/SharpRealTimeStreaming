@@ -48,13 +48,13 @@ using (Stream output = new BufferedStream(new FileStream("recording_out.mp4", Fi
         {
             ITrack outputTrack;
 
-            // The SDP may carry no fmtp at all, in which case the client reports the codec with no
-            // configuration data. Recording cannot start without the parameter sets.
+            // The SDP may carry no parameter sets, in which case the client reports a configuration
+            // without them. Recording cannot start without the parameter sets.
             switch (e.Codec)
             {
                 case "H264":
                     {
-                        if (!(e.StreamConfigurationData is H264StreamConfigurationData config))
+                        if (!(e.StreamConfigurationData is H264StreamConfigurationData config) || config.SPS == null || config.PPS == null)
                         {
                             Console.WriteLine("Ignoring the H264 stream, the SDP carried no parameter sets.");
                             return;
@@ -67,7 +67,7 @@ using (Stream output = new BufferedStream(new FileStream("recording_out.mp4", Fi
 
                 case "H265":
                     {
-                        if (!(e.StreamConfigurationData is H265StreamConfigurationData config))
+                        if (!(e.StreamConfigurationData is H265StreamConfigurationData config) || config.SPS == null || config.PPS == null)
                         {
                             Console.WriteLine("Ignoring the H265 stream, the SDP carried no parameter sets.");
                             return;
@@ -80,7 +80,7 @@ using (Stream output = new BufferedStream(new FileStream("recording_out.mp4", Fi
 
                 case "H266":
                     {
-                        if (!(e.StreamConfigurationData is H266StreamConfigurationData config))
+                        if (!(e.StreamConfigurationData is H266StreamConfigurationData config) || config.SPS == null || config.PPS == null)
                         {
                             Console.WriteLine("Ignoring the H266 stream, the SDP carried no parameter sets.");
                             return;
