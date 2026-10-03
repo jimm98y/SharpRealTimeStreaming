@@ -50,11 +50,13 @@ namespace SharpRTSPClient.Tests
             get { lock (_requestsLock) { return _requests.ToArray(); } }
         }
 
-        public FakeRtspServer(string sdp)
+        /// <param name="address">The address listened on: IPv4 loopback unless given, IPv6 loopback for a server only IPv6 reaches.</param>
+        public FakeRtspServer(string sdp, IPAddress address = null)
         {
             _sdp = sdp;
+            _address = address ?? IPAddress.Loopback;
 
-            _listener = new TcpListener(IPAddress.Loopback, 0);
+            _listener = new TcpListener(_address, 0);
             _listener.Start();
             Port = ((IPEndPoint)_listener.LocalEndpoint).Port;
 
@@ -62,7 +64,11 @@ namespace SharpRTSPClient.Tests
             _thread.Start();
         }
 
-        public string BaseUri => $"rtsp://127.0.0.1:{Port}/stream1";
+        private readonly IPAddress _address;
+
+        public string BaseUri => _address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6
+            ? $"rtsp://[{_address}]:{Port}/stream1"
+            : $"rtsp://{_address}:{Port}/stream1";
 
         /// <summary>Challenge every request that arrives without an Authorization header.</summary>
         public bool RequireAuthentication { get; set; }

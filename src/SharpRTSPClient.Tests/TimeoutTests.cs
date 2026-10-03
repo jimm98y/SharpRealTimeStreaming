@@ -206,5 +206,86 @@ namespace SharpRTSPClient.Tests
             Assert.AreEqual(StoppedReason.ConnectTimeout, reason);
             Assert.IsLessThan(TimeSpan.FromSeconds(5), elapsed.Elapsed, "Connect did not honour the timeout");
         }
+
+        [TestMethod]
+        public void AConnectWithATimeoutTriesEachAddressOfAName()
+        {
+            // localhost is ::1 as well as 127.0.0.1, and the server listens on the second only: the
+            // first refuses, the second answers
+            using var server = new FakeRtspServer(Sdp);
+            var stops = new BlockingCollection<StoppedReason>();
+            using var client = NewClient(stops);
+            client.ConnectTimeout = TimeSpan.FromSeconds(5);
+
+            client.Connect($"rtsp://localhost:{server.Port}/stream1", RTPTransport.TCP);
+
+            Assert.IsTrue(server.WaitForRequest("PLAY"));
+            Assert.IsNull(WaitForStop(stops, 0));
+        }
+
+        [TestMethod]
+        public void AConnectWithATimeoutReachesAnIPv6Server()
+        {
+            // a TcpClient made without an address family is IPv4 only on .NET Framework
+            if (!System.Net.Sockets.Socket.OSSupportsIPv6)
+            {
+                Assert.Inconclusive("This machine has no IPv6.");
+            }
+
+            using var server = new FakeRtspServer(Sdp, System.Net.IPAddress.IPv6Loopback);
+            var stops = new BlockingCollection<StoppedReason>();
+            using var client = NewClient(stops);
+            client.ConnectTimeout = TimeSpan.FromSeconds(5);
+
+            client.Connect(server.BaseUri, RTPTransport.TCP);
+
+            Assert.IsTrue(server.WaitForRequest("PLAY"));
+            Assert.IsNull(WaitForStop(stops, 0));
+        }
+
+        [TestMethod]
+        public void ARefusedConnectFailsRatherThanTimesOut()
+        {
+            // a port nothing listens on, of a server that was there and is gone
+            int port;
+            using (var server = new FakeRtspServer(Sdp))
+            {
+                port = server.Port;
+            }
+
+            var stops = new BlockingCollection<StoppedReason>();
+            using var client = NewClient(stops);
+            client.ConnectTimeout = TimeSpan.FromSeconds(5);
+
+            var elapsed = Stopwatch.StartNew();
+            client.Connect($"rtsp://127.0.0.1:{port}/stream1", RTPTransport.TCP);
+            elapsed.Stop();
+
+            Assert.AreEqual(StoppedReason.ConnectionFailed, WaitForStop(stops, 0));
+            Assert.IsLessThan(TimeSpan.FromSeconds(4), elapsed.Elapsed, "a refusal was waited out as a timeout");
+        }
+
+        [TestMethod]
+        public void StoppingWhileATimeoutFiresTearsDownOnceAndReportsAtMostOnce()
+        {
+            // the watchdog tears down on its timer thread just as Stop() does on another: run it
+            // again and again, Stop() falling just before, at or just after the timeout
+            for (int i = 0; i < 20; i++)
+            {
+                using var server = new FakeRtspServer(Sdp) { IgnoreMethod = "DESCRIBE" };
+                var stops = new BlockingCollection<StoppedReason>();
+                using var client = NewClient(stops);
+                client.ResponseTimeout = TimeSpan.FromMilliseconds(300);
+
+                client.Connect(server.BaseUri, RTPTransport.TCP);
+                Assert.IsTrue(server.WaitForRequest("DESCRIBE"));
+                Thread.Sleep(250 + 10 * (i % 10));
+                client.Stop();
+
+                Thread.Sleep(600);
+                Assert.IsLessThanOrEqualTo(1, stops.Count, $"run {i}: {string.Join(", ", stops)}");
+                Assert.AreEqual(RTSPClient.RtspStatus.WaitingToConnect, client.GetRtspStatus());
+            }
+        }
     }
 }

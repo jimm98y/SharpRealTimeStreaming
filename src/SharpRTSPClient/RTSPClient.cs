@@ -1013,68 +1013,73 @@ namespace SharpRTSPClient
 
         private void TeardownClient()
         {
-            // before the connection is closed below, which the watchdog would otherwise report as lost
-            StopWatchdog();
-
-            _rtspSocketStatus = RtspStatus.WaitingToConnect;
-
-            // a reconnect gets a new stream, so the SSRC we learned no longer applies
-            foreach (ClientTrack track in Tracks)
+            // one teardown at a time: the watchdog may tear down from its timer thread while Stop() or
+            // the listener does on theirs, and the second finds the transports already released
+            lock (_teardownLock)
             {
-                track.Rtcp.Reset();
-            }
+                // before the connection is closed below, which the watchdog would otherwise report as lost
+                StopWatchdog();
 
-            // Drop any SETUP messages left over from an interrupted handshake. A reconnect builds a
-            // fresh set from the new DESCRIBE, and sending a stale one first would use the old URI.
-            lock (_setupMessagesLock)
-            {
-                _setupMessages.Clear();
-            }
+                _rtspSocketStatus = RtspStatus.WaitingToConnect;
 
-            // Stop the keepalive timer
-            var keepaliveTimer = _keepaliveTimer;
-            if (keepaliveTimer != null)
-            {
-                keepaliveTimer.Elapsed -= SendKeepAlive;
-                keepaliveTimer.Dispose();
-                _keepaliveTimer = null;
-            }
-
-            // clear up any UDP sockets
-            foreach (ClientTrack track in Tracks)
-            {
-                IRtpTransport transport = track.Transport;
-
-                if (transport == null)
+                // a reconnect gets a new stream, so the SSRC we learned no longer applies
+                foreach (ClientTrack track in Tracks)
                 {
-                    continue;
+                    track.Rtcp.Reset();
                 }
 
-                transport.Stop();
-                transport.DataReceived -= track.OnData;
-                transport.ControlReceived -= track.OnControl;
-                ReleaseTransport(transport);
-                track.Transport = null;
+                // Drop any SETUP messages left over from an interrupted handshake. A reconnect builds a
+                // fresh set from the new DESCRIBE, and sending a stale one first would use the old URI.
+                lock (_setupMessagesLock)
+                {
+                    _setupMessages.Clear();
+                }
+
+                // Stop the keepalive timer
+                var keepaliveTimer = _keepaliveTimer;
+                if (keepaliveTimer != null)
+                {
+                    keepaliveTimer.Elapsed -= SendKeepAlive;
+                    keepaliveTimer.Dispose();
+                    _keepaliveTimer = null;
+                }
+
+                // clear up any UDP sockets
+                foreach (ClientTrack track in Tracks)
+                {
+                    IRtpTransport transport = track.Transport;
+
+                    if (transport == null)
+                    {
+                        continue;
+                    }
+
+                    transport.Stop();
+                    transport.DataReceived -= track.OnData;
+                    transport.ControlReceived -= track.OnControl;
+                    ReleaseTransport(transport);
+                    track.Transport = null;
+                }
+
+                lock (_tracksLock)
+                {
+                    _tracks.Clear();
+                }
+
+                _lastUdpPair = null;
+                _nextInterleavedChannel = 0;
+
+                // Drop the RTSP session
+                var rtspClient = _rtspClient;
+                if (rtspClient != null)
+                {
+                    rtspClient.MessageReceived -= RtspMessageReceived;
+                    rtspClient.Stop();
+                    _rtspClient = null;
+                }
+
+                _rtspSocket = null; // closed by rtspClient.Stop()
             }
-
-            lock (_tracksLock)
-            {
-                _tracks.Clear();
-            }
-
-            _lastUdpPair = null;
-            _nextInterleavedChannel = 0;
-
-            // Drop the RTSP session
-            var rtspClient = _rtspClient;
-            if (rtspClient != null)
-            {
-                rtspClient.MessageReceived -= RtspMessageReceived;
-                rtspClient.Stop();
-                _rtspClient = null;
-            }
-
-            _rtspSocket = null; // closed by rtspClient.Stop()
         }
 
         /// <summary>

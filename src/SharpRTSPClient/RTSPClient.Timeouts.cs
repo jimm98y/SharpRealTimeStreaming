@@ -26,6 +26,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Net;
 using System.Net.Sockets;
 using System.Runtime.CompilerServices;
 using System.Threading;
@@ -50,7 +51,8 @@ namespace SharpRTSPClient
         /// </summary>
         /// <remarks>
         /// Applies to rtsp:// and rtsps://. RTSP tunnelled over http(s) connects inside SharpRTSP and
-        /// is not covered. On expiry <see cref="Stopped"/> reports <see cref="StoppedReason.ConnectTimeout"/>.
+        /// is not covered, nor are the reconnects SharpRTSP makes on its own when auto reconnect is
+        /// on. On expiry <see cref="Stopped"/> reports <see cref="StoppedReason.ConnectTimeout"/>.
         /// </remarks>
         public TimeSpan ConnectTimeout { get; set; } = Timeout.InfiniteTimeSpan;
 
@@ -60,7 +62,9 @@ namespace SharpRTSPClient
         /// </summary>
         /// <remarks>
         /// Also used as the socket's send timeout, so a write to a server that stopped reading
-        /// cannot block for ever either. On expiry <see cref="Stopped"/> reports
+        /// cannot block for ever either - of the connection made by <see cref="Connect(Uri, RTPTransport, System.Net.NetworkCredential, bool, System.Net.Security.RemoteCertificateValidationCallback, bool)"/>
+        /// with a <see cref="ConnectTimeout"/>; not of one SharpRTSP makes itself, or remakes on its
+        /// own when auto reconnect is on. On expiry <see cref="Stopped"/> reports
         /// <see cref="StoppedReason.ResponseTimeout"/>.
         /// </remarks>
         public TimeSpan ResponseTimeout { get; set; } = Timeout.InfiniteTimeSpan;
@@ -90,8 +94,18 @@ namespace SharpRTSPClient
         private volatile bool _mediaExpected;
         private Timer _watchdog;
 
-        /// <summary>1 once the watchdog has fired or been stopped, so it acts at most once per session.</summary>
-        private int _watchdogDone = 1;
+        /// <summary>
+        /// The session the watchdog watches: a number of its own each time it starts, and a new one
+        /// as it stops, so a check from a session that has ended does nothing.
+        /// </summary>
+        private int _watchdogSession;
+
+        /// <summary>
+        /// Taken by a teardown and by the watchdog's check, which may tear down from its timer
+        /// thread while <see cref="Stop"/> or the listener does on theirs: one at a time, the
+        /// second finding the tracks' transports already released.
+        /// </summary>
+        private readonly object _teardownLock = new object();
 
         private static bool IsSet(TimeSpan timeout) => timeout > TimeSpan.Zero;
 
@@ -116,32 +130,89 @@ namespace SharpRTSPClient
                 return RtspUtils.CreateRtspTransportFromUrl(_uri, _credentials, _userCertificateSelectionCallback);
             }
 
-            var tcp = new TcpClient();
-            try
-            {
-                Task connecting = tcp.ConnectAsync(_uri.Host, _uri.Port);
-                if (!connecting.Wait(ConnectTimeout))
-                {
-                    // closing the client below faults the attempt; observe it so it is not reported
-                    // as an unobserved task exception later
-                    connecting.ContinueWith(t => _ = t.Exception, TaskContinuationOptions.OnlyOnFaulted);
-                    throw new TimeoutException($"No connection to {_uri.Host}:{_uri.Port} within {ConnectTimeout}.");
-                }
+            TcpClient tcp = ConnectWithin(_uri.Host, _uri.Port, ConnectTimeout);
 
-                // For rtsps the TLS handshake runs synchronously when the listener first asks for the
-                // stream, and a synchronous read honours this. Lifted again once the listener is up.
-                tcp.ReceiveTimeout = (int)ConnectTimeout.TotalMilliseconds;
-            }
-            catch
-            {
-                tcp.Close();
-                throw;
-            }
+            // For rtsps the TLS handshake runs synchronously when the listener first asks for the
+            // stream, and a synchronous read honours this. Lifted again once the listener is up.
+            tcp.ReceiveTimeout = (int)ConnectTimeout.TotalMilliseconds;
 
             connection = tcp;
             return _uri.Scheme == "rtsps"
                 ? new RtspTcpTlsTransport(tcp, _userCertificateSelectionCallback)
                 : new RtspTcpTransport(tcp);
+        }
+
+        /// <summary>
+        /// A TCP connection to a host, made within a time: its name resolved, then each of its
+        /// addresses tried in turn - IPv4 and IPv6 alike - with what is left of the time, as
+        /// <c>new TcpClient(host, port)</c> tries them. A <see cref="TcpClient"/> made without an
+        /// address family is IPv4 only on .NET Framework, which the netstandard2.0 and net481
+        /// builds run on, so a camera with only an IPv6 address would not be reached there.
+        /// </summary>
+        /// <exception cref="TimeoutException">No connection within <paramref name="timeout"/>.</exception>
+        /// <exception cref="SocketException">The name did not resolve, or every address refused.</exception>
+        private static TcpClient ConnectWithin(string host, int port, TimeSpan timeout)
+        {
+            long deadline = Stopwatch.GetTimestamp() + (long)(timeout.TotalSeconds * Stopwatch.Frequency);
+            TimeSpan Remaining() => Elapsed(Stopwatch.GetTimestamp(), deadline);
+
+            Task<IPAddress[]> resolving = Dns.GetHostAddressesAsync(host);
+            if (!WaitFor(resolving, Remaining()))
+                throw new TimeoutException($"Could not resolve {host} within {timeout}.");
+            IPAddress[] addresses = resolving.GetAwaiter().GetResult();
+
+            Exception refused = null;
+            foreach (IPAddress address in addresses)
+            {
+                TimeSpan remaining = Remaining();
+                if (remaining <= TimeSpan.Zero)
+                    break;
+
+                var tcp = new TcpClient(address.AddressFamily);
+                try
+                {
+                    Task connecting = tcp.ConnectAsync(address, port);
+                    if (!WaitFor(connecting, remaining))
+                    {
+                        tcp.Close();
+                        break;
+                    }
+
+                    connecting.GetAwaiter().GetResult();
+                    return tcp;
+                }
+                catch (SocketException ex)
+                {
+                    // this address refused, or is unreachable: the next may not be
+                    tcp.Close();
+                    refused = ex;
+                }
+            }
+
+            if (Remaining() <= TimeSpan.Zero || refused == null)
+                throw new TimeoutException($"No connection to {host}:{port} within {timeout}.");
+            throw refused;
+        }
+
+        /// <summary>
+        /// Whether a task completed - successfully or not - within a time. One that did not is left
+        /// to finish on its own, its exception observed so it is not reported as unobserved later.
+        /// </summary>
+        private static bool WaitFor(Task task, TimeSpan timeout)
+        {
+            try
+            {
+                if (task.Wait(timeout))
+                    return true;
+            }
+            catch (AggregateException)
+            {
+                // completed, faulted: the caller gets the exception from the task itself
+                return true;
+            }
+
+            task.ContinueWith(t => _ = t.Exception, TaskContinuationOptions.OnlyOnFaulted);
+            return false;
         }
 
         /// <summary>
@@ -187,7 +258,12 @@ namespace SharpRTSPClient
                 _pendingRequests[request] = Stopwatch.GetTimestamp();
             }
 
-            listener.SendMessage(request);
+            // not sent - the connection is closed, and the listener does not reconnect - so not
+            // waiting for a reply either: the closed connection is what the watchdog reports
+            if (!listener.SendMessage(request))
+            {
+                _pendingRequests.TryRemove(request, out _);
+            }
         }
 
         /// <summary>
@@ -223,22 +299,29 @@ namespace SharpRTSPClient
 
         private void StartWatchdog()
         {
-            _pendingRequests.Clear();
-            _mediaExpected = false;
-            Interlocked.Exchange(ref _watchdogDone, 0);
-            Interlocked.Exchange(ref _watchdog, new Timer(Watchdog, null, WatchdogPeriod, WatchdogPeriod))?.Dispose();
+            lock (_teardownLock)
+            {
+                _pendingRequests.Clear();
+                _mediaExpected = false;
+                int session = ++_watchdogSession;
+                Interlocked.Exchange(ref _watchdog, new Timer(Watchdog, session, WatchdogPeriod, WatchdogPeriod))?.Dispose();
+            }
         }
 
         /// <summary>
-        /// Stops the watchdog. First thing in a teardown, so closing the connection on purpose is
-        /// not mistaken for losing it.
+        /// Stops the watchdog, and retires its session: a check of it already running finds the
+        /// session gone and does nothing. First thing in a teardown, so closing the connection on
+        /// purpose is not mistaken for losing it.
         /// </summary>
         private void StopWatchdog()
         {
-            Interlocked.Exchange(ref _watchdogDone, 1);
-            Interlocked.Exchange(ref _watchdog, null)?.Dispose();
-            _pendingRequests.Clear();
-            _mediaExpected = false;
+            lock (_teardownLock)
+            {
+                _watchdogSession++;
+                Interlocked.Exchange(ref _watchdog, null)?.Dispose();
+                _pendingRequests.Clear();
+                _mediaExpected = false;
+            }
         }
 
         private void Watchdog(object state)
@@ -246,14 +329,23 @@ namespace SharpRTSPClient
             // a timer thread: anything escaping here would take the process down
             try
             {
-                if (Volatile.Read(ref _watchdogDone) != 0)
-                    return;
+                // Checked and torn down under the lock a teardown takes, and only while the session
+                // it watches is the current one: one torn down meanwhile - by Stop(), or by the
+                // listener on an error, on threads of their own - is neither torn down again nor
+                // reported, and a check still running from before is not either.
+                StoppedReason? reason;
+                lock (_teardownLock)
+                {
+                    if (_watchdogSession != (int)state)
+                        return;
 
-                StoppedReason? reason = CheckTimeouts();
-                if (reason == null || Interlocked.Exchange(ref _watchdogDone, 1) != 0)
-                    return;
+                    reason = CheckTimeouts();
+                    if (reason == null)
+                        return;
 
-                TeardownClient();
+                    TeardownClient();
+                }
+
                 Stopped?.Invoke(this, new StoppedEventArgs(reason.Value));
             }
             catch (Exception ex)
