@@ -249,6 +249,30 @@ namespace SharpRTSPServer
         internal Func<QueuedFrame> LastKeyFrame { get; set; }
 
         /// <summary>
+        /// The kept keyframe put in front of this connection's first live picture, until it is written.
+        /// </summary>
+        private QueuedFrame _replayedKeyFrame;
+
+        /// <summary>
+        /// Whether the frame being written is the kept keyframe this queue put in, forgetting it if so.
+        /// </summary>
+        /// <remarks>
+        /// That frame went out live some time ago, and its RTP timestamp is from then. A sender report
+        /// pairs the time it is sent at with an RTP timestamp, and paired with that one it put this
+        /// stream's clock as far behind the other streams' as the frame was old - seconds, for a group
+        /// of pictures - so a client lining up sound and pictures by the reports had them that far
+        /// apart until the next one. The report waits for the next frame, which is live.
+        /// <para>
+        /// Checked and cleared at once, by the writer, so that a frame object used again for another
+        /// frame once this one is finished with is not taken for it.
+        /// </para>
+        /// </remarks>
+        internal bool TakeReplayedKeyFrame(QueuedFrame frame)
+        {
+            return frame != null && Interlocked.CompareExchange(ref _replayedKeyFrame, null, frame) == frame;
+        }
+
+        /// <summary>
         /// Whether this stream has ever produced a picture a decoder could start on.
         /// </summary>
         /// <remarks>
@@ -617,6 +641,7 @@ namespace SharpRTSPServer
             }
 
             kept.AddRef();
+            Volatile.Write(ref _replayedKeyFrame, kept);
             _frames.AddLast(kept);
             _queuedBytes += kept.Bytes;
 
