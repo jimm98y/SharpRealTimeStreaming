@@ -2964,8 +2964,10 @@ namespace SharpRTSPServer
 
                 // Decided here rather than when the frame was queued, so the report describes what is
                 // actually going out and when. A report that fails is not on its own a reason to drop
-                // the connection - the packet that follows it will say so more reliably.
-                if (IsSenderReportDue(stream))
+                // the connection - the packet that follows it will say so more reliably. Not with a
+                // kept keyframe sent again, whose RTP timestamp is not now: see TakeReplayedKeyFrame.
+                bool replayed = connection.Outbound != null && connection.Outbound.TakeReplayedKeyFrame(frame);
+                if (!replayed && IsSenderReportDue(stream))
                 {
                     if (SendRTCPSenderReport(frame.RtpTimestamp, connection, stream))
                     {
