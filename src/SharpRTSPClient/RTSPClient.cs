@@ -2219,7 +2219,7 @@ namespace SharpRTSPClient
                             videoTrack.Configuration = streamConfigurationData;
 
                             NewTrack?.Invoke(this, new NewTrackEventArgs(videoTrack.Index, TrackKind.Video,
-                                media.PayloadType, payloadName, streamConfigurationData));
+                                media.PayloadType, payloadName, streamConfigurationData, videoTrack.Rtcp.ClockRate));
                         }
 
                     }
@@ -2399,7 +2399,7 @@ namespace SharpRTSPClient
                             audioTrack.Configuration = streamConfigurationData;
 
                             NewTrack?.Invoke(this, new NewTrackEventArgs(audioTrack.Index, TrackKind.Audio,
-                                media.PayloadType, audioTrack.Codec, streamConfigurationData));
+                                media.PayloadType, audioTrack.Codec, streamConfigurationData, audioTrack.Rtcp.ClockRate));
                         }
 
                     }
@@ -2473,7 +2473,7 @@ namespace SharpRTSPClient
                     }
 
                     NewTrack?.Invoke(this, new NewTrackEventArgs(track.Index, TrackKind.Application,
-                        media.PayloadType, track.Codec, null));
+                        media.PayloadType, track.Codec, null, track.Rtcp.ClockRate));
                 }
             }
 

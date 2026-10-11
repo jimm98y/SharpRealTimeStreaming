@@ -141,12 +141,19 @@ namespace SharpRTSPClient
     {
         public NewTrackEventArgs(int trackIndex, TrackKind kind, int payloadType, string codec,
             IStreamConfigurationData configuration)
+            : this(trackIndex, kind, payloadType, codec, configuration, 0)
+        {
+        }
+
+        public NewTrackEventArgs(int trackIndex, TrackKind kind, int payloadType, string codec,
+            IStreamConfigurationData configuration, int clockRate)
         {
             TrackIndex = trackIndex;
             Kind = kind;
             PayloadType = payloadType;
             Codec = codec;
             StreamConfigurationData = configuration;
+            ClockRate = clockRate;
         }
 
         public int TrackIndex { get; }
@@ -162,5 +169,11 @@ namespace SharpRTSPClient
         /// knows how to read.
         /// </summary>
         public IStreamConfigurationData StreamConfigurationData { get; }
+
+        /// <summary>
+        /// How many ticks of <see cref="SimpleDataEventArgs.RtpTimestamp"/> make a second: the rtpmap's
+        /// clock rate, or the one the payload type implies where it gave none. 0 where it is not known.
+        /// </summary>
+        public int ClockRate { get; }
     }
 }

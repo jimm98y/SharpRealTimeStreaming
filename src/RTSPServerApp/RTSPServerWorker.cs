@@ -349,93 +349,103 @@ internal class RTSPServerWorker : BackgroundService
 
                         double videoSampleSeconds = inputTrack.DefaultSampleDuration / (double)inputTrack.Timescale;
 
+                        // The timer raises Elapsed on the thread pool every interval, whether or not
+                        //  the last one has returned, and a send held up by a slow client lets the
+                        //  next wake-up read later frames and send them first. One wake-up of the
+                        //  track at a time keeps the frames in the order they were read, without
+                        //  holding up the other tracks the way sending under _syncRoot would.
+                        object videoFeedGate = new object();
+
                         mediaFileReader.VideoTimer = new Timer(PACING_WAKE_MS);
                         mediaFileReader.VideoTimer.Elapsed += (s, e) =>
                         {
-                            var pending = new List<(uint Pts, List<ReadOnlyMemory<byte>> Units)>();
-
-                            lock (_syncRoot)
+                            lock (videoFeedGate)
                             {
-                                // Send what the clock says is due, not one sample per wake-up. See
-                                // MediaFileReader.Clock for why the wake-up cannot be trusted to be
-                                // the sample duration.
-                                for (int sent = 0; sent < PACING_MAX_PER_WAKE; sent++)
+                                var pending = new List<(uint Pts, List<ReadOnlyMemory<byte>> Units)>();
+
+                                lock (_syncRoot)
                                 {
-                                    double due = mediaFileReader.Clock.Elapsed.TotalSeconds + PACING_LEAD_SECONDS;
-                                    if (mediaFileReader.VideoSentThroughSeconds > due)
-                                        break;
-
-                                    var sample = inputReader.ReadSample(inputTrack.TrackID);
-
-                                    if (sample == null)
+                                    // Send what the clock says is due, not one sample per wake-up. See
+                                    // MediaFileReader.Clock for why the wake-up cannot be trusted to be
+                                    // the sample duration.
+                                    for (int sent = 0; sent < PACING_MAX_PER_WAKE; sent++)
                                     {
-                                        if (mediaFile.Shuffle)
-                                        {
-                                            StartFileAgain(mediaFileReader, inputReader.Tracks);
+                                        double due = mediaFileReader.Clock.Elapsed.TotalSeconds + PACING_LEAD_SECONDS;
+                                        if (mediaFileReader.VideoSentThroughSeconds > due)
+                                            break;
 
-                                            // The next time round begins here rather than at the next
-                                            // wake-up, so a loop costs no gap in the picture.
-                                            continue;
+                                        var sample = inputReader.ReadSample(inputTrack.TrackID);
+
+                                        if (sample == null)
+                                        {
+                                            if (mediaFile.Shuffle)
+                                            {
+                                                StartFileAgain(mediaFileReader, inputReader.Tracks);
+
+                                                // The next time round begins here rather than at the next
+                                                // wake-up, so a loop costs no gap in the picture.
+                                                continue;
+                                            }
+
+                                            // end streaming
+                                            mediaFileReader.VideoTimer.Stop();
+                                            _server.RemoveStreamSource(streamSource);
+                                            break;
                                         }
 
-                                        // end streaming
-                                        mediaFileReader.VideoTimer.Stop();
-                                        _server.RemoveStreamSource(streamSource);
-                                        break;
-                                    }
+                                        IEnumerable<ArraySegment<byte>> units = inputReader.ParseSample(inputTrack.TrackID, sample.Data);
 
-                                    IEnumerable<ArraySegment<byte>> units = inputReader.ParseSample(inputTrack.TrackID, sample.Data);
-
-                                    // Where this sample sits in the file, and where that is in the
-                                    // playout - which stops being the same thing once the file has been
-                                    // round more than once.
-                                    double videoSeconds = (double)sample.PTS / sourceVideoTimescale;
-                                    double videoDecodeSeconds = (double)sample.DTS / sourceVideoTimescale;
-                                    if (mediaFileReader.VideoRewinding)
-                                    {
-                                        // Near the beginning of the file, not merely earlier than before.
-                                        // Putting the track back to its first sample rewinds the reader as far
-                                        // as the fragment it had in hand and no further, so what comes back
-                                        // next is the last second or so of the file over again - which is
-                                        // exactly what this is here to swallow.
-                                        if (videoSeconds >= START_OF_FILE_SECONDS)
+                                        // Where this sample sits in the file, and where that is in the
+                                        // playout - which stops being the same thing once the file has been
+                                        // round more than once.
+                                        double videoSeconds = (double)sample.PTS / sourceVideoTimescale;
+                                        double videoDecodeSeconds = (double)sample.DTS / sourceVideoTimescale;
+                                        if (mediaFileReader.VideoRewinding)
                                         {
-                                            mediaFileReader.VideoLastSeconds = videoSeconds;
+                                            // Near the beginning of the file, not merely earlier than before.
+                                            // Putting the track back to its first sample rewinds the reader as far
+                                            // as the fragment it had in hand and no further, so what comes back
+                                            // next is the last second or so of the file over again - which is
+                                            // exactly what this is here to swallow.
+                                            if (videoSeconds >= START_OF_FILE_SECONDS)
+                                            {
+                                                mediaFileReader.VideoLastSeconds = videoSeconds;
 
-                                            // Swallowed, not waited on: these carry no playout time, so
-                                            // stopping here would cost the track a wake-up apiece and put
-                                            // it behind the one that had none to swallow.
-                                            continue;
+                                                // Swallowed, not waited on: these carry no playout time, so
+                                                // stopping here would cost the track a wake-up apiece and put
+                                                // it behind the one that had none to swallow.
+                                                continue;
+                                            }
+
+                                            mediaFileReader.VideoRewinding = false;
                                         }
 
-                                        mediaFileReader.VideoRewinding = false;
+                                        mediaFileReader.VideoLastSeconds = videoSeconds;
+                                        mediaFileReader.FurthestSeconds = Math.Max(
+                                            mediaFileReader.FurthestSeconds, videoSeconds + videoSampleSeconds);
+                                        mediaFileReader.VideoSentThroughSeconds =
+                                            mediaFileReader.LoopOffsetSeconds + videoDecodeSeconds + videoSampleSeconds;
+
+                                        long videoPts = (long)((mediaFileReader.LoopOffsetSeconds + videoSeconds) * VIDEO_RTP_CLOCK);
+
+                                        // Held back until the lock is off. This hands the sample to the
+                                        //  server, which writes it to the client, and a client slow to
+                                        //  read blocks the write - so doing it under the lock stops
+                                        //  every other track dead. One lock covers both tracks of every
+                                        //  stream this worker serves, so that is a wide blast radius
+                                        //  for a write that has nothing to do with the reader the lock
+                                        //  is there to guard.
+                                        // Copied, because what the reader hands back is a view of a buffer
+                                        //  it reads the next sample into.
+                                        pending.Add(((uint)unchecked(mediaFileReader.VideoRtpBaseTime + videoPts),
+                                            units.Select(u => (ReadOnlyMemory<byte>)u.ToArray()).ToList()));
                                     }
-
-                                    mediaFileReader.VideoLastSeconds = videoSeconds;
-                                    mediaFileReader.FurthestSeconds = Math.Max(
-                                        mediaFileReader.FurthestSeconds, videoSeconds + videoSampleSeconds);
-                                    mediaFileReader.VideoSentThroughSeconds =
-                                        mediaFileReader.LoopOffsetSeconds + videoDecodeSeconds + videoSampleSeconds;
-
-                                    long videoPts = (long)((mediaFileReader.LoopOffsetSeconds + videoSeconds) * VIDEO_RTP_CLOCK);
-
-                                    // Held back until the lock is off. This hands the sample to the
-                                    //  server, which writes it to the client, and a client slow to
-                                    //  read blocks the write - so doing it under the lock stops
-                                    //  every other track dead. One lock covers both tracks of every
-                                    //  stream this worker serves, so that is a wide blast radius
-                                    //  for a write that has nothing to do with the reader the lock
-                                    //  is there to guard.
-                                    // Copied, because what the reader hands back is a view of a buffer
-                                    //  it reads the next sample into.
-                                    pending.Add(((uint)unchecked(mediaFileReader.VideoRtpBaseTime + videoPts),
-                                        units.Select(u => (ReadOnlyMemory<byte>)u.ToArray()).ToList()));
                                 }
-                            }
 
-                            foreach (var (pts, units) in pending)
-                            {
-                                rtspVideoTrack.FeedInRawSamples(pts, units);
+                                foreach (var (pts, units) in pending)
+                                {
+                                    rtspVideoTrack.FeedInRawSamples(pts, units);
+                                }
                             }
                         };
 
@@ -467,76 +477,82 @@ internal class RTSPServerWorker : BackgroundService
 
                         double audioSampleSeconds = inputTrack.DefaultSampleDuration / (double)inputTrack.Timescale;
 
+                        // As the picture: one wake-up at a time, so frames go out in the order read.
+                        object audioFeedGate = new object();
+
                         mediaFileReader.AudioTimer = new Timer(PACING_WAKE_MS);
                         mediaFileReader.AudioTimer.Elapsed += (s, e) =>
                         {
-                            var pending = new List<(uint Pts, List<ReadOnlyMemory<byte>> Units)>();
-
-                            lock (_syncRoot)
+                            lock (audioFeedGate)
                             {
-                                // The same clock as the picture, which is the whole point - see
-                                // MediaFileReader.Clock.
-                                for (int sent = 0; sent < PACING_MAX_PER_WAKE; sent++)
+                                var pending = new List<(uint Pts, List<ReadOnlyMemory<byte>> Units)>();
+
+                                lock (_syncRoot)
                                 {
-                                    double due = mediaFileReader.Clock.Elapsed.TotalSeconds + PACING_LEAD_SECONDS;
-                                    if (mediaFileReader.AudioSentThroughSeconds > due)
-                                        break;
-
-                                    var sample = inputReader.ReadSample(inputTrack.TrackID);
-
-                                    if (sample == null)
+                                    // The same clock as the picture, which is the whole point - see
+                                    // MediaFileReader.Clock.
+                                    for (int sent = 0; sent < PACING_MAX_PER_WAKE; sent++)
                                     {
-                                        if (mediaFile.Shuffle)
+                                        double due = mediaFileReader.Clock.Elapsed.TotalSeconds + PACING_LEAD_SECONDS;
+                                        if (mediaFileReader.AudioSentThroughSeconds > due)
+                                            break;
+
+                                        var sample = inputReader.ReadSample(inputTrack.TrackID);
+
+                                        if (sample == null)
                                         {
-                                            StartFileAgain(mediaFileReader, inputReader.Tracks);
-                                            continue;
+                                            if (mediaFile.Shuffle)
+                                            {
+                                                StartFileAgain(mediaFileReader, inputReader.Tracks);
+                                                continue;
+                                            }
+
+                                            // end streaming
+                                            mediaFileReader.AudioTimer.Stop();
+                                            _server.RemoveStreamSource(streamSource);
+                                            break;
                                         }
 
-                                        // end streaming
-                                        mediaFileReader.AudioTimer.Stop();
-                                        _server.RemoveStreamSource(streamSource);
-                                        break;
-                                    }
-
-                                    IEnumerable<ArraySegment<byte>> units = inputReader.ParseSample(inputTrack.TrackID, sample.Data);
-                                    // As the video above: the file's units are not the clock the SDP
-                                    // declares. For audio the two usually agree, which is why this went
-                                    // unnoticed, but a file that counts otherwise should still play.
-                                    double audioSeconds = (double)sample.PTS / sourceAudioTimescale;
-                                    if (mediaFileReader.AudioRewinding)
-                                    {
-                                        // Near the beginning of the file, not merely earlier than before - see
-                                        // the video track above for why.
-                                        if (audioSeconds >= START_OF_FILE_SECONDS)
+                                        IEnumerable<ArraySegment<byte>> units = inputReader.ParseSample(inputTrack.TrackID, sample.Data);
+                                        // As the video above: the file's units are not the clock the SDP
+                                        // declares. For audio the two usually agree, which is why this went
+                                        // unnoticed, but a file that counts otherwise should still play.
+                                        double audioSeconds = (double)sample.PTS / sourceAudioTimescale;
+                                        if (mediaFileReader.AudioRewinding)
                                         {
-                                            mediaFileReader.AudioLastSeconds = audioSeconds;
+                                            // Near the beginning of the file, not merely earlier than before - see
+                                            // the video track above for why.
+                                            if (audioSeconds >= START_OF_FILE_SECONDS)
+                                            {
+                                                mediaFileReader.AudioLastSeconds = audioSeconds;
 
-                                            // Swallowed, not waited on: these carry no playout time,
-                                            // so stopping here would cost the track a wake-up apiece
-                                            // and put it behind the one that had none to swallow.
-                                            continue;
+                                                // Swallowed, not waited on: these carry no playout time,
+                                                // so stopping here would cost the track a wake-up apiece
+                                                // and put it behind the one that had none to swallow.
+                                                continue;
+                                            }
+
+                                            mediaFileReader.AudioRewinding = false;
                                         }
 
-                                        mediaFileReader.AudioRewinding = false;
+                                        mediaFileReader.AudioLastSeconds = audioSeconds;
+                                        mediaFileReader.FurthestSeconds = Math.Max(
+                                            mediaFileReader.FurthestSeconds, audioSeconds + audioSampleSeconds);
+                                        mediaFileReader.AudioSentThroughSeconds =
+                                            mediaFileReader.LoopOffsetSeconds + audioSeconds + audioSampleSeconds;
+
+                                        long audioPts = (long)((mediaFileReader.LoopOffsetSeconds + audioSeconds) * audioRtpClock);
+                                        // See the picture track: the send waits until the lock is off, and
+                                        // the units are copied out of the reader's buffer.
+                                        pending.Add(((uint)unchecked(mediaFileReader.AudioRtpBaseTime + audioPts),
+                                            units.Select(u => (ReadOnlyMemory<byte>)u.ToArray()).ToList()));
                                     }
-
-                                    mediaFileReader.AudioLastSeconds = audioSeconds;
-                                    mediaFileReader.FurthestSeconds = Math.Max(
-                                        mediaFileReader.FurthestSeconds, audioSeconds + audioSampleSeconds);
-                                    mediaFileReader.AudioSentThroughSeconds =
-                                        mediaFileReader.LoopOffsetSeconds + audioSeconds + audioSampleSeconds;
-
-                                    long audioPts = (long)((mediaFileReader.LoopOffsetSeconds + audioSeconds) * audioRtpClock);
-                                    // See the picture track: the send waits until the lock is off, and
-                                    // the units are copied out of the reader's buffer.
-                                    pending.Add(((uint)unchecked(mediaFileReader.AudioRtpBaseTime + audioPts),
-                                        units.Select(u => (ReadOnlyMemory<byte>)u.ToArray()).ToList()));
                                 }
-                            }
 
-                            foreach (var (pts, units) in pending)
-                            {
-                                rtspAudioTrack.FeedInRawSamples(pts, units);
+                                foreach (var (pts, units) in pending)
+                                {
+                                    rtspAudioTrack.FeedInRawSamples(pts, units);
+                                }
                             }
                         };
 
