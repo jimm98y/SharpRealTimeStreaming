@@ -16,11 +16,14 @@
 
   <ItemGroup>
 	  <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="10.0.12" />
-	  <PackageReference Include="SharpMP4" Version="0.3.2" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\SharpRTSPClient\SharpRTSPClient.csproj" />
+    <!-- Writing each sample with the duration its RTP timestamps give needs SharpMP4 newer than the one on
+         nuget.org: built from the SharpMP4 repository checked out next to this one. Back to a PackageReference
+         once it is published. -->
+    <ProjectReference Include="..\..\..\SharpMP4\src\SharpMP4\SharpMP4.csproj" />
   </ItemGroup>
 
 </Project>
