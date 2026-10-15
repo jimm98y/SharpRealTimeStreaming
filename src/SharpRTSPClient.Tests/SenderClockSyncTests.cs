@@ -149,6 +149,21 @@ namespace SharpRTSPClient.Tests
         }
 
         [TestMethod]
+        public void AReportOfNoPacketsSentIsNotUsed()
+        {
+            // Wowza's first report: an RTP timestamp of 0, its wall clock, of nothing sent yet - then its real ones, of its
+            // own clock, weeks from the first
+            var channel = Channel(VideoClockRate);
+
+            Assert.IsFalse(channel.RecordSenderReport(Anchor, 0, 0));
+            Assert.IsFalse(channel.HasSenderSync, "a report of no stream places nothing");
+
+            Assert.IsTrue(channel.RecordSenderReport(Anchor.AddDays(78), 3_116_278_434, 61));
+            Assert.IsTrue(channel.TryMapToSenderClock(3_116_278_434 + VideoClockRate, out DateTime when));
+            Assert.AreEqual(Anchor.AddDays(78).AddSeconds(1), when);
+        }
+
+        [TestMethod]
         public void ALaterReportReplacesTheOne()
         {
             var channel = Channel(VideoClockRate);

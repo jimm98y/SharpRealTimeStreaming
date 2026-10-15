@@ -19,12 +19,11 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-using Rtsp.Rtp;
 using System;
 using System.Buffers;
 using System.Collections.Generic;
 
-namespace SharpRTSPClient
+namespace Rtsp.Rtp
 {
     /// <summary>
     /// Collects packets until the one that ends the thing they carry.
@@ -41,7 +40,7 @@ namespace SharpRTSPClient
     /// otherwise leave the pieces of one document to be joined onto the next.
     /// </para>
     /// </remarks>
-    internal sealed class MarkerFramedPayload : IPayloadProcessor
+    public class MarkerFramedPayload : IPayloadProcessor
     {
         /// <summary>
         /// How many packets one thing may be spread over before the run is given up as broken.
