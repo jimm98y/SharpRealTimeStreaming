@@ -21,13 +21,12 @@
 
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using Rtsp.Rtp;
 using System;
 using System.Buffers;
 using System.Collections.Generic;
 using System.IO;
 
-namespace SharpRTSPClient
+namespace Rtsp.Rtp
 {
     /// <summary>
     /// Puts VP9 frames back together from their packets.
@@ -47,7 +46,7 @@ namespace SharpRTSPClient
     /// </para>
     /// <see href="https://datatracker.ietf.org/doc/html/rfc9628" />
     /// </remarks>
-    internal sealed class VP9Payload : IPayloadProcessor
+    public class VP9Payload : IPayloadProcessor
     {
         /// <summary>
         /// The largest a frame may grow before it is given up as broken.

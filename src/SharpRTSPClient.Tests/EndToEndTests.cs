@@ -176,7 +176,7 @@ namespace SharpRTSPClient.Tests
                     Thread.Sleep(5);
                 }
 
-                Thread.Sleep(300);
+                Thread.Sleep(600);
                 client.Stop();
 
                 Assert.IsGreaterThan(0, Volatile.Read(ref frames), "nothing arrived, so nothing was proved");

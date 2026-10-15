@@ -98,6 +98,24 @@ namespace SharpRTSPClient
         /// which is what makes the streams line up - the sender's clock does not have to agree with
         /// ours, or with anything else, for that to hold.
         /// </remarks>
+        /// <summary>
+        /// Records the pairing of a sender report, as <see cref="RecordSenderReport(DateTime, uint)"/> does - unless the sender
+        /// has sent no RTP yet, which its packet count says: its pairing is then of no stream.
+        /// </summary>
+        /// <remarks>
+        /// Wowza sends such a report as a stream starts, of an RTP timestamp of 0 and its wall clock: 0 is no time of the
+        /// stream's clock, and placed against it, its frames came hours early, then - as its real reports came, of its own
+        /// clock - weeks late.
+        /// </remarks>
+        /// <returns>Whether it was recorded.</returns>
+        public bool RecordSenderReport(DateTime senderTimeUtc, uint rtpTimestamp, uint senderPacketCount)
+        {
+            if (senderPacketCount == 0)
+                return false;
+            RecordSenderReport(senderTimeUtc, rtpTimestamp);
+            return true;
+        }
+
         public void RecordSenderReport(DateTime senderTimeUtc, uint rtpTimestamp)
         {
             lock (_syncGate)

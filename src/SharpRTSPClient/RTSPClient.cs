@@ -1552,6 +1552,9 @@ namespace SharpRTSPClient
                         UInt32 rtpTimestamp = (uint)(span[packetIndex + 16] << 24) + (uint)(span[packetIndex + 17] << 16)
                         + (uint)(span[packetIndex + 18] << 8) + span[packetIndex + 19];
 
+                        UInt32 senderPacketCount = (uint)(span[packetIndex + 20] << 24) + (uint)(span[packetIndex + 21] << 16)
+                        + (uint)(span[packetIndex + 22] << 8) + span[packetIndex + 23];
+
                         // The fraction matters. Lip sync is a matter of tens of milliseconds and the
                         // seconds word alone is a second wide, so reading only that would be two
                         // orders of magnitude too coarse to be worth anything. Divided by 2^32 as a
@@ -1565,7 +1568,11 @@ namespace SharpRTSPClient
 
                         // What makes the two streams of a session comparable: this pairs a wall clock
                         // time with the RTP timestamp of that same instant on this stream.
-                        channel.RecordSenderReport(time, rtpTimestamp);
+                        // Of a sender that has sent nothing yet, there is no stream to pair it with.
+                        if (!channel.RecordSenderReport(time, rtpTimestamp, senderPacketCount))
+                        {
+                            _logger.LogDebug("Sender report of no packets sent yet, its RTP timestamp {rtpTimestamp} not used", rtpTimestamp);
+                        }
 
                         // The middle of the timestamp is what a report echoes back, and the moment it
                         // arrived is what says how long the answer waited here. Between them the
