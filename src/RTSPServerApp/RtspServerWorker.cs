@@ -37,7 +37,7 @@ using Timer = System.Timers.Timer;
 
 namespace RTSPServerApp;
 
-internal class RTSPServerWorker : BackgroundService
+internal class RtspServerWorker : BackgroundService
 {
     public class MediaFile
     {
@@ -167,7 +167,7 @@ internal class RTSPServerWorker : BackgroundService
 
     private readonly ILoggerFactory _loggerFactory;
     private readonly IConfiguration _configuration;
-    private RTSPServer _server;
+    private RtspServer _server;
 
     private List<MediaFileReader> _mediaFileStreamReaders = new List<MediaFileReader>();
 
@@ -227,7 +227,7 @@ internal class RTSPServerWorker : BackgroundService
             : RtspAuthenticationScheme.Digest;
     }
 
-    public RTSPServerWorker(IConfiguration configuration, ILoggerFactory loggerFactory)
+    public RtspServerWorker(IConfiguration configuration, ILoggerFactory loggerFactory)
     {
         ArgumentNullException.ThrowIfNull(configuration);
         ArgumentNullException.ThrowIfNull(loggerFactory);
@@ -238,7 +238,7 @@ internal class RTSPServerWorker : BackgroundService
 
     protected override Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        var _logger = _loggerFactory.CreateLogger<RTSPServerWorker>();
+        var _logger = _loggerFactory.CreateLogger<RtspServerWorker>();
 
         var hostName = _configuration["RTSPServerApp:HostName"];
         var port = ushort.Parse(_configuration["RTSPServerApp:Port"]);
@@ -249,7 +249,7 @@ internal class RTSPServerWorker : BackgroundService
         if (mediaFiles == null)
             return Task.CompletedTask;
 
-        _server = new RTSPServer(port, ReadUsers(_configuration, "RTSPServerApp:Users"), _loggerFactory);
+        _server = new RtspServer(port, ReadUsers(_configuration, "RTSPServerApp:Users"), _loggerFactory);
         _server.AuthenticationScheme = ReadAuthenticationScheme(_configuration["RTSPServerApp:AllowBasicAuthentication"]);
         List<MediaFileReader> mediaFileReaders = new List<MediaFileReader>();
 
@@ -261,7 +261,7 @@ internal class RTSPServerWorker : BackgroundService
             ITrack rtspAudioTrack = null;
 
             string fileName = mediaFile.FilePath;
-            RTSPStreamSource streamSource = null;
+            RtspStreamSource streamSource = null;
 
             if (Path.GetExtension(fileName).ToLowerInvariant() == ".mp4")
             {
@@ -583,7 +583,7 @@ internal class RTSPServerWorker : BackgroundService
                 };
             }
 
-            streamSource = new RTSPStreamSource(mediaFile.StreamID, rtspVideoTrack, rtspAudioTrack);
+            streamSource = new RtspStreamSource(mediaFile.StreamID, rtspVideoTrack, rtspAudioTrack);
 
             // A client that arrives mid-group has nothing it can decode until the next keyframe.
             // Keeping the last one means it is given a picture straight away, and held on that

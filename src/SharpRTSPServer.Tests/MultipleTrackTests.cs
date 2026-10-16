@@ -48,12 +48,12 @@ namespace SharpRTSPServer.Tests
         public void AStreamCanCarryTwoAudioTracks()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
+            using var server = new RtspServer(port, new InMemoryUserRepository("admin", "password"));
 
             var english = new PCMUTrack { ID = 1 };
             var french = new PCMATrack { ID = 2 };
 
-            server.AddStreamSource(new RTSPStreamSource("stream1",
+            server.AddStreamSource(new RtspStreamSource("stream1",
                 new H264Track(Sps, Pps), english, french));
             server.StartListen();
 
@@ -84,12 +84,12 @@ namespace SharpRTSPServer.Tests
         public void EachOfTwoAudioTracksCarriesItsOwnMedia()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
+            using var server = new RtspServer(port, new InMemoryUserRepository("admin", "password"));
 
             var english = new PCMUTrack { ID = 1 };
             var french = new PCMATrack { ID = 2 };
 
-            server.AddStreamSource(new RTSPStreamSource("stream1",
+            server.AddStreamSource(new RtspStreamSource("stream1",
                 new H264Track(Sps, Pps), english, french));
             server.StartListen();
 
@@ -136,7 +136,7 @@ namespace SharpRTSPServer.Tests
         {
             // The ID is what a control URL names, so two tracks sharing one would give a client no
             // way of saying which it wanted.
-            var source = new RTSPStreamSource("stream1", new H264Track(Sps, Pps));
+            var source = new RtspStreamSource("stream1", new H264Track(Sps, Pps));
 
             var clash = Assert.ThrowsExactly<ArgumentException>(
                 () => source.AddTrack(new MP4VTrack(new byte[] { 0x00, 0x00, 0x01, 0xB0 })));
@@ -150,7 +150,7 @@ namespace SharpRTSPServer.Tests
         public void MetadataIsDescribedAsAnApplicationTrack()
         {
             var track = new MetadataTrack();
-            string sdp = track.BuildSDP(new StringBuilder()).ToString();
+            string sdp = track.BuildSdp(new StringBuilder()).ToString();
 
             // application, which is what SDP has for a stream that is neither sound nor pictures
             Assert.Contains("m=application", sdp, sdp);
@@ -162,10 +162,10 @@ namespace SharpRTSPServer.Tests
         public void MetadataIsCarriedAlongsideThePicture()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
+            using var server = new RtspServer(port, new InMemoryUserRepository("admin", "password"));
 
             var metadata = new MetadataTrack();
-            server.AddStreamSource(new RTSPStreamSource("stream1",
+            server.AddStreamSource(new RtspStreamSource("stream1",
                 new H264Track(Sps, Pps), null, metadata));
             server.StartListen();
 

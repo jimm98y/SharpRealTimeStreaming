@@ -56,14 +56,14 @@ namespace SharpRTSPClient.Tests
 
         private static Seen Describe(string sdp, bool receiveAllTracks)
         {
-            return Describe(sdp, receiveAllTracks ? (_ => true) : RTSPClient.FirstOfEachKind);
+            return Describe(sdp, receiveAllTracks ? (_ => true) : RtspClient.FirstOfEachKind);
         }
 
         private static Seen Describe(string sdp, Func<TrackOffer, bool> acceptTrack)
         {
             var seen = new Seen();
             using var server = new FakeRtspServer(SdpHeader + sdp);
-            using var client = new RTSPClient { AutoPlay = false, AcceptTrack = acceptTrack };
+            using var client = new RtspClient { AutoPlay = false, AcceptTrack = acceptTrack };
 
             var settled = new ManualResetEventSlim(false);
 
@@ -79,7 +79,7 @@ namespace SharpRTSPClient.Tests
             client.Stopped += (s, e) => { seen.Stopped = e.Reason; settled.Set(); };
             client.SetupMessageCompleted += (s, e) => settled.Set();
 
-            client.Connect(server.BaseUri, RTPTransport.TCP);
+            client.Connect(server.BaseUri, RtpTransport.TCP);
 
             settled.Wait(5000);
             client.Stop();
@@ -156,7 +156,7 @@ namespace SharpRTSPClient.Tests
         public void MetadataCanBeLeftOutWithoutLeavingOutTheOtherExtras()
         {
             var seen = Describe(WithMetadata,
-                t => RTSPClient.FirstOfEachKind(t) && t.Kind != TrackKind.Application);
+                t => RtspClient.FirstOfEachKind(t) && t.Kind != TrackKind.Application);
 
             Assert.IsFalse(seen.Tracks.Any(t => t.Kind == TrackKind.Application),
                 "a client that said not to should not set it up");

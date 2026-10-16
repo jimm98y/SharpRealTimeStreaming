@@ -49,11 +49,11 @@ namespace SharpRTSPServer.Tests
         {
             int port = TestPorts.FindFree();
 
-            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"), false, null,
+            using var server = new RtspServer(port, new InMemoryUserRepository("admin", "password"), false, null,
                 SrtpCryptoSuites.AES_CM_128_HMAC_SHA1_80, null);
 
             var videoTrack = new H264Track(Sps, Pps) { RtpProfile = RtpProfiles.SAVP };
-            server.AddStreamSource(new RTSPStreamSource("stream1", videoTrack, null));
+            server.AddStreamSource(new RtspStreamSource("stream1", videoTrack, null));
             server.StartListen();
 
             string baseUri = $"rtsp://127.0.0.1:{port}/stream1";

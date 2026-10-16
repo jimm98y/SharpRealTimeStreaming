@@ -38,7 +38,7 @@ namespace SharpRTSPServer.Tests
         private static readonly byte[] Sps = { 0x67, 0x42, 0x00, 0x1E };
         private static readonly byte[] Pps = { 0x68, 0xCE, 0x3C, 0x80 };
 
-        private readonly RTSPServer _server;
+        private readonly RtspServer _server;
         private readonly int _port;
 
         private string BaseUri => $"rtsp://127.0.0.1:{_port}/{StreamId}";
@@ -46,9 +46,9 @@ namespace SharpRTSPServer.Tests
         public BasicAuthenticationTests()
         {
             _port = TestPorts.FindFree();
-            _server = new RTSPServer(_port, new InMemoryUserRepository(UserName, Password));
+            _server = new RtspServer(_port, new InMemoryUserRepository(UserName, Password));
             _server.AuthenticationScheme = RtspAuthenticationScheme.Basic;
-            _server.AddStreamSource(new RTSPStreamSource(StreamId, new H264Track(Sps, Pps), null));
+            _server.AddStreamSource(new RtspStreamSource(StreamId, new H264Track(Sps, Pps), null));
             _server.StartListen();
         }
 
@@ -137,9 +137,9 @@ namespace SharpRTSPServer.Tests
         {
             int port = TestPorts.FindFree();
 
-            using var open = new RTSPServer(port, (IUserRepository)null);
+            using var open = new RtspServer(port, (IUserRepository)null);
             open.AuthenticationScheme = RtspAuthenticationScheme.Basic;
-            open.AddStreamSource(new RTSPStreamSource(StreamId, new H264Track(Sps, Pps), null));
+            open.AddStreamSource(new RtspStreamSource(StreamId, new H264Track(Sps, Pps), null));
             open.StartListen();
 
             using var client = new RtspTestClient(port, null, null);

@@ -60,7 +60,7 @@ namespace SharpRTSPServer
     /// <para>
     /// The server used to be given one user name and one password in its constructor, so every
     /// client that authenticated was the same client as far as anything downstream could tell -
-    /// which made <see cref="RTSPServer.AuthorizeStream"/> unable to say anything useful, since
+    /// which made <see cref="RtspServer.AuthorizeStream"/> unable to say anything useful, since
     /// the user it reported was the only user there was.
     /// </para>
     /// <para>

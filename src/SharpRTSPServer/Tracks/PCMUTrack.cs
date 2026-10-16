@@ -70,7 +70,7 @@ namespace SharpRTSPServer
         /// </summary>
         /// <param name="sdp">SDP <see cref="StringBuilder"/>.</param>
         /// <returns><see cref="StringBuilder"/>.</returns>
-        public override StringBuilder BuildSDP(StringBuilder sdp)
+        public override StringBuilder BuildSdp(StringBuilder sdp)
         {
             sdp.Append($"m=audio 0 RTP/{RtpProfile} {PayloadType}\r\n");
             sdp.Append($"a=control:trackID={ID}\r\n");
@@ -98,10 +98,10 @@ namespace SharpRTSPServer
                 int rtpCsrcCount = 0;
                 const bool rtpMarker = true;
 
-                RTPPacketUtil.WriteHeader(rtpPacket.Span,
-                    RTPPacketUtil.RTP_VERSION, rtpPadding, rtpHasExtension, rtpCsrcCount, rtpMarker, PayloadType);
+                RtpPacketUtil.WriteHeader(rtpPacket.Span,
+                    RtpPacketUtil.RTP_VERSION, rtpPadding, rtpHasExtension, rtpCsrcCount, rtpMarker, PayloadType);
 
-                RTPPacketUtil.WriteTS(rtpPacket.Span, rtpTimestamp);
+                RtpPacketUtil.WriteTimestamp(rtpPacket.Span, rtpTimestamp);
                 audioPacket.CopyTo(rtpPacket.Slice(12));
             }
         }

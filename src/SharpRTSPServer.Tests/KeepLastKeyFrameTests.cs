@@ -61,7 +61,7 @@ namespace SharpRTSPServer.Tests
         [TestMethod]
         public void ItIsOffUnlessItIsAskedFor()
         {
-            var source = new RTSPStreamSource("stream1", new H264Track(Sps, Pps), null);
+            var source = new RtspStreamSource("stream1", new H264Track(Sps, Pps), null);
 
             Assert.IsFalse(source.KeepLastKeyFrame,
                 "it costs a frame of memory per stream and starts a client on a stale picture");
@@ -71,10 +71,10 @@ namespace SharpRTSPServer.Tests
         public void NothingIsKeptWhileItIsOff()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
+            using var server = new RtspServer(port, new InMemoryUserRepository("admin", "password"));
 
             var video = new H264Track(Sps, Pps);
-            var source = new RTSPStreamSource("stream1", video, null) { KeepLastKeyFrame = false };
+            var source = new RtspStreamSource("stream1", video, null) { KeepLastKeyFrame = false };
 
             server.AddStreamSource(source);
             server.StartListen();
@@ -97,10 +97,10 @@ namespace SharpRTSPServer.Tests
         public void TheKeptFrameIsLetGoWhenItIsTurnedOff()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
+            using var server = new RtspServer(port, new InMemoryUserRepository("admin", "password"));
 
             var video = new H264Track(Sps, Pps);
-            var source = new RTSPStreamSource("stream1", video, null) { KeepLastKeyFrame = true };
+            var source = new RtspStreamSource("stream1", video, null) { KeepLastKeyFrame = true };
 
             server.AddStreamSource(source);
             server.StartListen();
@@ -126,14 +126,14 @@ namespace SharpRTSPServer.Tests
         public void AClientJoiningMidGroupWaitsRatherThanBeingStartedOnAStalePicture()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
+            using var server = new RtspServer(port, new InMemoryUserRepository("admin", "password"));
 
             // Short, so that the wait runs out during the test - with a keyframe kept this is when
             // the stale one would be sent, and with it off nothing should be.
             server.KeyFrameWait = TimeSpan.FromMilliseconds(200);
 
             var video = new H264Track(Sps, Pps);
-            var source = new RTSPStreamSource("stream1", video, null) { KeepLastKeyFrame = false };
+            var source = new RtspStreamSource("stream1", video, null) { KeepLastKeyFrame = false };
 
             server.AddStreamSource(source);
             server.StartListen();
@@ -186,10 +186,10 @@ namespace SharpRTSPServer.Tests
             // The counterpart of the above, so that neither test can pass by the stream simply
             // never producing anything.
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
+            using var server = new RtspServer(port, new InMemoryUserRepository("admin", "password"));
 
             var video = new H264Track(Sps, Pps);
-            var source = new RTSPStreamSource("stream1", video, null) { KeepLastKeyFrame = true };
+            var source = new RtspStreamSource("stream1", video, null) { KeepLastKeyFrame = true };
 
             server.AddStreamSource(source);
             server.StartListen();
@@ -212,11 +212,11 @@ namespace SharpRTSPServer.Tests
             // Keeping one is also what makes a stream packetise for a client that has not arrived
             // yet, so turning it off puts that back to nothing as well.
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
+            using var server = new RtspServer(port, new InMemoryUserRepository("admin", "password"));
 
             var video = new H264Track(Sps, Pps);
-            var keeps = new RTSPStreamSource("keeps", video, null) { KeepLastKeyFrame = true };
-            var doesNot = new RTSPStreamSource("doesNot", new H264Track(Sps, Pps), null) { KeepLastKeyFrame = false };
+            var keeps = new RtspStreamSource("keeps", video, null) { KeepLastKeyFrame = true };
+            var doesNot = new RtspStreamSource("doesNot", new H264Track(Sps, Pps), null) { KeepLastKeyFrame = false };
 
             server.AddStreamSource(keeps);
             server.AddStreamSource(doesNot);

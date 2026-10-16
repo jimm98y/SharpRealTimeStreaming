@@ -21,6 +21,7 @@
 
 using Rtsp;
 using Rtsp.Rtp;
+using SharpRTCP;
 using SharpSRTP.SRTP;
 using System;
 
@@ -107,7 +108,7 @@ namespace SharpRTSPClient
         /// <summary>
         /// What is known of the sender's clock on this track, and when it was last reported to.
         /// </summary>
-        public RtcpChannelState Rtcp { get; } = new RtcpChannelState();
+        public ChannelState Rtcp { get; } = new ChannelState();
 
         /// <summary>
         /// The SSRC this client reports under on this track.

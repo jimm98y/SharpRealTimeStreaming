@@ -86,7 +86,7 @@ namespace SharpRTSPServer.Tests
         public void TheFirstPictureAClientGetsIsOneItCanDecode()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
+            using var server = new RtspServer(port, new InMemoryUserRepository("admin", "password"));
 
             // Longer than this test can possibly take, so that the wait ending of its own accord -
             // which is a safety valve for producers whose frames cannot be read, not the behaviour
@@ -94,7 +94,7 @@ namespace SharpRTSPServer.Tests
             server.KeyFrameWait = TimeSpan.FromMinutes(5);
 
             var video = new H264Track(Sps, Pps);
-            server.AddStreamSource(new RTSPStreamSource("stream1", video, null));
+            server.AddStreamSource(new RtspStreamSource("stream1", video, null));
             server.StartListen();
 
             string baseUri = $"rtsp://127.0.0.1:{port}/stream1";
@@ -164,11 +164,11 @@ namespace SharpRTSPServer.Tests
         public void AKeyFrameFedBeforeTheClientSaysPlayStillReachesIt()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
+            using var server = new RtspServer(port, new InMemoryUserRepository("admin", "password"));
             server.KeyFrameWait = TimeSpan.FromMinutes(5);
 
             var video = new H264Track(Sps, Pps);
-            server.AddStreamSource(new RTSPStreamSource("stream1", video, null));
+            server.AddStreamSource(new RtspStreamSource("stream1", video, null));
             server.StartListen();
 
             string baseUri = $"rtsp://127.0.0.1:{port}/stream1";
@@ -231,11 +231,11 @@ namespace SharpRTSPServer.Tests
         public void MediaStartedWhenPlayIsAnsweredArrivesFromItsFirstFrame()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
+            using var server = new RtspServer(port, new InMemoryUserRepository("admin", "password"));
             server.KeyFrameWait = TimeSpan.FromMinutes(5);
 
             var video = new H264Track(Sps, Pps);
-            var source = new RTSPStreamSource("stream1", video, null);
+            var source = new RtspStreamSource("stream1", video, null);
 
             server.AddStreamSource(source);
 
@@ -298,13 +298,13 @@ namespace SharpRTSPServer.Tests
         public void AClientWithNothingToShowIsSentTheLastKeyFrameKept()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
+            using var server = new RtspServer(port, new InMemoryUserRepository("admin", "password"));
 
             // Short, because the fallback is what happens when this runs out.
             server.KeyFrameWait = TimeSpan.FromMilliseconds(200);
 
             var video = new H264Track(Sps, Pps);
-            var source = new RTSPStreamSource("stream1", video, null);
+            var source = new RtspStreamSource("stream1", video, null);
             source.KeepLastKeyFrame = true;
 
             server.AddStreamSource(source);
@@ -372,11 +372,11 @@ namespace SharpRTSPServer.Tests
         public void AKeyFrameProducedBeforeAnyoneConnectsIsStillThereForTheFirstClient()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
+            using var server = new RtspServer(port, new InMemoryUserRepository("admin", "password"));
             server.KeyFrameWait = TimeSpan.FromMinutes(5);
 
             var video = new H264Track(Sps, Pps);
-            var source = new RTSPStreamSource("stream1", video, null);
+            var source = new RtspStreamSource("stream1", video, null);
             source.KeepLastKeyFrame = true;
 
             server.AddStreamSource(source);
@@ -437,13 +437,13 @@ namespace SharpRTSPServer.Tests
         public void AStreamWithNoRecognisableKeyFrameIsNotHeldUp()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
+            using var server = new RtspServer(port, new InMemoryUserRepository("admin", "password"));
 
             // Far longer than this test runs: if anything waits, nothing arrives.
             server.KeyFrameWait = TimeSpan.FromMinutes(5);
 
             var video = new H264Track(Sps, Pps);
-            server.AddStreamSource(new RTSPStreamSource("stream1", video, null));
+            server.AddStreamSource(new RtspStreamSource("stream1", video, null));
             server.StartListen();
 
             string baseUri = $"rtsp://127.0.0.1:{port}/stream1";
@@ -488,11 +488,11 @@ namespace SharpRTSPServer.Tests
         public void TheKeptPictureIsHeldUntilTheNextGroupRatherThanBrokenUp()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
+            using var server = new RtspServer(port, new InMemoryUserRepository("admin", "password"));
             server.KeyFrameWait = TimeSpan.FromMinutes(5);
 
             var video = new H264Track(Sps, Pps);
-            var source = new RTSPStreamSource("stream1", video, null);
+            var source = new RtspStreamSource("stream1", video, null);
             source.KeepLastKeyFrame = true;
 
             server.AddStreamSource(source);
@@ -557,14 +557,14 @@ namespace SharpRTSPServer.Tests
         public void TheEncoderIsAskedForAPictureTheClientCanStartOn()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
+            using var server = new RtspServer(port, new InMemoryUserRepository("admin", "password"));
 
             // Longer than this test can take, so that the wait ending of its own accord - after
             // which there is nothing to ask for - cannot decide the result on a loaded machine.
             server.KeyFrameWait = TimeSpan.FromMinutes(5);
 
             var video = new H264Track(Sps, Pps);
-            server.AddStreamSource(new RTSPStreamSource("stream1", video, null));
+            server.AddStreamSource(new RtspStreamSource("stream1", video, null));
 
             var asked = new ManualResetEventSlim(false);
             server.KeyFrameNeeded += (s, e) => asked.Set();

@@ -1,4 +1,4 @@
-// SharpRTSPClient
+// SharpRTCP
 // Copyright (C) 2026 Lukas Volf
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -21,7 +21,7 @@
 
 using System;
 
-namespace SharpRTSPClient.Tests
+namespace SharpRTCP.Tests
 {
     /// <summary>
     /// Placing a stream's RTP timestamps on the sender's clock, which is what makes two streams of
@@ -40,9 +40,9 @@ namespace SharpRTSPClient.Tests
 
         private static readonly DateTime Anchor = new DateTime(2026, 9, 17, 12, 0, 0, DateTimeKind.Utc);
 
-        private static RtcpChannelState Channel(int clockRate)
+        private static ChannelState Channel(int clockRate)
         {
-            return new RtcpChannelState { ClockRate = clockRate };
+            return new ChannelState { ClockRate = clockRate };
         }
 
         [TestMethod]

@@ -94,7 +94,7 @@ namespace SharpRTSPServer
             {
                 if (_payloadType < 0)
                 {
-                    return RTSPServer.DYNAMIC_PAYLOAD_TYPE + ID;
+                    return RtspServer.DYNAMIC_PAYLOAD_TYPE + ID;
                 }
                 else
                 {
@@ -141,7 +141,7 @@ namespace SharpRTSPServer
             this.PPS = pps;
         }
 
-        public override StringBuilder BuildSDP(StringBuilder sdp)
+        public override StringBuilder BuildSdp(StringBuilder sdp)
         {
             // Each parameter set is optional, so only advertise the ones we actually have.
             string vps = VPS != null && VPS.Length > 0 ? "; sprop-vps=" + Convert.ToBase64String(VPS) : "";
@@ -227,11 +227,11 @@ namespace SharpRTSPServer
                         const bool rtpHasExtension = false;
                         const int rtpCsrcCount = 0;
 
-                        RTPPacketUtil.WriteHeader(rtpPacket.Span, RTPPacketUtil.RTP_VERSION,
+                        RtpPacketUtil.WriteHeader(rtpPacket.Span, RtpPacketUtil.RTP_VERSION,
                             rtpPadding, rtpHasExtension, rtpCsrcCount, lastNal && endBit == 1, PayloadType);
 
                         // sequence number and SSRC are set just before send
-                        RTPPacketUtil.WriteTS(rtpPacket.Span, rtpTimestamp);
+                        RtpPacketUtil.WriteTimestamp(rtpPacket.Span, rtpTimestamp);
 
                         // For H265 we need https://www.rfc-editor.org/rfc/rfc7798#section-4.4.3
 
@@ -269,13 +269,13 @@ namespace SharpRTSPServer
                     const bool rtpHasExtension = false;
                     const int rtpCsrcCount = 0;
 
-                    RTPPacketUtil.WriteHeader(rtpPacket.Span,
-                        RTPPacketUtil.RTP_VERSION,
+                    RtpPacketUtil.WriteHeader(rtpPacket.Span,
+                        RtpPacketUtil.RTP_VERSION,
                         rtpPadding,
                         rtpHasExtension, rtpCsrcCount, lastNal, PayloadType);
 
                     // sequence number and SSRC are set just before send
-                    RTPPacketUtil.WriteTS(rtpPacket.Span, rtpTimestamp);
+                    RtpPacketUtil.WriteTimestamp(rtpPacket.Span, rtpTimestamp);
 
                     // Now append the raw NAL
                     rawNal.CopyTo(rtpPacket.Slice(12));

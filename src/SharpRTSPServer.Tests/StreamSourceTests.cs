@@ -46,17 +46,17 @@ namespace SharpRTSPServer.Tests
         [TestMethod]
         public void StreamIdIsRequired()
         {
-            Assert.ThrowsExactly<ArgumentNullException>(() => new RTSPStreamSource(null, null, null));
-            Assert.ThrowsExactly<ArgumentNullException>(() => new RTSPStreamSource("", null, null));
-            Assert.ThrowsExactly<ArgumentNullException>(() => new RTSPStreamSource("   ", null, null));
+            Assert.ThrowsExactly<ArgumentNullException>(() => new RtspStreamSource(null, null, null));
+            Assert.ThrowsExactly<ArgumentNullException>(() => new RtspStreamSource("", null, null));
+            Assert.ThrowsExactly<ArgumentNullException>(() => new RtspStreamSource("   ", null, null));
         }
 
         [TestMethod]
         public void OverrideSDP_AddsAControlAttributeAfterEachMediaSection()
         {
-            var source = new RTSPStreamSource("stream1", null, null);
+            var source = new RtspStreamSource("stream1", null, null);
 
-            source.OverrideSDP(VideoAndAudioSdp);
+            source.OverrideSdp(VideoAndAudioSdp);
 
             var lines = source.Sdp.Split('\n').Select(l => l.Trim()).Where(l => l.Length > 0).ToList();
 
@@ -70,10 +70,10 @@ namespace SharpRTSPServer.Tests
         [TestMethod]
         public void OverrideSDP_LeavesAnSdpThatAlreadyHasControlAttributesAlone()
         {
-            var source = new RTSPStreamSource("stream1", null, null);
+            var source = new RtspStreamSource("stream1", null, null);
             string sdp = VideoOnlySdp + "a=control:trackID=7\n";
 
-            source.OverrideSDP(sdp);
+            source.OverrideSdp(sdp);
 
             Assert.AreEqual(sdp, source.Sdp);
             Assert.DoesNotContain("trackID=0", source.Sdp, "the existing control attribute must be left alone");
@@ -82,7 +82,7 @@ namespace SharpRTSPServer.Tests
         [TestMethod]
         public void OverrideSDP_IgnoresASessionLevelControlAttribute()
         {
-            var source = new RTSPStreamSource("stream1", null, null);
+            var source = new RtspStreamSource("stream1", null, null);
 
             // a session level a=control says nothing about the individual tracks; taking it as proof
             // that the SDP was already munged left every media section without a trackID
@@ -94,7 +94,7 @@ namespace SharpRTSPServer.Tests
                 "m=video 0 RTP/AVP 96\n" +
                 "a=rtpmap:96 H264/90000\n";
 
-            source.OverrideSDP(sdp);
+            source.OverrideSdp(sdp);
 
             StringAssert.Contains(source.Sdp, "a=control:trackID=0");
         }
@@ -102,7 +102,7 @@ namespace SharpRTSPServer.Tests
         [TestMethod]
         public void OverrideSDP_FillsInOnlyTheMediaSectionsThatAreMissingOne()
         {
-            var source = new RTSPStreamSource("stream1", null, null);
+            var source = new RtspStreamSource("stream1", null, null);
 
             string sdp =
                 "v=0\n" +
@@ -110,7 +110,7 @@ namespace SharpRTSPServer.Tests
                 "a=control:trackID=7\n" +
                 "m=audio 0 RTP/AVP 97\n";
 
-            source.OverrideSDP(sdp);
+            source.OverrideSdp(sdp);
 
             var lines = source.Sdp.Split('\n').Select(l => l.Trim()).Where(l => l.Length > 0).ToList();
 
@@ -126,17 +126,17 @@ namespace SharpRTSPServer.Tests
         [TestMethod]
         public void OverrideSDP_RejectsNull()
         {
-            var source = new RTSPStreamSource("stream1", null, null);
+            var source = new RtspStreamSource("stream1", null, null);
 
-            Assert.ThrowsExactly<ArgumentNullException>(() => source.OverrideSDP(null));
+            Assert.ThrowsExactly<ArgumentNullException>(() => source.OverrideSdp(null));
         }
 
         [TestMethod]
         public void OverrideSDP_CanBeAskedNotToTouchTheSdp()
         {
-            var source = new RTSPStreamSource("stream1", null, null);
+            var source = new RtspStreamSource("stream1", null, null);
 
-            source.OverrideSDP(VideoOnlySdp, mungleSDP: false);
+            source.OverrideSdp(VideoOnlySdp, mungleSdp: false);
 
             Assert.AreEqual(VideoOnlySdp, source.Sdp);
         }
@@ -149,7 +149,7 @@ namespace SharpRTSPServer.Tests
             video.Start();
             audio.Start();
 
-            var source = new RTSPStreamSource("stream1", video, audio);
+            var source = new RtspStreamSource("stream1", video, audio);
             source.Dispose();
 
             Assert.IsFalse(video.IsReady);

@@ -100,7 +100,7 @@ namespace SharpRTSPServer
         /// <summary>
         /// Build the SDP for this track.
         /// </summary>
-        public override StringBuilder BuildSDP(StringBuilder sdp)
+        public override StringBuilder BuildSdp(StringBuilder sdp)
         {
             if (!IsReady)
             {
@@ -160,9 +160,9 @@ namespace SharpRTSPServer
                     // telling a receiver where one ends.
                     bool rtpMarker = endOfFrame && isLastSample;
 
-                    RTPPacketUtil.WriteHeader(rtpPacket.Span,
-                        RTPPacketUtil.RTP_VERSION, false, false, 0, rtpMarker, PayloadType);
-                    RTPPacketUtil.WriteTS(rtpPacket.Span, rtpTimestamp);
+                    RtpPacketUtil.WriteHeader(rtpPacket.Span,
+                        RtpPacketUtil.RTP_VERSION, false, false, 0, rtpMarker, PayloadType);
+                    RtpPacketUtil.WriteTimestamp(rtpPacket.Span, rtpTimestamp);
 
                     frame.Slice(at, take).CopyTo(rtpPacket.Slice(12));
 

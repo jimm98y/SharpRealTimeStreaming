@@ -24,7 +24,7 @@ using Microsoft.Extensions.Hosting;
 using SrtpServerSample;
 
 var builder = Host.CreateApplicationBuilder(args);
-builder.Services.AddHostedService<RTSPServerWorker>();
+builder.Services.AddHostedService<RtspServerWorker>();
 
 var host = builder.Build();
 host.Run();

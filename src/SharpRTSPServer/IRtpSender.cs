@@ -45,7 +45,7 @@ namespace SharpRTSPServer
         /// <param name="streamType">Which track of it, by the track's ID.</param>
         /// <param name="rtpTimestamp">RTP timestamp in the timescale of the track.</param>
         /// <param name="packets">The packets, already built, and the memory holding them.</param>
-        void FeedInRawRTP(string streamID, int streamType, uint rtpTimestamp, RtpPackets packets);
+        void FeedInRawRtp(string streamID, int streamType, uint rtpTimestamp, RtpPackets packets);
 
         bool CanAcceptNewSamples(string streamID);
     }

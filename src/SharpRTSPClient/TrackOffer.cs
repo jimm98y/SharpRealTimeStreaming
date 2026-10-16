@@ -22,7 +22,7 @@
 namespace SharpRTSPClient
 {
     /// <summary>
-    /// A track the description offers, put to <see cref="RTSPClient.AcceptTrack"/> before the client
+    /// A track the description offers, put to <see cref="RtspClient.AcceptTrack"/> before the client
     /// sets it up.
     /// </summary>
     /// <remarks>
@@ -82,7 +82,7 @@ namespace SharpRTSPClient
         /// <remarks>
         /// The index this track will have if it is accepted, which is what
         /// <see cref="NewTrackEventArgs.TrackIndex"/> reports and what
-        /// <see cref="RTSPClient.SendRTCP(int, byte[])"/> takes.
+        /// <see cref="RtspClient.SendRtcp(int, byte[])"/> takes.
         /// </remarks>
         public int AcceptedSoFar { get; }
 
@@ -92,7 +92,7 @@ namespace SharpRTSPClient
         /// <remarks>
         /// Zero for the first video track, the first audio track and the first metadata track, which
         /// is what makes "the first of each kind" a condition rather than a setting - see
-        /// <see cref="RTSPClient.FirstOfEachKind"/>.
+        /// <see cref="RtspClient.FirstOfEachKind"/>.
         /// </remarks>
         public int AcceptedOfThisKind { get; }
 

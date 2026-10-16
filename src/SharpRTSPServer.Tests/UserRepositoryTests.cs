@@ -39,11 +39,11 @@ namespace SharpRTSPServer.Tests
         private static readonly byte[] Sps = { 0x67, 0x42, 0x00, 0x1E };
         private static readonly byte[] Pps = { 0x68, 0xCE, 0x3C, 0x80 };
 
-        private static RTSPServer NewServer(out int port, IUserRepository users)
+        private static RtspServer NewServer(out int port, IUserRepository users)
         {
             port = TestPorts.FindFree();
-            var server = new RTSPServer(port, users);
-            server.AddStreamSource(new RTSPStreamSource("stream1", new H264Track(Sps, Pps), null));
+            var server = new RtspServer(port, users);
+            server.AddStreamSource(new RtspStreamSource("stream1", new H264Track(Sps, Pps), null));
             server.StartListen();
             return server;
         }
@@ -130,9 +130,9 @@ namespace SharpRTSPServer.Tests
                 .Add("bob", "bob-password");
 
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, users);
-            server.AddStreamSource(new RTSPStreamSource("alices", new H264Track(Sps, Pps), null));
-            server.AddStreamSource(new RTSPStreamSource("bobs", new H264Track(Sps, Pps), null));
+            using var server = new RtspServer(port, users);
+            server.AddStreamSource(new RtspStreamSource("alices", new H264Track(Sps, Pps), null));
+            server.AddStreamSource(new RtspStreamSource("bobs", new H264Track(Sps, Pps), null));
             server.StartListen();
 
             server.AuthorizeStream += (s, e) =>
@@ -252,11 +252,11 @@ namespace SharpRTSPServer.Tests
                 .Add("bob", "bob-password");
 
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, users)
+            using var server = new RtspServer(port, users)
             {
                 AuthenticationScheme = RtspAuthenticationScheme.Basic,
             };
-            server.AddStreamSource(new RTSPStreamSource("stream1", new H264Track(Sps, Pps), null));
+            server.AddStreamSource(new RtspStreamSource("stream1", new H264Track(Sps, Pps), null));
             server.StartListen();
 
             // The test client answers a Digest challenge, not a Basic one, so the header is built

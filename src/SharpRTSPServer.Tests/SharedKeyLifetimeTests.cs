@@ -43,12 +43,12 @@ namespace SharpRTSPServer.Tests
         private static readonly byte[] Sps = { 0x67, 0x42, 0x00, 0x1E };
         private static readonly byte[] Pps = { 0x68, 0xCE, 0x3C, 0x80 };
 
-        private static RTSPServer NewServer(int port)
+        private static RtspServer NewServer(int port)
         {
-            var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"), false, null,
+            var server = new RtspServer(port, new InMemoryUserRepository("admin", "password"), false, null,
                 SrtpCryptoSuites.AES_CM_128_HMAC_SHA1_80, null);
 
-            server.AddStreamSource(new RTSPStreamSource("stream1",
+            server.AddStreamSource(new RtspStreamSource("stream1",
                 new H264Track(Sps, Pps) { RtpProfile = RtpProfiles.SAVP }, null)
             {
                 SharedSrtpKey = true,
@@ -173,11 +173,11 @@ namespace SharpRTSPServer.Tests
         {
             int port = TestPorts.FindFree();
 
-            var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"), false, null,
+            var server = new RtspServer(port, new InMemoryUserRepository("admin", "password"), false, null,
                 SrtpCryptoSuites.AES_CM_128_HMAC_SHA1_80, null);
 
             var videoTrack = new H264Track(Sps, Pps) { RtpProfile = RtpProfiles.SAVP };
-            server.AddStreamSource(new RTSPStreamSource("stream1", videoTrack, null) { SharedSrtpKey = true });
+            server.AddStreamSource(new RtspStreamSource("stream1", videoTrack, null) { SharedSrtpKey = true });
             server.StartListen();
 
             using (server)

@@ -41,7 +41,7 @@ namespace SharpRTSPServer.Tests
 
         private const string TcpTransport = "Transport: RTP/AVP/TCP;unicast;interleaved=0-1";
 
-        private readonly RTSPServer _server;
+        private readonly RtspServer _server;
         private readonly int _port;
 
         private string BaseUri => $"rtsp://127.0.0.1:{_port}/{StreamId}";
@@ -50,8 +50,8 @@ namespace SharpRTSPServer.Tests
         public RtspSessionSecurityTests()
         {
             _port = TestPorts.FindFree();
-            _server = new RTSPServer(_port, new InMemoryUserRepository(UserName, Password));
-            _server.AddStreamSource(new RTSPStreamSource(StreamId, new H264Track(Sps, Pps), null));
+            _server = new RtspServer(_port, new InMemoryUserRepository(UserName, Password));
+            _server.AddStreamSource(new RtspStreamSource(StreamId, new H264Track(Sps, Pps), null));
             _server.StartListen();
         }
 
@@ -220,9 +220,9 @@ namespace SharpRTSPServer.Tests
             string firstChallenge = first.Send("OPTIONS", BaseUri).Match("nonce=\"([^\"]+)\"");
 
             int otherPort = TestPorts.FindFree();
-            using (var otherServer = new RTSPServer(otherPort, new InMemoryUserRepository(UserName, Password)))
+            using (var otherServer = new RtspServer(otherPort, new InMemoryUserRepository(UserName, Password)))
             {
-                otherServer.AddStreamSource(new RTSPStreamSource(StreamId, new H264Track(Sps, Pps), null));
+                otherServer.AddStreamSource(new RtspStreamSource(StreamId, new H264Track(Sps, Pps), null));
                 otherServer.StartListen();
 
                 using var second = new RtspTestClient(otherPort, null, null);

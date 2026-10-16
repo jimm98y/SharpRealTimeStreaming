@@ -45,7 +45,7 @@ namespace SharpRTSPServer.Tests
             public override int PayloadType { get; set; } = 96;
             public override bool IsReady => true;
 
-            public override StringBuilder BuildSDP(StringBuilder sdp) => sdp;
+            public override StringBuilder BuildSdp(StringBuilder sdp) => sdp;
 
             public override void CreateRtpPackets(List<ReadOnlyMemory<byte>> samples, uint rtpTimestamp, RtpPackets packets)
             {

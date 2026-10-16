@@ -27,7 +27,7 @@ namespace SharpRTSPServer
     /// Says that a client is waiting for a picture it can start on.
     /// </summary>
     /// <remarks>
-    /// See <see cref="RTSPServer.KeyFrameNeeded"/> for when this is raised and what handling it is
+    /// See <see cref="RtspServer.KeyFrameNeeded"/> for when this is raised and what handling it is
     /// worth.
     /// </remarks>
     public class KeyFrameNeededEventArgs : EventArgs

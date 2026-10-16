@@ -86,17 +86,17 @@ namespace SharpRTSPClient.Tests
         {
             int port = FreePort();
 
-            using var server = new SharpRTSPServer.RTSPServer(port, new SharpRTSPServer.InMemoryUserRepository("admin", "password"));
+            using var server = new SharpRTSPServer.RtspServer(port, new SharpRTSPServer.InMemoryUserRepository("admin", "password"));
             var video = new SharpRTSPServer.H265Track(Vps, Sps, Pps);
-            server.AddStreamSource(new SharpRTSPServer.RTSPStreamSource("stream1", video, null));
+            server.AddStreamSource(new SharpRTSPServer.RtspStreamSource("stream1", video, null));
             server.StartListen();
 
-            using var client = new RTSPClient();
+            using var client = new RtspClient();
 
             int frames = 0;
             client.ReceivedData += (s, e) => Interlocked.Increment(ref frames);
 
-            client.Connect($"rtsp://127.0.0.1:{port}/stream1", RTPTransport.TCP, "admin", "password");
+            client.Connect($"rtsp://127.0.0.1:{port}/stream1", RtpTransport.TCP, "admin", "password");
             client.Play();
 
             // An IDR, which is what the parser waits for before it hands anything over, small enough

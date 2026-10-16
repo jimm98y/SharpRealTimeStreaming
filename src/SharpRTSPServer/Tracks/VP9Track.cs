@@ -83,7 +83,7 @@ namespace SharpRTSPServer
             {
                 if (_payloadType < 0)
                 {
-                    return RTSPServer.DYNAMIC_PAYLOAD_TYPE + ID;
+                    return RtspServer.DYNAMIC_PAYLOAD_TYPE + ID;
                 }
                 else
                 {
@@ -126,7 +126,7 @@ namespace SharpRTSPServer
             VideoClock = clock;
         }
 
-        public override StringBuilder BuildSDP(StringBuilder sdp)
+        public override StringBuilder BuildSdp(StringBuilder sdp)
         {
             sdp.Append($"m=video 0 RTP/{RtpProfile} {PayloadType}\r\n");
             sdp.Append($"a=control:trackID={ID}\r\n");
@@ -199,11 +199,11 @@ namespace SharpRTSPServer
 
                     // The marker is the end of the picture; with no spatial layers that is the end
                     // of its last frame.
-                    RTPPacketUtil.WriteHeader(span, RTPPacketUtil.RTP_VERSION,
+                    RtpPacketUtil.WriteHeader(span, RtpPacketUtil.RTP_VERSION,
                         false, false, 0, endOfFrame && isLastSample, PayloadType);
 
                     // sequence number and SSRC are set just before send
-                    RTPPacketUtil.WriteTS(span, rtpTimestamp);
+                    RtpPacketUtil.WriteTimestamp(span, rtpTimestamp);
 
                     //  0 1 2 3 4 5 6 7
                     // +-+-+-+-+-+-+-+-+

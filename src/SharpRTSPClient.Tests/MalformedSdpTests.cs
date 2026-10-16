@@ -48,14 +48,14 @@ namespace SharpRTSPClient.Tests
             using var server = new FakeRtspServer(sdp);
 
             var stops = new List<StoppedReason>();
-            using var client = new RTSPClient();
+            using var client = new RtspClient();
             client.Stopped += (s, e) => { lock (stops) stops.Add(e.Reason); };
 
             // These are about malformed descriptions, so the default is not enough: the video track
             // is the one under test and it must be the one taken.
             client.AcceptTrack = acceptTrack ?? (t => t.Kind == TrackKind.Video);
 
-            client.Connect(server.BaseUri, RTPTransport.TCP, "admin", "password",
+            client.Connect(server.BaseUri, RtpTransport.TCP, "admin", "password",
                 false, null, false);
 
             bool reachedPlay = server.WaitForRequest("PLAY", 3000);

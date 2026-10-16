@@ -100,7 +100,7 @@ namespace SharpRTSPServer
         /// <summary>
         /// Build the SDP for this track.
         /// </summary>
-        public override StringBuilder BuildSDP(StringBuilder sdp)
+        public override StringBuilder BuildSdp(StringBuilder sdp)
         {
             sdp.Append($"m=audio 0 RTP/{RtpProfile} {PayloadType}\r\n");
             sdp.Append($"a=control:trackID={ID}\r\n");
@@ -131,10 +131,10 @@ namespace SharpRTSPServer
                 // Audio has no frames to end, so every packet is the end of what it carries.
                 const bool rtpMarker = true;
 
-                RTPPacketUtil.WriteHeader(rtpPacket.Span,
-                    RTPPacketUtil.RTP_VERSION, rtpPadding, rtpHasExtension, rtpCsrcCount, rtpMarker, PayloadType);
+                RtpPacketUtil.WriteHeader(rtpPacket.Span,
+                    RtpPacketUtil.RTP_VERSION, rtpPadding, rtpHasExtension, rtpCsrcCount, rtpMarker, PayloadType);
 
-                RTPPacketUtil.WriteTS(rtpPacket.Span, rtpTimestamp);
+                RtpPacketUtil.WriteTimestamp(rtpPacket.Span, rtpTimestamp);
                 audio.CopyTo(rtpPacket.Slice(12));
 
             }

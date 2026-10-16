@@ -123,9 +123,9 @@ namespace SharpRTSPServer.Tests
         [TestMethod]
         public void FeedingSamplesAfterTheStreamSourceIsRemovedIsDropped()
         {
-            using var server = new RTSPServer(TestPorts.FindFree(), new InMemoryUserRepository("admin", "password"));
+            using var server = new RtspServer(TestPorts.FindFree(), new InMemoryUserRepository("admin", "password"));
             var track = new H264Track(new byte[] { 0x67, 0x42, 0x00, 0x1E }, new byte[] { 0x68, 0xCE, 0x3C, 0x80 });
-            var streamSource = new RTSPStreamSource("stream1", track, null);
+            var streamSource = new RtspStreamSource("stream1", track, null);
 
             server.AddStreamSource(streamSource);
             Assert.IsNotNull(track.Sink);

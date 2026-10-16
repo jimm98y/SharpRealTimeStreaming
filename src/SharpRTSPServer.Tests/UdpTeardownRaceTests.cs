@@ -119,16 +119,16 @@ namespace SharpRTSPServer.Tests
             int port = TestPorts.FindFree();
 
             using var server = protect
-                ? new RTSPServer(port, new InMemoryUserRepository("admin", "password"), false, null,
+                ? new RtspServer(port, new InMemoryUserRepository("admin", "password"), false, null,
                     SrtpCryptoSuites.AES_CM_128_HMAC_SHA1_80, logs)
-                : new RTSPServer(port, new InMemoryUserRepository("admin", "password"), false, null, logs);
+                : new RtspServer(port, new InMemoryUserRepository("admin", "password"), false, null, logs);
 
             server.SetRtpPortRange(53000, 53400);
 
             var videoTrack = protect
                 ? new H264Track(Sps, Pps) { RtpProfile = RtpProfiles.SAVP }
                 : new H264Track(Sps, Pps);
-            server.AddStreamSource(new RTSPStreamSource("stream1", videoTrack, null));
+            server.AddStreamSource(new RtspStreamSource("stream1", videoTrack, null));
             server.StartListen();
 
             string baseUri = $"rtsp://127.0.0.1:{port}/stream1";
@@ -212,13 +212,13 @@ namespace SharpRTSPServer.Tests
         public void ThePortsStillComeBackAtOnce()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
+            using var server = new RtspServer(port, new InMemoryUserRepository("admin", "password"));
 
             // one pair, so a second SETUP can only succeed if the first one's pair came back
             server.SetRtpPortRange(53400, 53402);
 
             var videoTrack = new H264Track(Sps, Pps);
-            server.AddStreamSource(new RTSPStreamSource("stream1", videoTrack, null));
+            server.AddStreamSource(new RtspStreamSource("stream1", videoTrack, null));
             server.StartListen();
 
             string baseUri = $"rtsp://127.0.0.1:{port}/stream1";

@@ -91,14 +91,14 @@ namespace SharpRTSPServer.Tests
         public void TheTwoTracksAgreeOnWhereTheyAreInTime()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
+            using var server = new RtspServer(port, new InMemoryUserRepository("admin", "password"));
 
             // A report on every frame, so the test does not have to run for half a minute to see one.
             server.RtcpSenderReportInterval = TimeSpan.FromMilliseconds(1);
 
             var video = new H264Track(Sps, Pps) { ID = 0 };
             var audio = new PCMUTrack { ID = 1 };
-            server.AddStreamSource(new RTSPStreamSource("stream1", video, audio));
+            server.AddStreamSource(new RtspStreamSource("stream1", video, audio));
             server.StartListen();
 
             string baseUri = $"rtsp://127.0.0.1:{port}/stream1";

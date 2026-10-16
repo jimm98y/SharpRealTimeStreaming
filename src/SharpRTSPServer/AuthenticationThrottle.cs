@@ -31,7 +31,7 @@ namespace SharpRTSPServer
     /// <para>
     /// A wrong password costs the client its connection, which already makes guessing slower than
     /// it would be on a connection it could keep. It does not make it slow: opening a TCP connection
-    /// is cheap, and up to <see cref="RTSPServer.MaxConnections"/> of them can be in flight at once,
+    /// is cheap, and up to <see cref="RtspServer.MaxConnections"/> of them can be in flight at once,
     /// so an attacker who can reconnect gets as many attempts as it has patience for.
     /// </para>
     /// <para>
@@ -216,7 +216,7 @@ namespace SharpRTSPServer
                 return null;
             }
 
-            return RTSPServer.MediaDestination(endPoint.Address);
+            return RtspServer.MediaDestination(endPoint.Address);
         }
     }
 }

@@ -64,7 +64,7 @@ namespace SharpRTSPServer
         /// </para>
         /// <para>
         /// The source's SSRC is picked up from the first packet forwarded and published as
-        /// <see cref="TrackBase.SSRC"/>, so the SETUP reply and the RTCP the server sends for this
+        /// <see cref="TrackBase.Ssrc"/>, so the SETUP reply and the RTCP the server sends for this
         /// track agree with the RTP. Set it before the first client sets up, otherwise that client is
         /// told the placeholder SSRC this track was constructed with.
         /// </para>
@@ -91,12 +91,12 @@ namespace SharpRTSPServer
             if (!PreserveSourceHeaders || rtpPacket.Length < RTP_HEADER_LENGTH)
                 return;
 
-            uint ssrc = RTPPacketUtil.ReadSSRC(rtpPacket);
+            uint ssrc = RtpPacketUtil.ReadSsrc(rtpPacket);
 
-            if (HasLearnedSourceSsrc && SSRC == ssrc)
+            if (HasLearnedSourceSsrc && Ssrc == ssrc)
                 return;
 
-            SSRC = ssrc;
+            Ssrc = ssrc;
             HasLearnedSourceSsrc = true;
         }
 
@@ -112,14 +112,14 @@ namespace SharpRTSPServer
         /// An SDP says what the media is - which codec, at what rate, with which parameters - and a
         /// track that forwards someone else's RTP knows none of that. It has the packets and nothing
         /// describing them. The description belongs to whatever produced the stream, so it is given
-        /// to the stream source with RTSPStreamSource.OverrideSDP rather than made up here.
+        /// to the stream source with RtspStreamSource.OverrideSdp rather than made up here.
         /// </remarks>
         /// <exception cref="InvalidOperationException">Always.</exception>
-        public override StringBuilder BuildSDP(StringBuilder sdp)
+        public override StringBuilder BuildSdp(StringBuilder sdp)
         {
             throw new InvalidOperationException(
                 $"A {nameof(ProxyTrack)} forwards RTP that something else described, so it cannot build an SDP. " +
-                $"Pass the description the source gave you to {nameof(RTSPStreamSource)}.OverrideSDP.");
+                $"Pass the description the source gave you to {nameof(RtspStreamSource)}.OverrideSdp.");
         }
 
         public void Start()

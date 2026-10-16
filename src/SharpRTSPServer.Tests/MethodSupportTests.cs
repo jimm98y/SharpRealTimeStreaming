@@ -39,10 +39,10 @@ namespace SharpRTSPServer.Tests
         private static readonly byte[] Sps = { 0x67, 0x42, 0x00, 0x1E };
         private static readonly byte[] Pps = { 0x68, 0xCE, 0x3C, 0x80 };
 
-        private static RTSPServer NewServer(int port)
+        private static RtspServer NewServer(int port)
         {
-            var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
-            server.AddStreamSource(new RTSPStreamSource("stream1", new H264Track(Sps, Pps), null));
+            var server = new RtspServer(port, new InMemoryUserRepository("admin", "password"));
+            server.AddStreamSource(new RtspStreamSource("stream1", new H264Track(Sps, Pps), null));
             server.StartListen();
             return server;
         }

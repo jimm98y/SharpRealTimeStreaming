@@ -96,7 +96,7 @@ namespace SharpRTSPServer
             {
                 if (_payloadType < 0)
                 {
-                    return RTSPServer.DYNAMIC_PAYLOAD_TYPE + ID;
+                    return RtspServer.DYNAMIC_PAYLOAD_TYPE + ID;
                 }
                 else
                 {
@@ -149,7 +149,7 @@ namespace SharpRTSPServer
             this.SEI = sei;
         }
 
-        public override StringBuilder BuildSDP(StringBuilder sdp)
+        public override StringBuilder BuildSdp(StringBuilder sdp)
         {
             string dci = "";
             string vps = "";
@@ -253,11 +253,11 @@ namespace SharpRTSPServer
                         const bool rtpHasExtension = false;
                         const int rtpCsrcCount = 0;
 
-                        RTPPacketUtil.WriteHeader(rtpPacket.Span, RTPPacketUtil.RTP_VERSION,
+                        RtpPacketUtil.WriteHeader(rtpPacket.Span, RtpPacketUtil.RTP_VERSION,
                             rtpPadding, rtpHasExtension, rtpCsrcCount, lastNal && endBit == 1, PayloadType);
 
                         // sequence number and SSRC are set just before send
-                        RTPPacketUtil.WriteTS(rtpPacket.Span, rtpTimestamp);
+                        RtpPacketUtil.WriteTimestamp(rtpPacket.Span, rtpTimestamp);
 
                         // For H266 we need https://www.rfc-editor.org/rfc/rfc9328.pdf
 
@@ -294,13 +294,13 @@ namespace SharpRTSPServer
                     const bool rtpHasExtension = false;
                     const int rtpCsrcCount = 0;
 
-                    RTPPacketUtil.WriteHeader(rtpPacket.Span,
-                        RTPPacketUtil.RTP_VERSION,
+                    RtpPacketUtil.WriteHeader(rtpPacket.Span,
+                        RtpPacketUtil.RTP_VERSION,
                         rtpPadding,
                         rtpHasExtension, rtpCsrcCount, lastNal, PayloadType);
 
                     // sequence number and SSRC are set just before send
-                    RTPPacketUtil.WriteTS(rtpPacket.Span, rtpTimestamp);
+                    RtpPacketUtil.WriteTimestamp(rtpPacket.Span, rtpTimestamp);
 
                     // Now append the raw NAL
                     rawNal.CopyTo(rtpPacket.Slice(12));

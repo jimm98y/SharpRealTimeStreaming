@@ -83,7 +83,7 @@ const string STREAM_ID = "stream1";
 
 bool keepLastKeyFrame = ReadKeepLastKeyFrame(config["KeepLastKeyFrame"]);
 
-using (var server = new RTSPServer(port, ReadUsers(config, "Users")))
+using (var server = new RtspServer(port, ReadUsers(config, "Users")))
 {
     server.AuthenticationScheme = ReadAuthenticationScheme(config["AllowBasicAuthentication"]);
 
@@ -106,8 +106,8 @@ using (var server = new RTSPServer(port, ReadUsers(config, "Users")))
             audioTask = RunUdpClient(rtspAudioTrack, new Uri(audioUri, UriKind.Absolute), cts.Token);
         }
 
-        var streamSource = new RTSPStreamSource(STREAM_ID, rtspVideoTrack, rtspAudioTrack);
-        streamSource.OverrideSDP(sdp, true);
+        var streamSource = new RtspStreamSource(STREAM_ID, rtspVideoTrack, rtspAudioTrack);
+        streamSource.OverrideSdp(sdp, true);
 
         // A client that arrives mid-group has nothing it can decode until the next keyframe.
         // Keeping the last one means it is given a picture straight away, and held on that
@@ -225,7 +225,7 @@ Task RunUdpClient(ProxyTrack track, Uri uri, CancellationToken cancellationToken
                     try
                     {
                         byte[] rtp = udpClient.Receive(ref remoteEndPoint);
-                        uint rtpTimestamp = RTPPacketUtil.ReadTS(rtp);
+                        uint rtpTimestamp = RtpPacketUtil.ReadTimestamp(rtp);
                         track.FeedInRawSamples(rtpTimestamp, new List<ReadOnlyMemory<byte>>() { rtp });
                     }
                     catch (Exception e)

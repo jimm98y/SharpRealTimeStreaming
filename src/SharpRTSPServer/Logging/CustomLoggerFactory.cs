@@ -30,7 +30,7 @@ namespace SharpRTSPServer.Logging
     /// <remarks>
     /// What a server builds for itself when it is not given an <see cref="ILoggerFactory"/>. The
     /// logger is looked up per message rather than captured, so
-    /// <see cref="RTSPServer.Logger"/> can be assigned after the server exists.
+    /// <see cref="RtspServer.Logger"/> can be assigned after the server exists.
     /// </remarks>
     public class CustomLoggerFactory : ILoggerFactory
     {
