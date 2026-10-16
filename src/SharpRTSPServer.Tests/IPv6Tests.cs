@@ -46,11 +46,11 @@ namespace SharpRTSPServer.Tests
         {
             // The one that used to become the empty string
             Assert.AreEqual("2001:db8::1",
-                RTSPServer.MediaDestination(IPAddress.Parse("2001:db8::1")));
+                RtspServer.MediaDestination(IPAddress.Parse("2001:db8::1")));
 
             // and the one the cutting was presumably meant for, which never had a port on it anyway
             Assert.AreEqual("192.168.1.10",
-                RTSPServer.MediaDestination(IPAddress.Parse("192.168.1.10")));
+                RtspServer.MediaDestination(IPAddress.Parse("192.168.1.10")));
         }
 
         [TestMethod]
@@ -61,10 +61,10 @@ namespace SharpRTSPServer.Tests
             var mapped = IPAddress.Parse("127.0.0.1").MapToIPv6();
 
             Assert.IsTrue(mapped.IsIPv4MappedToIPv6, "the test is about the mapped form");
-            Assert.AreEqual("127.0.0.1", RTSPServer.MediaDestination(mapped));
+            Assert.AreEqual("127.0.0.1", RtspServer.MediaDestination(mapped));
 
             // the mapping is how the listener describes it, not how the client is reached
-            Assert.AreEqual(AddressFamily.InterNetwork, RTSPServer.MediaFamily(mapped));
+            Assert.AreEqual(AddressFamily.InterNetwork, RtspServer.MediaFamily(mapped));
         }
 
         [TestMethod]
@@ -74,14 +74,14 @@ namespace SharpRTSPServer.Tests
             // wrote it down.
             var scoped = IPAddress.Parse("fe80::1%12");
 
-            Assert.AreEqual("fe80::1", RTSPServer.MediaDestination(scoped));
+            Assert.AreEqual("fe80::1", RtspServer.MediaDestination(scoped));
         }
 
         [TestMethod]
         public void MediaGoesOutInTheFamilyTheClientArrivedOn()
         {
-            Assert.AreEqual(AddressFamily.InterNetworkV6, RTSPServer.MediaFamily(IPAddress.Parse("2001:db8::1")));
-            Assert.AreEqual(AddressFamily.InterNetwork, RTSPServer.MediaFamily(IPAddress.Parse("10.0.0.5")));
+            Assert.AreEqual(AddressFamily.InterNetworkV6, RtspServer.MediaFamily(IPAddress.Parse("2001:db8::1")));
+            Assert.AreEqual(AddressFamily.InterNetwork, RtspServer.MediaFamily(IPAddress.Parse("10.0.0.5")));
         }
 
         [TestMethod]
@@ -94,8 +94,8 @@ namespace SharpRTSPServer.Tests
             }
 
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
-            server.AddStreamSource(new RTSPStreamSource("stream1", new H264Track(Sps, Pps), null));
+            using var server = new RtspServer(port, new InMemoryUserRepository("admin", "password"));
+            server.AddStreamSource(new RtspStreamSource("stream1", new H264Track(Sps, Pps), null));
             server.StartListen();
 
             // over the loopback of the other family
@@ -127,11 +127,11 @@ namespace SharpRTSPServer.Tests
             }
 
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
+            using var server = new RtspServer(port, new InMemoryUserRepository("admin", "password"));
             server.SetRtpPortRange(55200, 55400);
 
             var videoTrack = new H264Track(Sps, Pps);
-            server.AddStreamSource(new RTSPStreamSource("stream1", videoTrack, null));
+            server.AddStreamSource(new RtspStreamSource("stream1", videoTrack, null));
             server.StartListen();
 
             // where this client wants its RTP, on the loopback of the family it connected over

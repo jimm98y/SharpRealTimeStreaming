@@ -67,12 +67,12 @@ namespace SharpRTSPClient.Tests
         {
             int port = FreePort();
 
-            using var server = new SharpRTSPServer.RTSPServer(port, new SharpRTSPServer.InMemoryUserRepository("admin", "password"));
+            using var server = new SharpRTSPServer.RtspServer(port, new SharpRTSPServer.InMemoryUserRepository("admin", "password"));
             var video = new SharpRTSPServer.H264Track(Sps, Pps);
-            server.AddStreamSource(new SharpRTSPServer.RTSPStreamSource("stream1", video, null));
+            server.AddStreamSource(new SharpRTSPServer.RtspStreamSource("stream1", video, null));
             server.StartListen();
 
-            using var client = new RTSPClient();
+            using var client = new RtspClient();
 
             int frames = 0;
             var arrived = new ManualResetEventSlim();
@@ -83,7 +83,7 @@ namespace SharpRTSPClient.Tests
                 arrived.Set();
             };
 
-            client.Connect($"rtsp://127.0.0.1:{port}/stream1", RTPTransport.TCP, "admin", "password");
+            client.Connect($"rtsp://127.0.0.1:{port}/stream1", RtpTransport.TCP, "admin", "password");
             client.Play();
 
             // An IDR, which is what the client's parser waits for before it will hand anything over.
@@ -151,18 +151,18 @@ namespace SharpRTSPClient.Tests
             {
                 int port = FreePort();
 
-                using var server = new SharpRTSPServer.RTSPServer(port, new SharpRTSPServer.InMemoryUserRepository("admin", "password"));
+                using var server = new SharpRTSPServer.RtspServer(port, new SharpRTSPServer.InMemoryUserRepository("admin", "password"));
                 // H265, because that is the parser which reports every NAL at trace level.
                 var video = new SharpRTSPServer.H265Track(HevcVps, HevcSps, HevcPps);
-                server.AddStreamSource(new SharpRTSPServer.RTSPStreamSource("stream1", video, null));
+                server.AddStreamSource(new SharpRTSPServer.RtspStreamSource("stream1", video, null));
                 server.StartListen();
 
-                using var client = new RTSPClient { Logger = counting };
+                using var client = new RtspClient { Logger = counting };
 
                 int frames = 0;
                 client.ReceivedData += (s, e) => Interlocked.Increment(ref frames);
 
-                client.Connect($"rtsp://127.0.0.1:{port}/stream1", RTPTransport.TCP, "admin", "password");
+                client.Connect($"rtsp://127.0.0.1:{port}/stream1", RtpTransport.TCP, "admin", "password");
                 client.Play();
 
                 var idr = new byte[600];

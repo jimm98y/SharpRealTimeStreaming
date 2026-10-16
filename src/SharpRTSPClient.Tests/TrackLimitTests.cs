@@ -62,7 +62,7 @@ namespace SharpRTSPClient.Tests
         private static int PortsHeldAfterDescribing(string sdp, int maxTracks)
         {
             using var server = new FakeRtspServer(SdpHeader + sdp);
-            using var client = new RTSPClient { MaxTracks = maxTracks, AutoPlay = false };
+            using var client = new RtspClient { MaxTracks = maxTracks, AutoPlay = false };
 
             var settled = new ManualResetEventSlim(false);
             client.Stopped += (s, e) => settled.Set();
@@ -71,7 +71,7 @@ namespace SharpRTSPClient.Tests
             // UDP, so a transport that is built binds a real pair of ports out of a real range.
             // Its own corner of the range, clear of the one the other tests take from.
             client.SetRtpPortRange(53000, 53100);
-            client.Connect(server.BaseUri, RTPTransport.UDP);
+            client.Connect(server.BaseUri, RtpTransport.UDP);
 
             settled.Wait(5000);
 
@@ -103,13 +103,13 @@ namespace SharpRTSPClient.Tests
         public void ADescriptionCannotOfferMoreTracksThanWeWillTakeOn()
         {
             using var server = new FakeRtspServer(SdpHeader + ManyUnplayableVideoSections(40));
-            using var client = new RTSPClient { MaxTracks = 8, AutoPlay = false };
+            using var client = new RtspClient { MaxTracks = 8, AutoPlay = false };
 
             var settled = new ManualResetEventSlim(false);
             client.Stopped += (s, e) => settled.Set();
             client.SetupMessageCompleted += (s, e) => settled.Set();
 
-            client.Connect(server.BaseUri, RTPTransport.TCP);
+            client.Connect(server.BaseUri, RtpTransport.TCP);
             settled.Wait(5000);
 
             Assert.IsLessThanOrEqualTo(8, client.Tracks.Length,
@@ -128,7 +128,7 @@ namespace SharpRTSPClient.Tests
                 "a=control:trackID=0\r\n";
 
             using var server = new FakeRtspServer(SdpHeader + sdp);
-            using var client = new RTSPClient { AutoPlay = false };
+            using var client = new RtspClient { AutoPlay = false };
 
             string codec = null;
             var settled = new ManualResetEventSlim(false);
@@ -136,7 +136,7 @@ namespace SharpRTSPClient.Tests
             client.Stopped += (s, e) => settled.Set();
             client.SetupMessageCompleted += (s, e) => settled.Set();
 
-            client.Connect(server.BaseUri, RTPTransport.TCP);
+            client.Connect(server.BaseUri, RtpTransport.TCP);
             settled.Wait(5000);
 
             Assert.AreEqual("H264", codec, "a stream this client can play still plays");

@@ -40,7 +40,7 @@ namespace SharpRTSPClient.Tests
         [DataRow("rtsp://camera.local:8554/")]
         public void SameHostSchemeAndPortIsAccepted(string candidate)
         {
-            Assert.IsTrue(RTSPClient.IsSameOrigin(Connected, new Uri(candidate)));
+            Assert.IsTrue(RtspClient.IsSameOrigin(Connected, new Uri(candidate)));
         }
 
         [TestMethod]
@@ -50,15 +50,15 @@ namespace SharpRTSPClient.Tests
         [DataRow("http://camera.local:8554/stream1")]
         public void AnythingPointingElsewhereIsRejected(string candidate)
         {
-            Assert.IsFalse(RTSPClient.IsSameOrigin(Connected, new Uri(candidate)));
+            Assert.IsFalse(RtspClient.IsSameOrigin(Connected, new Uri(candidate)));
         }
 
         [TestMethod]
         public void NullsAreNotConsideredSameOrigin()
         {
-            Assert.IsFalse(RTSPClient.IsSameOrigin(Connected, null));
-            Assert.IsFalse(RTSPClient.IsSameOrigin(null, Connected));
-            Assert.IsFalse(RTSPClient.IsSameOrigin(null, null));
+            Assert.IsFalse(RtspClient.IsSameOrigin(Connected, null));
+            Assert.IsFalse(RtspClient.IsSameOrigin(null, Connected));
+            Assert.IsFalse(RtspClient.IsSameOrigin(null, null));
         }
 
         [TestMethod]
@@ -68,7 +68,7 @@ namespace SharpRTSPClient.Tests
             var implicitPort = new Uri("rtsp://camera.local/stream1");
             var explicitPort = new Uri("rtsp://camera.local:554/stream1");
 
-            Assert.IsTrue(RTSPClient.IsSameOrigin(implicitPort, explicitPort));
+            Assert.IsTrue(RtspClient.IsSameOrigin(implicitPort, explicitPort));
         }
     }
 }

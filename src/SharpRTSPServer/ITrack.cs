@@ -37,7 +37,7 @@ namespace SharpRTSPServer
     {
         RtpProfiles RtpProfile { get; set; }
 
-        uint SSRC { get; set; }
+        uint Ssrc { get; set; }
 
         IRtpSender Sink { get; set; }
 
@@ -78,7 +78,7 @@ namespace SharpRTSPServer
         /// </summary>
         /// <param name="sdp">SDP <see cref="StringBuilder"/>.</param>
         /// <returns><see cref="StringBuilder"/>.</returns>
-        StringBuilder BuildSDP(StringBuilder sdp);
+        StringBuilder BuildSdp(StringBuilder sdp);
 
         /// <summary>
         /// Creates RTP packets.

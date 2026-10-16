@@ -148,10 +148,10 @@ namespace SharpRTSPServer.Tests
             var first = new Recorder();
             var second = new Recorder();
 
-            using var one = new RTSPServer(TestPorts.FindFree(), new InMemoryUserRepository("admin", "password")) { Logger = first };
-            using var two = new RTSPServer(TestPorts.FindFree(), new InMemoryUserRepository("admin", "password")) { Logger = second };
+            using var one = new RtspServer(TestPorts.FindFree(), new InMemoryUserRepository("admin", "password")) { Logger = first };
+            using var two = new RtspServer(TestPorts.FindFree(), new InMemoryUserRepository("admin", "password")) { Logger = second };
 
-            one.AddStreamSource(new RTSPStreamSource("stream1", new H264Track(Sps, Pps), null));
+            one.AddStreamSource(new RtspStreamSource("stream1", new H264Track(Sps, Pps), null));
 
             one.StartListen();
             two.StartListen();
@@ -168,7 +168,7 @@ namespace SharpRTSPServer.Tests
         [TestMethod]
         public void ANullLoggerSaysNothingAndReportsEveryLevelOff()
         {
-            using var server = new RTSPServer(TestPorts.FindFree(), new InMemoryUserRepository("admin", "password")) { Logger = NullLog.Instance };
+            using var server = new RtspServer(TestPorts.FindFree(), new InMemoryUserRepository("admin", "password")) { Logger = NullLog.Instance };
 
             Assert.IsFalse(server.Logger.IsErrorEnabled);
             Assert.IsFalse(server.Logger.IsTraceEnabled);
@@ -242,12 +242,12 @@ namespace SharpRTSPServer.Tests
         public void ATrackReportsWhereItsServerDoes()
         {
             var log = new Recorder();
-            using var server = new RTSPServer(TestPorts.FindFree(), new InMemoryUserRepository("admin", "password")) { Logger = log };
+            using var server = new RtspServer(TestPorts.FindFree(), new InMemoryUserRepository("admin", "password")) { Logger = log };
 
             var opus = new OpusTrack { ID = 1, SamplingRate = 16000, Channels = 1 }; // neither is what Opus allows
-            server.AddStreamSource(new RTSPStreamSource("stream1", new H264Track(Sps, Pps), opus));
+            server.AddStreamSource(new RtspStreamSource("stream1", new H264Track(Sps, Pps), opus));
 
-            opus.BuildSDP(new System.Text.StringBuilder());
+            opus.BuildSdp(new System.Text.StringBuilder());
 
             Assert.IsGreaterThanOrEqualTo(2, log.Warnings.Count,
                 "the track should have complained about the sampling rate and the channel count");
@@ -259,13 +259,13 @@ namespace SharpRTSPServer.Tests
             var first = new Recorder();
             var second = new Recorder();
 
-            using var server = new RTSPServer(TestPorts.FindFree(), new InMemoryUserRepository("admin", "password")) { Logger = first };
+            using var server = new RtspServer(TestPorts.FindFree(), new InMemoryUserRepository("admin", "password")) { Logger = first };
 
             var opus = new OpusTrack { ID = 1, SamplingRate = 16000, Channels = 1 };
-            server.AddStreamSource(new RTSPStreamSource("stream1", new H264Track(Sps, Pps), opus));
+            server.AddStreamSource(new RtspStreamSource("stream1", new H264Track(Sps, Pps), opus));
 
             server.Logger = second;
-            opus.BuildSDP(new System.Text.StringBuilder());
+            opus.BuildSdp(new System.Text.StringBuilder());
 
             Assert.AreEqual(0, first.Warnings.Count, "the track should no longer be writing to the old one");
             Assert.IsGreaterThanOrEqualTo(2, second.Warnings.Count);

@@ -55,7 +55,7 @@ namespace SharpRTSPServer.Tests
             foreach (var rate in new[] { G726BitRate.Rate16, G726BitRate.Rate24, G726BitRate.Rate32, G726BitRate.Rate40 })
             {
                 var track = new G726Track(rate);
-                string sdp = track.BuildSDP(new StringBuilder()).ToString();
+                string sdp = track.BuildSdp(new StringBuilder()).ToString();
 
                 Assert.Contains($"G726-{(int)rate}/8000", sdp, "the rate belongs in the codec name: " + sdp);
                 Assert.Contains("m=audio", sdp);
@@ -100,7 +100,7 @@ namespace SharpRTSPServer.Tests
         public void AmrSaysItIsOctetAlignedBecauseAReceiverCannotTell()
         {
             var track = new AMRTrack();
-            string sdp = track.BuildSDP(new StringBuilder()).ToString();
+            string sdp = track.BuildSdp(new StringBuilder()).ToString();
 
             // Without this a receiver reads the payload bit packed and makes nothing of it.
             Assert.Contains("octet-align=1", sdp, sdp);
@@ -110,7 +110,7 @@ namespace SharpRTSPServer.Tests
         [TestMethod]
         public void AmrWidebandIsADifferentCodecAtADifferentRate()
         {
-            string sdp = new AMRTrack(wideband: true).BuildSDP(new StringBuilder()).ToString();
+            string sdp = new AMRTrack(wideband: true).BuildSdp(new StringBuilder()).ToString();
 
             Assert.Contains("AMR-WB/16000", sdp, sdp);
         }
@@ -212,7 +212,7 @@ namespace SharpRTSPServer.Tests
             byte[] config = { 0x00, 0x00, 0x01, 0xB0, 0x01, 0x00, 0x00, 0x01, 0xB5 };
             var track = new MP4VTrack(config) { PayloadType = 96, ProfileLevelId = 1 };
 
-            string sdp = track.BuildSDP(new StringBuilder()).ToString();
+            string sdp = track.BuildSdp(new StringBuilder()).ToString();
 
             Assert.Contains("MP4V-ES/90000", sdp, sdp);
             Assert.Contains("profile-level-id=1", sdp, sdp);
@@ -228,7 +228,7 @@ namespace SharpRTSPServer.Tests
             var track = new MP4VTrack();
 
             Assert.IsFalse(track.IsReady, "a track with nothing to decode by is not ready");
-            Assert.ThrowsExactly<InvalidOperationException>(() => track.BuildSDP(new StringBuilder()));
+            Assert.ThrowsExactly<InvalidOperationException>(() => track.BuildSdp(new StringBuilder()));
         }
 
         [TestMethod]

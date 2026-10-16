@@ -50,21 +50,21 @@ namespace SharpRTSPServer.Tests
         /// The video track these tests add, which is the first one they add.
         /// </summary>
         /// <remarks>
-        /// By position, not by kind. RTSPStreamSource used to answer "the video track" itself, which
+        /// By position, not by kind. RtspStreamSource used to answer "the video track" itself, which
         /// is a question with no answer for a stream carrying two of them - the test knows which one
         /// it put there.
         /// </remarks>
-        private static ProxyTrack VideoOf(RTSPStreamSource source) => (ProxyTrack)source.Tracks[0];
+        private static ProxyTrack VideoOf(RtspStreamSource source) => (ProxyTrack)source.Tracks[0];
 
         /// <summary>The audio track these tests add, which is the second one they add.</summary>
-        private static ProxyTrack AudioOf(RTSPStreamSource source) => (ProxyTrack)source.Tracks[1];
+        private static ProxyTrack AudioOf(RtspStreamSource source) => (ProxyTrack)source.Tracks[1];
 
-        private static RTSPStreamSource NewSource(string sdp)
+        private static RtspStreamSource NewSource(string sdp)
         {
-            var source = new RTSPStreamSource("stream1",
+            var source = new RtspStreamSource("stream1",
                 new ProxyTrack(TrackType.Video),
                 new ProxyTrack(TrackType.Audio));
-            source.OverrideSDP(sdp, true);
+            source.OverrideSdp(sdp, true);
             return source;
         }
 
@@ -82,7 +82,7 @@ namespace SharpRTSPServer.Tests
         [TestMethod]
         public void AGeneratedSdpStillUsesTrackIds()
         {
-            var source = new RTSPStreamSource("stream1", new H264Track(Sps, Pps), new AACTrack(new byte[] { 0x12, 0x10 }, 44100, 2));
+            var source = new RtspStreamSource("stream1", new H264Track(Sps, Pps), new AACTrack(new byte[] { 0x12, 0x10 }, 44100, 2));
 
             // Not the ProxyTracks the other tests use, so the tracks are taken as they were added.
             Assert.AreEqual("trackID=0", source.GetTrackControl(source.Tracks[0]));
@@ -93,7 +93,7 @@ namespace SharpRTSPServer.Tests
         public void SetupFindsATrackByItsOwnControlAttribute()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
+            using var server = new RtspServer(port, new InMemoryUserRepository("admin", "password"));
 
             var source = NewSource(AudioFirstSdp);
             var videoTrack = VideoOf(source);
@@ -123,7 +123,7 @@ namespace SharpRTSPServer.Tests
         public void RtpInfoNamesTheControlUrlTheSdpAdvertised()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
+            using var server = new RtspServer(port, new InMemoryUserRepository("admin", "password"));
 
             var source = NewSource(AudioFirstSdp);
             VideoOf(source).Start();
@@ -152,13 +152,13 @@ namespace SharpRTSPServer.Tests
         public void CryptoGoesIntoTheSectionThatBelongsToTheTrack()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"), false, null,
+            using var server = new RtspServer(port, new InMemoryUserRepository("admin", "password"), false, null,
                 SrtpCryptoSuites.AES_CM_128_HMAC_SHA1_80, null);
 
-            var source = new RTSPStreamSource("stream1",
+            var source = new RtspStreamSource("stream1",
                 new ProxyTrack(TrackType.Video) { RtpProfile = RtpProfiles.SAVP },
                 new ProxyTrack(TrackType.Audio) { RtpProfile = RtpProfiles.SAVP });
-            source.OverrideSDP(AudioFirstSavpSdp, true);
+            source.OverrideSdp(AudioFirstSavpSdp, true);
             VideoOf(source).Start();
             AudioOf(source).Start();
             server.AddStreamSource(source);

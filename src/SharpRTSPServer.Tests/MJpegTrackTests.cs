@@ -259,7 +259,7 @@ namespace SharpRTSPServer.Tests
         {
             var track = new MJpegTrack { ID = 0 };
 
-            string sdp = track.BuildSDP(new System.Text.StringBuilder()).ToString();
+            string sdp = track.BuildSdp(new System.Text.StringBuilder()).ToString();
 
             StringAssert.Contains(sdp, "m=video 0 RTP/AVP 26");
             StringAssert.Contains(sdp, "a=control:trackID=0");

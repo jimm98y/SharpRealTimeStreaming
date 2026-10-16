@@ -47,12 +47,12 @@ namespace SharpRTSPClient.Tests
             };
 
             var stops = new List<StoppedReason>();
-            using var client = new RTSPClient();
+            using var client = new RtspClient();
             client.Stopped += (s, e) => { lock (stops) stops.Add(e.Reason); };
 
             client.AcceptTrack = t => t.Kind == TrackKind.Video;
 
-            client.Connect(server.BaseUri, RTPTransport.TCP, "admin", "password",
+            client.Connect(server.BaseUri, RtpTransport.TCP, "admin", "password",
                 false, null, false);
 
             // The client used to treat any 401 to an authorized request as a wrong password and stop
@@ -79,12 +79,12 @@ namespace SharpRTSPClient.Tests
             };
 
             var stops = new List<StoppedReason>();
-            using var client = new RTSPClient();
+            using var client = new RtspClient();
             client.Stopped += (s, e) => { lock (stops) stops.Add(e.Reason); };
 
             client.AcceptTrack = t => t.Kind == TrackKind.Video;
 
-            client.Connect(server.BaseUri, RTPTransport.TCP, "admin", "password",
+            client.Connect(server.BaseUri, RtpTransport.TCP, "admin", "password",
                 false, null, false);
 
             var deadline = DateTime.UtcNow.AddSeconds(8);

@@ -43,7 +43,7 @@ namespace SharpRTSPServer.Tests
         /// Plays a stream and hands back the SDP and the first RTP packet that arrived on a track.
         /// </summary>
         private static (string Sdp, byte[] FirstPacket) Play(
-            RTSPServer server, int port, int trackId, Action feed)
+            RtspServer server, int port, int trackId, Action feed)
         {
             string baseUri = $"rtsp://127.0.0.1:{port}/stream1";
 
@@ -82,10 +82,10 @@ namespace SharpRTSPServer.Tests
         public void G726IsDescribedAndCarried()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
+            using var server = new RtspServer(port, new InMemoryUserRepository("admin", "password"));
 
             var audio = new G726Track(G726BitRate.Rate24);
-            server.AddStreamSource(new RTSPStreamSource("stream1", new H264Track(Sps, Pps), audio));
+            server.AddStreamSource(new RtspStreamSource("stream1", new H264Track(Sps, Pps), audio));
             server.StartListen();
 
             byte[] adpcm = { 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF };
@@ -106,10 +106,10 @@ namespace SharpRTSPServer.Tests
         public void AmrIsDescribedAndCarried()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
+            using var server = new RtspServer(port, new InMemoryUserRepository("admin", "password"));
 
             var audio = new AMRTrack();
-            server.AddStreamSource(new RTSPStreamSource("stream1", new H264Track(Sps, Pps), audio));
+            server.AddStreamSource(new RtspStreamSource("stream1", new H264Track(Sps, Pps), audio));
             server.StartListen();
 
             // frame type 7, which carries 31 bytes of speech
@@ -136,12 +136,12 @@ namespace SharpRTSPServer.Tests
         public void Mp4vIsDescribedAndCarried()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
+            using var server = new RtspServer(port, new InMemoryUserRepository("admin", "password"));
 
             byte[] config = { 0x00, 0x00, 0x01, 0xB0, 0xF3, 0x00, 0x00, 0x01, 0xB5 };
             var video = new MP4VTrack(config);
 
-            server.AddStreamSource(new RTSPStreamSource("stream1", video, null));
+            server.AddStreamSource(new RtspStreamSource("stream1", video, null));
             server.StartListen();
 
             byte[] frame = Enumerable.Range(0, 400).Select(i => (byte)i).ToArray();
@@ -164,11 +164,11 @@ namespace SharpRTSPServer.Tests
         public void Vp9IsDescribedAndCarried()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
+            using var server = new RtspServer(port, new InMemoryUserRepository("admin", "password"));
 
             var video = new VP9Track();
 
-            server.AddStreamSource(new RTSPStreamSource("stream1", video, null));
+            server.AddStreamSource(new RtspStreamSource("stream1", video, null));
             server.StartListen();
 
             byte[] frame = VP9TrackTests.KeyFrame(640, 360, 400);
@@ -195,9 +195,9 @@ namespace SharpRTSPServer.Tests
             // It forwards RTP that something else described, so there is nothing here to build an
             // SDP from - and saying so beats a NotImplementedException, which reads like an oversight.
             var complaint = Assert.ThrowsExactly<InvalidOperationException>(
-                () => proxy.BuildSDP(new System.Text.StringBuilder()));
+                () => proxy.BuildSdp(new System.Text.StringBuilder()));
 
-            Assert.Contains("OverrideSDP", complaint.Message,
+            Assert.Contains("OverrideSdp", complaint.Message,
                 "the message should say where the description is meant to come from");
         }
     }

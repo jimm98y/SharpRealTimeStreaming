@@ -72,7 +72,7 @@ namespace SharpRTSPServer
             {
                 if (_payloadType < 0)
                 {
-                    return RTSPServer.DYNAMIC_PAYLOAD_TYPE + ID;
+                    return RtspServer.DYNAMIC_PAYLOAD_TYPE + ID;
                 }
                 else
                 {
@@ -97,7 +97,7 @@ namespace SharpRTSPServer
         /// </summary>
         /// <param name="sdp">SDP <see cref="StringBuilder"/>.</param>
         /// <returns><see cref="StringBuilder"/>.</returns>
-        public override StringBuilder BuildSDP(StringBuilder sdp)
+        public override StringBuilder BuildSdp(StringBuilder sdp)
         {
             if (SamplingRate != 48000)
             {
@@ -140,11 +140,11 @@ namespace SharpRTSPServer
                 int rtpCsrcCount = 0;
                 const bool rtpMarker = true; // always 1 as this is the last (and only) RTP packet for this audio timestamp
 
-                RTPPacketUtil.WriteHeader(rtpPacket.Span,
-                    RTPPacketUtil.RTP_VERSION, rtpPadding, rtpHasExtension, rtpCsrcCount, rtpMarker, PayloadType);
+                RtpPacketUtil.WriteHeader(rtpPacket.Span,
+                    RtpPacketUtil.RTP_VERSION, rtpPadding, rtpHasExtension, rtpCsrcCount, rtpMarker, PayloadType);
 
                 // sequence number is set just before send
-                RTPPacketUtil.WriteTS(rtpPacket.Span, rtpTimestamp);
+                RtpPacketUtil.WriteTimestamp(rtpPacket.Span, rtpTimestamp);
 
                 // Now append the audio packet
                 audioPacket.CopyTo(rtpPacket.Slice(12));

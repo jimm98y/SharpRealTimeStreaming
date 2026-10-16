@@ -71,7 +71,7 @@ const string STREAM_ID = "stream1";
 
 bool keepLastKeyFrame = ReadKeepLastKeyFrame(config["KeepLastKeyFrame"]);
 
-using (var server = new RTSPServer(port, ReadUsers(config, "Users")))
+using (var server = new RtspServer(port, ReadUsers(config, "Users")))
 {
     server.AuthenticationScheme = ReadAuthenticationScheme(config["AllowBasicAuthentication"]);
 
@@ -83,8 +83,8 @@ using (var server = new RTSPServer(port, ReadUsers(config, "Users")))
     rtspVideoTrack = new ProxyTrack(TrackType.Video) { PreserveSourceHeaders = true };
     rtspAudioTrack = new ProxyTrack(TrackType.Audio) { PreserveSourceHeaders = true };
 
-    var streamSource = new RTSPStreamSource(STREAM_ID, rtspVideoTrack, rtspAudioTrack);
-    streamSource.OverrideSDP(rtspProtocolParser.SDP, true);
+    var streamSource = new RtspStreamSource(STREAM_ID, rtspVideoTrack, rtspAudioTrack);
+    streamSource.OverrideSdp(rtspProtocolParser.SDP, true);
 
     // A client that arrives mid-group has nothing it can decode until the next keyframe.
     // Keeping the last one means it is given a picture straight away, and held on that
@@ -191,7 +191,7 @@ void ParseData(byte[] data, object header, uint seconds, uint microseconds)
                 {
                     Thread.Sleep(sleep);
                 }
-                rtspVideoTrack?.FeedInRawSamples(RTPPacketUtil.ReadTS(data), new List<ReadOnlyMemory<byte>> { data });
+                rtspVideoTrack?.FeedInRawSamples(RtpPacketUtil.ReadTimestamp(data), new List<ReadOnlyMemory<byte>> { data });
             }
             else if(rtspProtocolParser.Ports.Count > 1 && rtspProtocolParser.Ports[1].Contains(udp.SourcePort) && rtspProtocolParser.Ports[1].Contains(udp.DestinationPort))
             {
@@ -208,7 +208,7 @@ void ParseData(byte[] data, object header, uint seconds, uint microseconds)
                     Thread.Sleep(sleep);
                 }
 
-                rtspAudioTrack?.FeedInRawSamples(RTPPacketUtil.ReadTS(data), new List<ReadOnlyMemory<byte>> { data });
+                rtspAudioTrack?.FeedInRawSamples(RtpPacketUtil.ReadTimestamp(data), new List<ReadOnlyMemory<byte>> { data });
             }
         }
     }

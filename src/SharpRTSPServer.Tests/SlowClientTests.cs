@@ -68,9 +68,9 @@ namespace SharpRTSPServer.Tests
         public void AClientThatStopsReadingDoesNotBlockAnotherClientsRequests()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
+            using var server = new RtspServer(port, new InMemoryUserRepository("admin", "password"));
             var videoTrack = new H264Track(Sps, Pps);
-            server.AddStreamSource(new RTSPStreamSource("stream1", videoTrack, null));
+            server.AddStreamSource(new RtspStreamSource("stream1", videoTrack, null));
             server.StartListen();
 
             string baseUri = "rtsp://127.0.0.1:" + port + "/stream1";
@@ -121,12 +121,12 @@ namespace SharpRTSPServer.Tests
         public void AClientThatStopsReadingDoesNotBlockAnotherStreamsMedia()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
+            using var server = new RtspServer(port, new InMemoryUserRepository("admin", "password"));
 
             var stalledTrack = new H264Track(Sps, Pps);
             var livelyTrack = new H264Track(Sps, Pps);
-            server.AddStreamSource(new RTSPStreamSource("stream1", stalledTrack, null));
-            server.AddStreamSource(new RTSPStreamSource("stream2", livelyTrack, null));
+            server.AddStreamSource(new RtspStreamSource("stream1", stalledTrack, null));
+            server.AddStreamSource(new RtspStreamSource("stream2", livelyTrack, null));
             server.StartListen();
 
             string stalledUri = "rtsp://127.0.0.1:" + port + "/stream1";

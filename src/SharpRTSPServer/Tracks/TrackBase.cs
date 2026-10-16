@@ -39,7 +39,7 @@ namespace SharpRTSPServer
         /// Drawn at random from the full 32 bit range, so two tracks colliding - which would break
         /// demultiplexing on the receiver - is not something that happens in practice.
         /// </remarks>
-        public uint SSRC { get; set; } = RandomGenerator.NextUInt32();
+        public uint Ssrc { get; set; } = RandomGenerator.NextUInt32();
 
         /// <summary>
         /// Default value of <see cref="PacketMTU"/>, chosen to fit inside a 1500 byte Ethernet frame.
@@ -87,7 +87,7 @@ namespace SharpRTSPServer
         /// Where this track reports what it could not do.
         /// </summary>
         /// <remarks>
-        /// Set by <see cref="RTSPServer.AddStreamSource"/> to the server's own logger, and kept in
+        /// Set by <see cref="RtspServer.AddStreamSource"/> to the server's own logger, and kept in
         /// step when that is reassigned - so a track says what it has to say wherever the server it
         /// belongs to does. Null for a track that has not been added to one, which is why every use
         /// of it goes through the null-safe extensions.
@@ -134,7 +134,7 @@ namespace SharpRTSPServer
 
         public abstract bool IsReady { get; }
 
-        public abstract StringBuilder BuildSDP(StringBuilder sdp);
+        public abstract StringBuilder BuildSdp(StringBuilder sdp);
 
         public abstract void CreateRtpPackets(List<ReadOnlyMemory<byte>> samples, uint rtpTimestamp, RtpPackets packets);
 
@@ -231,7 +231,7 @@ namespace SharpRTSPServer
 
             // Handed over, not lent. The sink releases them once the last client has been sent the
             // frame, which is why it no longer has to copy every packet before letting this return.
-            sink.FeedInRawRTP(StreamID, ID, rtpTimestamp, packets);
+            sink.FeedInRawRtp(StreamID, ID, rtpTimestamp, packets);
         }
     }
 }

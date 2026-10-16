@@ -33,11 +33,11 @@ namespace SharpRTSPServer.Tests
         private static readonly byte[] Sps = { 0x67, 0x42, 0x00, 0x1E };
         private static readonly byte[] Pps = { 0x68, 0xCE, 0x3C, 0x80 };
 
-        private static RTSPServer NewServer(int port, bool withAudio)
+        private static RtspServer NewServer(int port, bool withAudio)
         {
-            var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
+            var server = new RtspServer(port, new InMemoryUserRepository("admin", "password"));
             var audio = withAudio ? new AACTrack(new byte[] { 0x12, 0x10 }, 44100, 2) : null;
-            server.AddStreamSource(new RTSPStreamSource("stream1", new H264Track(Sps, Pps), audio));
+            server.AddStreamSource(new RtspStreamSource("stream1", new H264Track(Sps, Pps), audio));
             server.StartListen();
             return server;
         }
@@ -162,9 +162,9 @@ namespace SharpRTSPServer.Tests
         public void MediaFedTheMomentPlayIsAnsweredStillReachesTheClient()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
+            using var server = new RtspServer(port, new InMemoryUserRepository("admin", "password"));
             var videoTrack = new H264Track(Sps, Pps);
-            server.AddStreamSource(new RTSPStreamSource("stream1", videoTrack, null));
+            server.AddStreamSource(new RtspStreamSource("stream1", videoTrack, null));
             server.StartListen();
 
             string baseUri = "rtsp://127.0.0.1:" + port + "/stream1";

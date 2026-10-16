@@ -1,4 +1,4 @@
-// SharpRTSPClient
+// SharpRTCP
 // Copyright (C) 2026 Lukas Volf
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -21,7 +21,7 @@
 
 using System;
 
-namespace SharpRTSPClient
+namespace SharpRTCP
 {
     /// <summary>
     /// What one track has actually received, as a receiver report describes it.
@@ -40,7 +40,7 @@ namespace SharpRTSPClient
     /// </para>
     /// <see href="https://datatracker.ietf.org/doc/html/rfc3550#section-6.4.1" />
     /// </remarks>
-    internal sealed class ReceptionStatistics
+    public sealed class ReceptionStatistics
     {
         /// <summary>
         /// Half the sequence space. A step of less than this is the stream moving on; more, and it
@@ -152,13 +152,13 @@ namespace SharpRTSPClient
         /// <summary>
         /// What to put in a report block now, and notes that this is where the next one starts from.
         /// </summary>
-        public ReceptionReport TakeReport()
+        public ReportBlock TakeReport()
         {
             lock (_gate)
             {
                 if (!_started)
                 {
-                    return new ReceptionReport();
+                    return new ReportBlock();
                 }
 
                 uint extendedHighest = _cycles + _highestSequence;
@@ -192,7 +192,7 @@ namespace SharpRTSPClient
                     delay = (uint)Math.Min(uint.MaxValue, seconds * 65536.0);
                 }
 
-                return new ReceptionReport
+                return new ReportBlock
                 {
                     HasData = true,
                     FractionLost = fraction,
@@ -223,32 +223,5 @@ namespace SharpRTSPClient
                 _lastSenderReportArrivedTicks = 0;
             }
         }
-    }
-
-    /// <summary>
-    /// One report block's worth of what a track has received.
-    /// </summary>
-    internal struct ReceptionReport
-    {
-        /// <summary>Whether anything has arrived to report on.</summary>
-        public bool HasData { get; set; }
-
-        /// <summary>What share of the packets expected since the last report did not arrive, out of 256.</summary>
-        public byte FractionLost { get; set; }
-
-        /// <summary>How many have not arrived since the stream began. Negative where duplicates arrived.</summary>
-        public int CumulativeLost { get; set; }
-
-        /// <summary>How far through the sequence this receiver has got, counting wraps.</summary>
-        public uint ExtendedHighestSequence { get; set; }
-
-        /// <summary>How unevenly packets are arriving, in this track's own clock.</summary>
-        public uint Jitter { get; set; }
-
-        /// <summary>The middle of the timestamp of the last sender report, so the sender knows which.</summary>
-        public uint LastSenderReport { get; set; }
-
-        /// <summary>How long that report sat here before this answer went out.</summary>
-        public uint DelaySinceLastSenderReport { get; set; }
     }
 }

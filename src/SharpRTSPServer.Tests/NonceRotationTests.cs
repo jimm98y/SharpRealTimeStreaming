@@ -39,10 +39,10 @@ namespace SharpRTSPServer.Tests
         private const string UserName = "admin";
         private const string Password = "password";
 
-        private static RTSPServer NewServer(int port, TimeSpan nonceLifetime)
+        private static RtspServer NewServer(int port, TimeSpan nonceLifetime)
         {
-            var server = new RTSPServer(port, new InMemoryUserRepository(UserName, Password)) { NonceLifetime = nonceLifetime };
-            server.AddStreamSource(new RTSPStreamSource("stream1", new H264Track(Sps, Pps), null));
+            var server = new RtspServer(port, new InMemoryUserRepository(UserName, Password)) { NonceLifetime = nonceLifetime };
+            server.AddStreamSource(new RtspStreamSource("stream1", new H264Track(Sps, Pps), null));
             server.StartListen();
             return server;
         }
@@ -176,8 +176,8 @@ namespace SharpRTSPServer.Tests
         public void RotationIsOffWhenNoCredentialsAreConfigured()
         {
             int port = TestPorts.FindFree();
-            var server = new RTSPServer(port, (IUserRepository)null) { NonceLifetime = TimeSpan.FromMilliseconds(200) };
-            server.AddStreamSource(new RTSPStreamSource("stream1", new H264Track(Sps, Pps), null));
+            var server = new RtspServer(port, (IUserRepository)null) { NonceLifetime = TimeSpan.FromMilliseconds(200) };
+            server.AddStreamSource(new RtspStreamSource("stream1", new H264Track(Sps, Pps), null));
             server.StartListen();
 
             using (server)

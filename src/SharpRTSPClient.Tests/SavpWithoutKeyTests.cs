@@ -51,12 +51,12 @@ namespace SharpRTSPClient.Tests
             using var server = new FakeRtspServer(sdp);
 
             var stops = new List<StoppedReason>();
-            using var client = new RTSPClient();
+            using var client = new RtspClient();
             client.Stopped += (s, e) => { lock (stops) stops.Add(e.Reason); };
 
             client.AcceptTrack = t => t.Kind == TrackKind.Video;
 
-            client.Connect(server.BaseUri, RTPTransport.TCP, "admin", "password",
+            client.Connect(server.BaseUri, RtpTransport.TCP, "admin", "password",
                 false, null, false);
 
             bool reachedPlay = server.WaitForRequest("PLAY", 3000);

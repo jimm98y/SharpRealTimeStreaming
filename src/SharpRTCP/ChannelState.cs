@@ -1,4 +1,4 @@
-// SharpRTSPClient
+// SharpRTCP
 // Copyright (C) 2026 Lukas Volf
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -22,7 +22,7 @@
 using System;
 using System.Threading;
 
-namespace SharpRTSPClient
+namespace SharpRTCP
 {
     /// <summary>
     /// RTCP state kept for one media channel (video or audio).
@@ -31,7 +31,7 @@ namespace SharpRTSPClient
     /// Updated from the RTP receive thread and read from the RTCP receive thread, so the SSRC is
     /// held as a <see cref="long"/> and accessed through <see cref="Interlocked"/>.
     /// </remarks>
-    internal sealed class RtcpChannelState
+    public sealed class ChannelState
     {
         private const long Unknown = -1;
 

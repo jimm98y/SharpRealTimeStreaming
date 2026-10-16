@@ -78,7 +78,7 @@ namespace SharpRTSPClient.Tests
             var outcome = new Outcome();
 
             using var server = new FakeRtspServer(SdpHeader + sdp);
-            using var client = new RTSPClient { AutoPlay = false };
+            using var client = new RtspClient { AutoPlay = false };
 
             if (filter != null)
             {
@@ -94,7 +94,7 @@ namespace SharpRTSPClient.Tests
             client.Stopped += (s, e) => settled.Set();
             client.SetupMessageCompleted += (s, e) => settled.Set();
 
-            client.Connect(server.BaseUri, RTPTransport.TCP);
+            client.Connect(server.BaseUri, RtpTransport.TCP);
             settled.Wait(5000);
 
             outcome.TrackCount = client.TrackCount;
@@ -233,14 +233,14 @@ namespace SharpRTSPClient.Tests
             var outcome = new Outcome();
 
             using var server = new FakeRtspServer(SdpHeader + RichSdp);
-            using var client = new RTSPClient { AutoPlay = false, MaxTracks = 2 };
+            using var client = new RtspClient { AutoPlay = false, MaxTracks = 2 };
             client.AcceptTrack = _ => true;
 
             var settled = new ManualResetEventSlim(false);
             client.Stopped += (s, e) => settled.Set();
             client.SetupMessageCompleted += (s, e) => settled.Set();
 
-            client.Connect(server.BaseUri, RTPTransport.TCP);
+            client.Connect(server.BaseUri, RtpTransport.TCP);
             settled.Wait(5000);
 
             Assert.IsLessThanOrEqualTo(2, client.TrackCount);
@@ -250,10 +250,10 @@ namespace SharpRTSPClient.Tests
         [TestMethod]
         public void NeitherOldSettingIsPartOfThePublicApiAnyMore()
         {
-            Type client = typeof(RTSPClient);
+            Type client = typeof(RtspClient);
 
             Assert.IsNull(client.GetProperty("ReceiveAllTracks"));
-            Assert.IsNull(typeof(RTSPClient).Assembly.GetType("SharpRTSPClient.MediaRequest"),
+            Assert.IsNull(typeof(RtspClient).Assembly.GetType("SharpRTSPClient.MediaRequest"),
                 "MediaRequest should be gone, not merely unused");
         }
     }

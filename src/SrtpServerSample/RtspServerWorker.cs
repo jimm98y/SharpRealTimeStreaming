@@ -39,7 +39,7 @@ using Timer = System.Timers.Timer;
 
 namespace SrtpServerSample
 {
-    internal class RTSPServerWorker : BackgroundService
+    internal class RtspServerWorker : BackgroundService
     {
         public class MediaFile
         {
@@ -171,7 +171,7 @@ namespace SrtpServerSample
 
         private readonly ILoggerFactory _loggerFactory;
         private readonly IConfiguration _configuration;
-        private RTSPServer _server;
+        private RtspServer _server;
 
         private List<MediaFileReader> _mediaFileStreamReaders = new List<MediaFileReader>();
 
@@ -350,7 +350,7 @@ namespace SrtpServerSample
                 : RtspAuthenticationScheme.Digest;
         }
 
-        public RTSPServerWorker(IConfiguration configuration, ILoggerFactory loggerFactory)
+        public RtspServerWorker(IConfiguration configuration, ILoggerFactory loggerFactory)
         {
             ArgumentNullException.ThrowIfNull(configuration);
             ArgumentNullException.ThrowIfNull(loggerFactory);
@@ -361,7 +361,7 @@ namespace SrtpServerSample
 
         protected override Task ExecuteAsync(CancellationToken stoppingToken)
         {
-            var _logger = _loggerFactory.CreateLogger<RTSPServerWorker>();
+            var _logger = _loggerFactory.CreateLogger<RtspServerWorker>();
 
             var hostName = _configuration["RTSPServerApp:HostName"];
             var port = ushort.Parse(_configuration["RTSPServerApp:Port"]);
@@ -379,7 +379,7 @@ namespace SrtpServerSample
                 string.IsNullOrEmpty(hostName) ? "localhost" : hostName,
                 DateTime.UtcNow.AddDays(-1),
                 DateTime.UtcNow.AddDays(30));
-            _server = new RTSPServer(
+            _server = new RtspServer(
                 port,
                 ReadUsers(_configuration, "RTSPServerApp:Users"),
                 false,
@@ -397,7 +397,7 @@ namespace SrtpServerSample
                 ITrack rtspAudioTrack = null;
 
                 string fileName = mediaFile.FilePath; 
-                RTSPStreamSource streamSource = null;
+                RtspStreamSource streamSource = null;
 
                 if (Path.GetExtension(fileName).ToLowerInvariant() == ".mp4")
                 {
@@ -708,7 +708,7 @@ namespace SrtpServerSample
                     rtspAudioTrack.RtpProfile = RtpProfiles.SAVP;
                 }
 
-                streamSource = new RTSPStreamSource(mediaFile.StreamID, rtspVideoTrack, rtspAudioTrack);
+                streamSource = new RtspStreamSource(mediaFile.StreamID, rtspVideoTrack, rtspAudioTrack);
 
                 // A client that arrives mid-group has nothing it can decode until the next keyframe.
                 // Keeping the last one means it is given a picture straight away, and held on that

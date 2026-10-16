@@ -36,7 +36,7 @@ namespace SharpRTSPServer
     /// stamping its own sequence numbers over the others.
     /// </para>
     /// <para>
-    /// So the group gets a sender of its own. It is an <see cref="RTSPConnection"/> like any other -
+    /// So the group gets a sender of its own. It is an <see cref="RtspConnection"/> like any other -
     /// it has the streams, the send lock and the queue that the writing already knows what to do
     /// with - but no client is at the other end of it. Frames reach it because it is in the stream
     /// source's connection list; the clients that asked for multicast are in there too, and are
@@ -53,7 +53,7 @@ namespace SharpRTSPServer
         /// <summary>
         /// The pseudo connection the group's media is queued to and written from.
         /// </summary>
-        public RTSPConnection Sender { get; set; }
+        public RtspConnection Sender { get; set; }
 
         /// <summary>
         /// The group the media is sent to.
@@ -79,7 +79,7 @@ namespace SharpRTSPServer
         /// The clients listening to this group. They receive nothing directly; they are counted, so
         /// that the group lasts exactly as long as somebody wants it.
         /// </summary>
-        public HashSet<RTSPConnection> Listeners { get; } = new HashSet<RTSPConnection>();
+        public HashSet<RtspConnection> Listeners { get; } = new HashSet<RtspConnection>();
 
         /// <summary>
         /// Whether a track has been set up for the group yet.

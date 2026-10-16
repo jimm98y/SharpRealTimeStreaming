@@ -37,7 +37,7 @@ namespace SharpRTSPClient.Tests
             string sdp = "m=video 0 RTP/SAVP 96\r\n"
                        + "a=crypto:1 AES_CM_128_HMAC_SHA1_80 inline:" + Key + "\r\n";
 
-            string redacted = RTSPClient.RedactKeys(sdp);
+            string redacted = RtspClient.RedactKeys(sdp);
 
             Assert.DoesNotContain(Key, redacted, "the master key must not reach the log");
             Assert.Contains("inline:<redacted>", redacted);
@@ -48,7 +48,7 @@ namespace SharpRTSPClient.Tests
         {
             string sdp = "a=crypto:1 AES_CM_128_HMAC_SHA1_80 inline:" + Key + "\r\n";
 
-            string redacted = RTSPClient.RedactKeys(sdp);
+            string redacted = RtspClient.RedactKeys(sdp);
 
             Assert.Contains("a=crypto:1", redacted, "the tag is worth having");
             Assert.Contains("AES_CM_128_HMAC_SHA1_80", redacted, "so is the suite");
@@ -59,7 +59,7 @@ namespace SharpRTSPClient.Tests
         {
             string sdp = "a=crypto:1 AES_CM_128_HMAC_SHA1_80 inline:" + Key + "|2^20|1:4\r\n";
 
-            string redacted = RTSPClient.RedactKeys(sdp);
+            string redacted = RtspClient.RedactKeys(sdp);
 
             Assert.DoesNotContain(Key, redacted);
             Assert.Contains("|2^20|1:4", redacted, "the lifetime and MKI say what is being done, not with what");
@@ -75,7 +75,7 @@ namespace SharpRTSPClient.Tests
                        + "m=audio 0 RTP/SAVP 97\r\n"
                        + "a=crypto:1 AES_CM_128_HMAC_SHA1_80 inline:" + second + "\r\n";
 
-            string redacted = RTSPClient.RedactKeys(sdp);
+            string redacted = RtspClient.RedactKeys(sdp);
 
             Assert.DoesNotContain(Key, redacted);
             Assert.DoesNotContain(second, redacted);
@@ -86,14 +86,14 @@ namespace SharpRTSPClient.Tests
         {
             string sdp = "v=0\r\nm=video 0 RTP/AVP 96\r\na=control:trackID=0\r\n";
 
-            Assert.AreEqual(sdp, RTSPClient.RedactKeys(sdp), "nothing to hide, so nothing to rewrite");
+            Assert.AreEqual(sdp, RtspClient.RedactKeys(sdp), "nothing to hide, so nothing to rewrite");
         }
 
         [TestMethod]
         public void NothingAtAllIsHandledRatherThanThrown()
         {
-            Assert.IsNull(RTSPClient.RedactKeys(null));
-            Assert.AreEqual(string.Empty, RTSPClient.RedactKeys(string.Empty));
+            Assert.IsNull(RtspClient.RedactKeys(null));
+            Assert.AreEqual(string.Empty, RtspClient.RedactKeys(string.Empty));
         }
     }
 }

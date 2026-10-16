@@ -66,7 +66,7 @@ namespace SharpRTSPServer
             {
                 if (_payloadType < 0)
                 {
-                    return RTSPServer.DYNAMIC_PAYLOAD_TYPE + ID;
+                    return RtspServer.DYNAMIC_PAYLOAD_TYPE + ID;
                 }
                 else
                 {
@@ -96,7 +96,7 @@ namespace SharpRTSPServer
             this._obus = obus;
         }
 
-        public override StringBuilder BuildSDP(StringBuilder sdp)
+        public override StringBuilder BuildSdp(StringBuilder sdp)
         {
             sdp.Append($"m=video 0 RTP/{RtpProfile} {PayloadType}\r\n"); // TODO: AVPF is AVP + Feedback https://aomediacodec.github.io/av1-rtp-spec/v1.0.0.html
             sdp.Append($"a=control:trackID={ID}\r\n");
@@ -203,11 +203,11 @@ namespace SharpRTSPServer
                     const bool rtpHasExtension = false;
                     const int rtpCsrcCount = 0;
 
-                    RTPPacketUtil.WriteHeader(rtpPacket.Span, RTPPacketUtil.RTP_VERSION,
+                    RtpPacketUtil.WriteHeader(rtpPacket.Span, RtpPacketUtil.RTP_VERSION,
                         rtpPadding, rtpHasExtension, rtpCsrcCount, lastObu && dataRemaining == payloadSize, PayloadType);
 
                     // sequence number and SSRC are set just before send
-                    RTPPacketUtil.WriteTS(rtpPacket.Span, rtpTimestamp);
+                    RtpPacketUtil.WriteTimestamp(rtpPacket.Span, rtpTimestamp);
 
                     //  0 1 2 3 4 5 6 7
                     // +-+-+-+-+-+-+-+-+

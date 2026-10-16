@@ -19,6 +19,9 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+
+using SharpRTCP;
+
 namespace SharpRTSPClient.Tests
 {
     /// <summary>
@@ -39,9 +42,9 @@ namespace SharpRTSPClient.Tests
 
         private const int ClockRate = 90000;
 
-        private static RtcpChannelState ChannelThatReceived(params ushort[] sequenceNumbers)
+        private static ChannelState ChannelThatReceived(params ushort[] sequenceNumbers)
         {
-            var channel = new RtcpChannelState { ClockRate = ClockRate };
+            var channel = new ChannelState { ClockRate = ClockRate };
 
             uint timestamp = 0;
 
@@ -53,9 +56,9 @@ namespace SharpRTSPClient.Tests
             return channel;
         }
 
-        private static byte[] ReportFor(RtcpChannelState channel)
+        private static byte[] ReportFor(ChannelState channel)
         {
-            using var client = new RTSPClient();
+            using var client = new RtspClient();
             return client.BuildRtcpReceiverReport(Us, Them, channel);
         }
 
@@ -153,7 +156,7 @@ namespace SharpRTSPClient.Tests
         [TestMethod]
         public void UnevenArrivalIsReportedAsJitter()
         {
-            var channel = new RtcpChannelState { ClockRate = ClockRate };
+            var channel = new ChannelState { ClockRate = ClockRate };
 
             // timestamps spaced evenly, arriving whenever this loop gets to them, which is not evenly
             for (ushort i = 1; i <= 20; i++)
@@ -192,7 +195,7 @@ namespace SharpRTSPClient.Tests
         [TestMethod]
         public void AChannelThatHasReceivedNothingStillReportsThatItIsThere()
         {
-            var channel = new RtcpChannelState { ClockRate = ClockRate };
+            var channel = new ChannelState { ClockRate = ClockRate };
 
             byte[] report = ReportFor(channel);
 

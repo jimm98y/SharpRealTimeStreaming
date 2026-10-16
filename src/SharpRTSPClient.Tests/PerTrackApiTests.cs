@@ -60,17 +60,17 @@ namespace SharpRTSPClient.Tests
             "m=audio 0 RTP/AVP 0\r\n" +
             "a=control:trackID=2\r\n";
 
-        private static RTSPClient Describe(string sdp, out FakeRtspServer server, bool allTracks = true)
+        private static RtspClient Describe(string sdp, out FakeRtspServer server, bool allTracks = true)
         {
             server = new FakeRtspServer(SdpHeader + sdp);
-            var client = new RTSPClient { AutoPlay = false };
-            client.AcceptTrack = allTracks ? (_ => true) : RTSPClient.FirstOfEachKind;
+            var client = new RtspClient { AutoPlay = false };
+            client.AcceptTrack = allTracks ? (_ => true) : RtspClient.FirstOfEachKind;
 
             var settled = new ManualResetEventSlim(false);
             client.Stopped += (s, e) => settled.Set();
             client.SetupMessageCompleted += (s, e) => settled.Set();
 
-            client.Connect(server.BaseUri, RTPTransport.TCP);
+            client.Connect(server.BaseUri, RtpTransport.TCP);
             settled.Wait(5000);
             return client;
         }
@@ -79,8 +79,8 @@ namespace SharpRTSPClient.Tests
         public void TheContextsAreNoLongerPartOfThePublicApi()
         {
             // Either all of them or none, and none is what was chosen: a SrtpSessionContext is live
-            // crypto state, and SendRTCP is what callers actually wanted it for.
-            Type client = typeof(RTSPClient);
+            // crypto state, and SendRtcp is what callers actually wanted it for.
+            Type client = typeof(RtspClient);
 
             Assert.IsNull(client.GetProperty("VideoContext", BindingFlags.Public | BindingFlags.Instance));
             Assert.IsNull(client.GetProperty("AudioContext", BindingFlags.Public | BindingFlags.Instance));
@@ -108,8 +108,8 @@ namespace SharpRTSPClient.Tests
             using var client = Describe(ThreeTracks, out var server);
             using (server)
             {
-                Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => client.SendRTCP(9, new byte[8]));
-                Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => client.SendRTCP(-1, new byte[8]));
+                Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => client.SendRtcp(9, new byte[8]));
+                Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => client.SendRtcp(-1, new byte[8]));
                 client.Stop();
             }
         }
@@ -124,7 +124,7 @@ namespace SharpRTSPClient.Tests
                 // the first video and first audio were.
                 for (int i = 0; i < client.TrackCount; i++)
                 {
-                    client.SendRTCP(i, client.BuildRtcpReceiverReport(1234));
+                    client.SendRtcp(i, client.BuildRtcpReceiverReport(1234));
                 }
 
                 client.Stop();
@@ -146,8 +146,8 @@ namespace SharpRTSPClient.Tests
             using (server)
             {
                 Assert.AreEqual(2, client.TrackCount);
-                client.SendRTCP(0, client.BuildRtcpReceiverReport(1));
-                client.SendRTCP(1, client.BuildRtcpReceiverReport(2));
+                client.SendRtcp(0, client.BuildRtcpReceiverReport(1));
+                client.SendRtcp(1, client.BuildRtcpReceiverReport(2));
                 client.Stop();
             }
         }
@@ -196,7 +196,7 @@ namespace SharpRTSPClient.Tests
             using var client = Describe(ThreeTracks, out var server);
             using (server)
             {
-                client.ReceivedRawRTP += (s, e) => { lock (seen) { seen.Add(e); } };
+                client.ReceivedRawRtp += (s, e) => { lock (seen) { seen.Add(e); } };
 
                 // Drive the receive path directly: the fake server describes but does not stream.
                 FeedRtp(client, trackIndex: 1, payloadType: 97);
@@ -225,12 +225,12 @@ namespace SharpRTSPClient.Tests
                 "ReceivedVideoData", "ReceivedAudioData",
                 "ReceivedRawVideoRTP", "ReceivedRawAudioRTP",
                 "ReceivedRawVideoRTCP", "ReceivedRawAudioRTCP",
-                "SendVideoRTCP", "SendAudioRTCP",
-                "VideoSSRC", "AudioSSRC",
+                "SendVideoRtcp", "SendAudioRtcp",
+                "VideoSsrc", "AudioSsrc",
                 "VideoContext", "AudioContext",
             };
 
-            Type client = typeof(RTSPClient);
+            Type client = typeof(RtspClient);
 
             foreach (string name in removed)
             {
@@ -242,7 +242,7 @@ namespace SharpRTSPClient.Tests
         /// <summary>
         /// Hands one RTP packet to the receive path of a given track.
         /// </summary>
-        private static void FeedRtp(RTSPClient client, int trackIndex, int payloadType)
+        private static void FeedRtp(RtspClient client, int trackIndex, int payloadType)
         {
             var packet = new byte[20];
             packet[0] = 0x80;                  // version 2
@@ -250,7 +250,7 @@ namespace SharpRTSPClient.Tests
             packet[3] = 1;                     // sequence number
             packet[12] = 0x65;                 // an IDR NAL, so the H264 parser is happy
 
-            MethodInfo received = typeof(RTSPClient).GetMethod("RtpDataReceived",
+            MethodInfo received = typeof(RtspClient).GetMethod("RtpDataReceived",
                 BindingFlags.Instance | BindingFlags.NonPublic);
             Assert.IsNotNull(received, "RtpDataReceived is not where the test expects it");
 

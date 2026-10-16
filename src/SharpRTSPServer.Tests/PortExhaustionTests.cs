@@ -35,9 +35,9 @@ namespace SharpRTSPServer.Tests
         public void ClientsThatVanishWithoutTearingDownDoNotExhaustTheUdpPorts()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
+            using var server = new RtspServer(port, new InMemoryUserRepository("admin", "password"));
             server.MaxConnections = 0;
-            server.AddStreamSource(new RTSPStreamSource("stream1", new H264Track(Sps, Pps), null));
+            server.AddStreamSource(new RtspStreamSource("stream1", new H264Track(Sps, Pps), null));
             server.StartListen();
 
             string baseUri = $"rtsp://127.0.0.1:{port}/stream1";
@@ -63,8 +63,8 @@ namespace SharpRTSPServer.Tests
         public void SetupIsRefusedWithUnsupportedTransportWhenTheUdpRangeIsFullyTaken()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
-            server.AddStreamSource(new RTSPStreamSource("stream1", new H264Track(Sps, Pps), null));
+            using var server = new RtspServer(port, new InMemoryUserRepository("admin", "password"));
+            server.AddStreamSource(new RtspStreamSource("stream1", new H264Track(Sps, Pps), null));
             server.StartListen();
 
             string baseUri = $"rtsp://127.0.0.1:{port}/stream1";
@@ -115,13 +115,13 @@ namespace SharpRTSPServer.Tests
         public void SetupAllocatesFromTheConfiguredPortRange()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
+            using var server = new RtspServer(port, new InMemoryUserRepository("admin", "password"));
 
             // one pair, somewhere clear of the default range
             int firstPort = 52000;
             server.SetRtpPortRange(firstPort, firstPort + 2);
 
-            server.AddStreamSource(new RTSPStreamSource("stream1", new H264Track(Sps, Pps), null));
+            server.AddStreamSource(new RtspStreamSource("stream1", new H264Track(Sps, Pps), null));
             server.StartListen();
 
             string baseUri = $"rtsp://127.0.0.1:{port}/stream1";
@@ -143,7 +143,7 @@ namespace SharpRTSPServer.Tests
         [TestMethod]
         public void SetRtpPortRangeRejectsARangeWithNoRoomForAPair()
         {
-            using var server = new RTSPServer(TestPorts.FindFree(), new InMemoryUserRepository("admin", "password"));
+            using var server = new RtspServer(TestPorts.FindFree(), new InMemoryUserRepository("admin", "password"));
 
             Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => server.SetRtpPortRange(52000, 52001));
             Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => server.SetRtpPortRange(-1, 52000));
@@ -154,8 +154,8 @@ namespace SharpRTSPServer.Tests
         public void ASecondSetupDoesNotLookAtThePairTheFirstOneTook()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
-            server.AddStreamSource(new RTSPStreamSource("stream1", new H264Track(Sps, Pps), null));
+            using var server = new RtspServer(port, new InMemoryUserRepository("admin", "password"));
+            server.AddStreamSource(new RtspStreamSource("stream1", new H264Track(Sps, Pps), null));
             server.StartListen();
 
             string baseUri = $"rtsp://127.0.0.1:{port}/stream1";
@@ -191,13 +191,13 @@ namespace SharpRTSPServer.Tests
         public void TheAllocationCursorWrapsBackToTheStartOfTheRange()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
+            using var server = new RtspServer(port, new InMemoryUserRepository("admin", "password"));
 
             // exactly two pairs, so the third allocation has to wrap
             const int firstPort = 52000;
             server.SetRtpPortRange(firstPort, firstPort + 4);
 
-            server.AddStreamSource(new RTSPStreamSource("stream1", new H264Track(Sps, Pps), null));
+            server.AddStreamSource(new RtspStreamSource("stream1", new H264Track(Sps, Pps), null));
             server.StartListen();
 
             string baseUri = $"rtsp://127.0.0.1:{port}/stream1";
@@ -230,8 +230,8 @@ namespace SharpRTSPServer.Tests
         public void ATornDownSessionReleasesItsUdpPortsImmediately()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
-            server.AddStreamSource(new RTSPStreamSource("stream1", new H264Track(Sps, Pps), null));
+            using var server = new RtspServer(port, new InMemoryUserRepository("admin", "password"));
+            server.AddStreamSource(new RtspStreamSource("stream1", new H264Track(Sps, Pps), null));
             server.StartListen();
 
             string baseUri = $"rtsp://127.0.0.1:{port}/stream1";

@@ -68,9 +68,9 @@ namespace SharpRTSPClient.Tests
         /// There used to be four of these, a pair per kind, and this named one of them. Both pairs
         /// are gone: the two that are left take the track the payload arrived on.
         /// </remarks>
-        private static void Raise(RTSPClient client, string handlerName, TrackKind kind, RtspDataEventArgs args)
+        private static void Raise(RtspClient client, string handlerName, TrackKind kind, RtspDataEventArgs args)
         {
-            MethodInfo handler = typeof(RTSPClient).GetMethod(handlerName,
+            MethodInfo handler = typeof(RtspClient).GetMethod(handlerName,
                 BindingFlags.Instance | BindingFlags.NonPublic);
 
             Assert.IsNotNull(handler, handlerName + " is not where the test expects it");
@@ -91,7 +91,7 @@ namespace SharpRTSPClient.Tests
         [DataRow("RtcpControlDataReceived", TrackKind.Audio)]
         public void AnEmptyPayloadIsStillDisposed(string handlerName, TrackKind kind)
         {
-            using var client = new RTSPClient();
+            using var client = new RtspClient();
 
             var owner = new TrackedOwner(0);
             var data = new RtspData(owner, 0);
@@ -106,7 +106,7 @@ namespace SharpRTSPClient.Tests
         [DataRow(TrackKind.Audio)]
         public void AShortPayloadIsStillDisposed(TrackKind kind)
         {
-            using var client = new RTSPClient();
+            using var client = new RtspClient();
 
             // too short to be anything, so every parse of it gives up early
             var owner = new TrackedOwner(3);

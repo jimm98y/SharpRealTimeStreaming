@@ -47,16 +47,16 @@ namespace SharpRTSPServer.Tests
             "v=0\r\no=- 0 0 IN IP4 0.0.0.0\r\ns=Test\r\nc=IN IP4 0.0.0.0\r\n" +
             "m=video 0 RTP/SAVP 96\r\na=control:trackID=0\r\na=rtpmap:96 H264/90000\r\n";
 
-        private static RTSPServer NewSavpServer(int port, out H264Track videoTrack, bool overrideSdp)
+        private static RtspServer NewSavpServer(int port, out H264Track videoTrack, bool overrideSdp)
         {
-            var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"), false, null,
+            var server = new RtspServer(port, new InMemoryUserRepository("admin", "password"), false, null,
                 SrtpCryptoSuites.AES_CM_128_HMAC_SHA1_80, null);
 
             videoTrack = new H264Track(Sps, Pps) { RtpProfile = RtpProfiles.SAVP };
-            var streamSource = new RTSPStreamSource("stream1", videoTrack, null);
+            var streamSource = new RtspStreamSource("stream1", videoTrack, null);
             if (overrideSdp)
             {
-                streamSource.OverrideSDP(OverriddenSdp, true);
+                streamSource.OverrideSdp(OverriddenSdp, true);
             }
 
             server.AddStreamSource(streamSource);
@@ -172,9 +172,9 @@ namespace SharpRTSPServer.Tests
         public void AnAvpTrackIsStillSetUpWithoutADescribe()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
+            using var server = new RtspServer(port, new InMemoryUserRepository("admin", "password"));
             var videoTrack = new H264Track(Sps, Pps);
-            server.AddStreamSource(new RTSPStreamSource("stream1", videoTrack, null));
+            server.AddStreamSource(new RtspStreamSource("stream1", videoTrack, null));
             server.StartListen();
 
             string baseUri = "rtsp://127.0.0.1:" + port + "/stream1";

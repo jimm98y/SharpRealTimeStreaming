@@ -31,7 +31,7 @@ string rtspUri = config["Uri"];
 string userName = config["UserName"];
 string password = config["Password"];
 
-using (RTSPClient client = new RTSPClient())
+using (RtspClient client = new RtspClient())
 {
     client.NewTrack += (sender, e) =>
         Console.WriteLine($"track {e.TrackIndex}: {e.Kind} {e.Codec} {e.StreamConfigurationData}");
@@ -56,7 +56,7 @@ using (RTSPClient client = new RTSPClient())
 
     client.AcceptTrack = _ => true;
 
-    client.Connect(rtspUri, RTPTransport.UDP, userName, password, false, OnValidateCertificate, true);
+    client.Connect(rtspUri, RtpTransport.UDP, userName, password, false, OnValidateCertificate, true);
 
     Console.WriteLine("Press any key to exit");
     // Asking whether a key has been pressed throws outright when there is no console, or when

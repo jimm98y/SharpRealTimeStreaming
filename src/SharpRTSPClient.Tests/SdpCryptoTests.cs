@@ -32,7 +32,7 @@ namespace SharpRTSPClient.Tests
         [TestMethod]
         public void ParseMKI_ReadsTheValueIntoABufferOfTheDeclaredLength()
         {
-            using var client = new RTSPClient();
+            using var client = new RtspClient();
 
             byte[] mki = client.ParseMKI("1:4");
 
@@ -55,7 +55,7 @@ namespace SharpRTSPClient.Tests
         [DataRow("16909060:2")]              // value too wide for the declared length
         public void ParseMKI_RejectsMalformedInputInsteadOfThrowing(string sdpMki)
         {
-            using var client = new RTSPClient();
+            using var client = new RtspClient();
 
             Assert.IsNull(client.ParseMKI(sdpMki));
         }
@@ -63,7 +63,7 @@ namespace SharpRTSPClient.Tests
         [TestMethod]
         public void ParseMKI_RejectsALengthAboveTheRfc4568Maximum()
         {
-            using var client = new RTSPClient();
+            using var client = new RtspClient();
 
             Assert.IsNotNull(client.ParseMKI("1:128"));
             Assert.IsNull(client.ParseMKI("1:129"));
@@ -72,7 +72,7 @@ namespace SharpRTSPClient.Tests
         [TestMethod]
         public void PrepareSrtpContext_ToleratesMediaWithoutAnRtpType()
         {
-            using var client = new RTSPClient();
+            using var client = new RtspClient();
             var media = new Media(string.Empty) { RtpType = null };
 
             // must not throw - the null check has to guard both profile comparisons
@@ -84,7 +84,7 @@ namespace SharpRTSPClient.Tests
         [DataRow("RTP/AVPF")]
         public void PrepareSrtpContext_ReturnsNothingForUnencryptedProfiles(string rtpType)
         {
-            using var client = new RTSPClient();
+            using var client = new RtspClient();
             var media = new Media(string.Empty) { RtpType = rtpType };
 
             Assert.IsNull(client.PrepareSrtpContext(media));
@@ -93,7 +93,7 @@ namespace SharpRTSPClient.Tests
         [TestMethod]
         public void PrepareSrtpContext_RejectsAnInvalidBase64MasterKey()
         {
-            using var client = new RTSPClient();
+            using var client = new RtspClient();
             var media = new Media(string.Empty) { RtpType = "RTP/SAVP" };
             media.Attributs.Add(Attribut.ParseInvariant("crypto:1 AES_CM_128_HMAC_SHA1_80 inline:!!!not-base64!!!"));
 

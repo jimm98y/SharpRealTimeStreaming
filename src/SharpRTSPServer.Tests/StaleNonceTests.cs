@@ -40,10 +40,10 @@ namespace SharpRTSPServer.Tests
         private const string UserName = "admin";
         private const string Password = "password";
 
-        private static RTSPServer NewServer(int port, TimeSpan nonceLifetime)
+        private static RtspServer NewServer(int port, TimeSpan nonceLifetime)
         {
-            var server = new RTSPServer(port, new InMemoryUserRepository(UserName, Password)) { NonceLifetime = nonceLifetime };
-            server.AddStreamSource(new RTSPStreamSource("stream1", new H264Track(Sps, Pps), null));
+            var server = new RtspServer(port, new InMemoryUserRepository(UserName, Password)) { NonceLifetime = nonceLifetime };
+            server.AddStreamSource(new RtspStreamSource("stream1", new H264Track(Sps, Pps), null));
             server.StartListen();
             return server;
         }
@@ -181,11 +181,11 @@ namespace SharpRTSPServer.Tests
         {
             // It ends any session whose client treats a 401 as a wrong password, so the deployment
             // has to opt in rather than find out.
-            Assert.AreEqual(TimeSpan.Zero, RTSPServer.DEFAULT_NONCE_LIFETIME);
+            Assert.AreEqual(TimeSpan.Zero, RtspServer.DEFAULT_NONCE_LIFETIME);
 
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, new InMemoryUserRepository(UserName, Password));
-            server.AddStreamSource(new RTSPStreamSource("stream1", new H264Track(Sps, Pps), null));
+            using var server = new RtspServer(port, new InMemoryUserRepository(UserName, Password));
+            server.AddStreamSource(new RtspStreamSource("stream1", new H264Track(Sps, Pps), null));
             server.StartListen();
 
             Assert.AreEqual(TimeSpan.Zero, server.NonceLifetime);

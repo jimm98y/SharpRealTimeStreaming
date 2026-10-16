@@ -76,7 +76,7 @@ namespace SharpRTSPServer
             {
                 if (_payloadType < 0)
                 {
-                    return RTSPServer.DYNAMIC_PAYLOAD_TYPE + ID;
+                    return RtspServer.DYNAMIC_PAYLOAD_TYPE + ID;
                 }
                 else
                 {
@@ -125,7 +125,7 @@ namespace SharpRTSPServer
         /// </summary>
         /// <param name="sdp">SDP <see cref="StringBuilder"/>.</param>
         /// <returns><see cref="StringBuilder"/>.</returns>
-        public override StringBuilder BuildSDP(StringBuilder sdp)
+        public override StringBuilder BuildSdp(StringBuilder sdp)
         {
             sdp.Append($"m=audio 0 RTP/{RtpProfile} {PayloadType}\r\n"); // <---- Payload Type 0 means G711 ULAW, 96+ means dynamic payload type
             sdp.Append($"a=control:trackID={ID}\r\n");
@@ -159,11 +159,11 @@ namespace SharpRTSPServer
                 int rtpCsrcCount = 0;
                 const bool rtpMarker = true; // always 1 as this is the last (and only) RTP packet for this audio timestamp
 
-                RTPPacketUtil.WriteHeader(rtpPacket.Span,
-                    RTPPacketUtil.RTP_VERSION, rtpPadding, rtpHasExtension, rtpCsrcCount, rtpMarker, PayloadType);
+                RtpPacketUtil.WriteHeader(rtpPacket.Span,
+                    RtpPacketUtil.RTP_VERSION, rtpPadding, rtpHasExtension, rtpCsrcCount, rtpMarker, PayloadType);
 
                 // sequence number is set just before send
-                RTPPacketUtil.WriteTS(rtpPacket.Span, rtpTimestamp);
+                RtpPacketUtil.WriteTimestamp(rtpPacket.Span, rtpTimestamp);
 
                 // The AU header and the frame go straight into the packet. Building them in an array
                 // of their own first meant an allocation and a second copy for every audio frame,

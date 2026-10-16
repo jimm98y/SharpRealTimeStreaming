@@ -133,10 +133,10 @@ namespace SharpRTSPServer.Tests
             Assert.IsFalse(track.PreserveSourceHeaders);
             Assert.IsFalse(track.HasLearnedSourceSsrc);
 
-            uint before = track.SSRC;
+            uint before = track.Ssrc;
             Packetize(track, RtpPacket(7, 0xDEADBEEF));
 
-            Assert.AreEqual(before, track.SSRC, "the track's own SSRC should be left alone");
+            Assert.AreEqual(before, track.Ssrc, "the track's own SSRC should be left alone");
             Assert.IsFalse(track.HasLearnedSourceSsrc);
         }
 
@@ -148,7 +148,7 @@ namespace SharpRTSPServer.Tests
             Packetize(track, RtpPacket(7, 0x3C790025));
 
             Assert.IsTrue(track.HasLearnedSourceSsrc);
-            Assert.AreEqual(0x3C790025u, track.SSRC, "the SETUP reply and RTCP have to name the SSRC the RTP carries");
+            Assert.AreEqual(0x3C790025u, track.Ssrc, "the SETUP reply and RTCP have to name the SSRC the RTP carries");
         }
 
         [TestMethod]
@@ -157,24 +157,24 @@ namespace SharpRTSPServer.Tests
             var track = new ProxyTrack(TrackType.Video) { PreserveSourceHeaders = true };
 
             Packetize(track, RtpPacket(1, 0x11111111));
-            Assert.AreEqual(0x11111111u, track.SSRC);
+            Assert.AreEqual(0x11111111u, track.Ssrc);
 
             // a source that restarts, or a capture that loops round to a different session
             Packetize(track, RtpPacket(2, 0x22222222));
-            Assert.AreEqual(0x22222222u, track.SSRC);
+            Assert.AreEqual(0x22222222u, track.Ssrc);
         }
 
         [TestMethod]
         public void AShortPacketDoesNotChangeTheLearnedSsrc()
         {
             var track = new ProxyTrack(TrackType.Video) { PreserveSourceHeaders = true };
-            uint before = track.SSRC;
+            uint before = track.Ssrc;
 
             // too short to hold an SSRC - forwarded anyway, but nothing is read out of it
             Packetize(track, new byte[] { 0x80, 96, 0, 1 });
 
             Assert.IsFalse(track.HasLearnedSourceSsrc);
-            Assert.AreEqual(before, track.SSRC);
+            Assert.AreEqual(before, track.Ssrc);
         }
 
     }

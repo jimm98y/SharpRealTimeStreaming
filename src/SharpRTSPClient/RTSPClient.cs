@@ -25,6 +25,7 @@ using Rtsp.Messages;
 using Rtsp.Onvif;
 using Rtsp.Rtp;
 using Rtsp.Sdp;
+using SharpRTCP;
 using SharpSRTP.SRTP;
 using System;
 using System.Collections.Concurrent;
@@ -43,7 +44,7 @@ using System.Threading.Tasks;
 
 namespace SharpRTSPClient
 {
-    public enum RTPTransport
+    public enum RtpTransport
     {
         UDP,
         TCP,
@@ -53,7 +54,7 @@ namespace SharpRTSPClient
     /// <summary>
     /// RTSP client.
     /// </summary>
-    public class RTSPClient : IDisposable
+    public class RtspClient : IDisposable
     {
         /// <summary>
         /// Source of the SSRCs this client reports under.
@@ -115,7 +116,7 @@ namespace SharpRTSPClient
         /// nothing else is asked for.
         /// </summary>
         /// <remarks>
-        /// Handy to compose with: <c>AcceptTrack = t =&gt; RTSPClient.FirstOfEachKind(t) &amp;&amp;
+        /// Handy to compose with: <c>AcceptTrack = t =&gt; RtspClient.FirstOfEachKind(t) &amp;&amp;
         /// t.Kind != TrackKind.Application;</c>
         /// </remarks>
         public static readonly Func<TrackOffer, bool> FirstOfEachKind = offer => offer.AcceptedOfThisKind == 0;
@@ -284,7 +285,7 @@ namespace SharpRTSPClient
         }
         public event EventHandler<StoppedEventArgs> Stopped;
 
-        public bool ProcessRTCP { get; set; } = true; // answer RTCP
+        public bool ProcessRtcp { get; set; } = true; // answer RTCP
 
         /// <summary>
         /// Every RTP packet that arrives, on whichever track, before it is parsed into frames.
@@ -294,15 +295,15 @@ namespace SharpRTSPClient
         /// sound nor pictures, can be told apart from the first. There used to be a pair of these
         /// per kind, reporting the first video track and the first audio track and nothing else.
         /// </remarks>
-        public event EventHandler<TrackRawRtpEventArgs> ReceivedRawRTP;
+        public event EventHandler<TrackRawRtpEventArgs> ReceivedRawRtp;
 
         /// <summary>
         /// Every RTCP packet that arrives, on whichever track.
         /// </summary>
         /// <remarks>
-        /// The counterpart of <see cref="ReceivedRawRTP"/> for the reports.
+        /// The counterpart of <see cref="ReceivedRawRtp"/> for the reports.
         /// </remarks>
-        public event EventHandler<TrackRawRtcpEventArgs> ReceivedRawRTCP;
+        public event EventHandler<TrackRawRtcpEventArgs> ReceivedRawRtcp;
 
         /// <summary>
         /// Default value of <see cref="ReceiverReportInterval"/>.
@@ -319,10 +320,10 @@ namespace SharpRTSPClient
         /// just as often. Set it to zero to go back to answering every one.
         /// </remarks>
         public TimeSpan ReceiverReportInterval { get; set; } = DEFAULT_RECEIVER_REPORT_INTERVAL;
-        // ReceivedRawVideoRTCP and ReceivedRawAudioRTCP were here; ReceivedRawRTCP replaces them.
+        // ReceivedRawVideoRTCP and ReceivedRawAudioRTCP were here; ReceivedRawRtcp replaces them.
 
-        public bool ProcessRTP { get; set; } = true;
-        // ReceivedRawVideoRTP and ReceivedRawAudioRTP were here; ReceivedRawRTP replaces them.
+        public bool ProcessRtp { get; set; } = true;
+        // ReceivedRawVideoRTP and ReceivedRawAudioRTP were here; ReceivedRawRtp replaces them.
 
         public bool AutoPlay { get; set; } = true;
 
@@ -359,7 +360,7 @@ namespace SharpRTSPClient
         /// <param name="firstPort">First port of the range, inclusive.</param>
         /// <param name="lastPort">Last port of the range, exclusive.</param>
         /// <remarks>
-        /// Set this before <see cref="Connect(string, RTPTransport, string, string, bool, RemoteCertificateValidationCallback, bool)"/>.
+        /// Set this before <see cref="Connect(string, RtpTransport, string, string, bool, RemoteCertificateValidationCallback, bool)"/>.
         /// Keep it clear of the range an RTSP server on the same machine uses - they would otherwise
         /// take ports from each other.
         /// </remarks>
@@ -414,7 +415,7 @@ namespace SharpRTSPClient
         
         // this wraps around a the RTSP tcpSocket stream
         private RtspListener _rtspClient;
-        private RTPTransport _rtpTransport = RTPTransport.UDP; // Mode, either RTP over UDP or RTP over TCP using the RTSP socket
+        private RtpTransport _rtpTransport = RtpTransport.UDP; // Mode, either RTP over UDP or RTP over TCP using the RTSP socket
 
         /// <summary>
         /// The tracks of the stream being received, in the order the description offered them.
@@ -453,7 +454,7 @@ namespace SharpRTSPClient
         /// <remarks>
         /// However many <see cref="AcceptTrack"/> let through, which is the first of each kind
         /// unless something else was asked for. The index of each is what <see cref="NewTrack"/>
-        /// and <see cref="ReceivedData"/> report, and what <see cref="SendRTCP(int, byte[])"/>
+        /// and <see cref="ReceivedData"/> report, and what <see cref="SendRtcp(int, byte[])"/>
         /// takes.
         /// </remarks>
         public int TrackCount
@@ -536,7 +537,7 @@ namespace SharpRTSPClient
         /// Which track, as <see cref="NewTrackEventArgs.TrackIndex"/> reports it.
         /// </param>
         /// <remarks>
-        /// Drawn at random when the track is set up. This used to be a VideoSSRC and an AudioSSRC -
+        /// Drawn at random when the track is set up. This used to be a VideoSsrc and an AudioSsrc -
         /// one apiece for the first track of each kind, which left every track after those two with
         /// an SSRC nothing could read or set.
         /// </remarks>
@@ -582,9 +583,9 @@ namespace SharpRTSPClient
         // SrtpSessionContext is live crypto state rather than a value: protecting a packet with one
         // out of band advances the roll over counter and the replay state, and the far end then
         // cannot read what follows. What a caller actually wanted was to send RTCP on a track,
-        // which SendRTCP does with the context kept inside.
+        // which SendRtcp does with the context kept inside.
 
-        static RTSPClient()
+        static RtspClient()
         {
             try
             {
@@ -602,20 +603,20 @@ namespace SharpRTSPClient
         /// <summary>
         /// Default ctor.
         /// </summary>
-        public RTSPClient()
+        public RtspClient()
         {
             // Over this client's own logger, read per message, so assigning Logger later works.
             _loggerFactory = new CustomLoggerFactory(() => Logger);
-            _logger = _loggerFactory.CreateLogger<RTSPClient>();
+            _logger = _loggerFactory.CreateLogger<RtspClient>();
         }
 
         /// <summary>
         /// Ctor.
         /// </summary>
         /// <param name="loggerFactory">Logger factory <see cref="ILoggerFactory"/>.</param>
-        public RTSPClient(ILoggerFactory loggerFactory)
+        public RtspClient(ILoggerFactory loggerFactory)
         {
-            _logger = loggerFactory.CreateLogger<RTSPClient>();
+            _logger = loggerFactory.CreateLogger<RtspClient>();
             _loggerFactory = loggerFactory;
         }
 
@@ -641,7 +642,7 @@ namespace SharpRTSPClient
         /// Connects to the specified RTSP server.
         /// </summary>
         /// <param name="url">URL to connect to.</param>
-        /// <param name="rtpTransport">Type of the RTP transport <see cref="RTPTransport"/>.</param>
+        /// <param name="rtpTransport">Type of the RTP transport <see cref="RtpTransport"/>.</param>
         /// <param name="username">User name.</param>
         /// <param name="password">Password.</param>
         /// <param name="playbackSession">Playback session.</param>
@@ -658,7 +659,7 @@ namespace SharpRTSPClient
         /// </remarks>
         public void Connect(
             string url,
-            RTPTransport rtpTransport,
+            RtpTransport rtpTransport,
             string username = null,
             string password = null,
             bool playbackSession = false,
@@ -675,7 +676,7 @@ namespace SharpRTSPClient
         /// Connects to the specified RTSP server.
         /// </summary>
         /// <param name="uri">The URI of the RTSP server.</param>
-        /// <param name="rtpTransport">Type of the RTP transport <see cref="RTPTransport"/>.</param>
+        /// <param name="rtpTransport">Type of the RTP transport <see cref="RtpTransport"/>.</param>
         /// <param name="username">User name.</param>
         /// <param name="password">Password.</param>
         /// <param name="playbackSession">Playback session.</param>
@@ -688,7 +689,7 @@ namespace SharpRTSPClient
         /// </param>
         public void Connect(
             Uri uri,
-            RTPTransport rtpTransport,
+            RtpTransport rtpTransport,
             string username = null,
             string password = null,
             bool playbackSession = false,
@@ -708,7 +709,7 @@ namespace SharpRTSPClient
         /// Connects to the specified RTSP server.
         /// </summary>
         /// <param name="uri">The URI of the RTSP server.</param>
-        /// <param name="rtpTransport">Type of the RTP transport <see cref="RTPTransport"/>.</param>
+        /// <param name="rtpTransport">Type of the RTP transport <see cref="RtpTransport"/>.</param>
         /// <param name="credentials">Network credentials.</param>
         /// <param name="playbackSession">Playback session.</param>
         /// <param name="userCertificateSelectionCallback">Callback for user certificate selection.</param>
@@ -720,7 +721,7 @@ namespace SharpRTSPClient
         /// </param>
         public void Connect(
             Uri uri,
-            RTPTransport rtpTransport,
+            RtpTransport rtpTransport,
             NetworkCredential credentials = null,
             bool playbackSession = false,
             RemoteCertificateValidationCallback userCertificateSelectionCallback = null,
@@ -732,7 +733,7 @@ namespace SharpRTSPClient
 
         private void Open(
             Uri uri,
-            RTPTransport rtpTransport,
+            RtpTransport rtpTransport,
             NetworkCredential credentials,
             bool playbackSession,
             RemoteCertificateValidationCallback userCertificateSelectionCallback,
@@ -1144,14 +1145,14 @@ namespace SharpRTSPClient
         {
             switch (_rtpTransport)
             {
-                case RTPTransport.TCP:
+                case RtpTransport.TCP:
                     return new RtpTcpTransport(_rtspClient)
                     {
                         DataChannel = _nextInterleavedChannel++,
                         ControlChannel = _nextInterleavedChannel++,
                     };
 
-                case RTPTransport.UDP:
+                case RtpTransport.UDP:
                     // the range holds one RTP/RTCP pair per transport, see SetRtpPortRange
                     UDPSocket pair = _lastUdpPair == null
                         ? new UDPSocket(RtpPortRangeStart, RtpPortRangeEnd)
@@ -1179,15 +1180,15 @@ namespace SharpRTSPClient
         /// elsewhere leaves the far end unable to read what follows.
         /// </remarks>
         /// <exception cref="ArgumentOutOfRangeException">There is no track with that index.</exception>
-        public void SendRTCP(int trackIndex, byte[] rtcp)
+        public void SendRtcp(int trackIndex, byte[] rtcp)
         {
-            SendRTCP(RequireTrack(trackIndex), rtcp);
+            SendRtcp(RequireTrack(trackIndex), rtcp);
         }
 
-        // SendVideoRTCP and SendAudioRTCP were here, sending on the first track of each kind.
-        // SendRTCP takes the track index instead, so every track can be sent to.
+        // SendVideoRtcp and SendAudioRtcp were here, sending on the first track of each kind.
+        // SendRtcp takes the track index instead, so every track can be sent to.
 
-        private void SendRTCP(ClientTrack track, byte[] rtcp)
+        private void SendRtcp(ClientTrack track, byte[] rtcp)
         {
             if (track == null)
             {
@@ -1244,63 +1245,20 @@ namespace SharpRTSPClient
         /// section 6.4.2 lays it out.
         /// </para>
         /// </remarks>
-        internal byte[] BuildRtcpReceiverReport(uint ssrc, uint aboutSsrc, RtcpChannelState channel)
+        internal byte[] BuildRtcpReceiverReport(uint ssrc, uint aboutSsrc, ChannelState channel)
         {
-            ReceptionReport report = channel?.Reception.TakeReport() ?? new ReceptionReport();
+            var receiverReport = new ReceiverReport { Ssrc = ssrc };
+            ReportBlock block = channel?.Reception.TakeReport() ?? new ReportBlock();
 
-            if (!report.HasData || aboutSsrc == 0)
+            // Nothing has arrived to report on, so there is nothing to say about anyone. The report
+            // still goes, because it is also what says this receiver is still here.
+            if (block.HasData && aboutSsrc != 0)
             {
-                // Nothing has arrived to report on, so there is nothing to say about anyone. The
-                // report still goes, because it is also what says this receiver is still here.
-                byte[] empty = new byte[8];
-                WriteRtcpHeader(empty, reportCount: 0, length: 1, ssrc: ssrc);
-                return empty;
+                block.Ssrc = aboutSsrc;
+                receiverReport.Reports.Add(block);
             }
 
-            // eight bytes of header and sender, then twenty four of report block
-            byte[] rtcp = new byte[32];
-            WriteRtcpHeader(rtcp, reportCount: 1, length: 7, ssrc: ssrc);
-
-            WriteUInt32(rtcp, 8, aboutSsrc);
-
-            rtcp[12] = report.FractionLost;
-
-            // twenty four bits, signed, so a receiver that took in duplicates reports fewer than none
-            int lost = report.CumulativeLost;
-            lost = lost > 0x7FFFFF ? 0x7FFFFF : lost < -0x800000 ? -0x800000 : lost;
-
-            rtcp[13] = (byte)((lost >> 16) & 0xFF);
-            rtcp[14] = (byte)((lost >> 8) & 0xFF);
-            rtcp[15] = (byte)(lost & 0xFF);
-
-            WriteUInt32(rtcp, 16, report.ExtendedHighestSequence);
-            WriteUInt32(rtcp, 20, report.Jitter);
-            WriteUInt32(rtcp, 24, report.LastSenderReport);
-            WriteUInt32(rtcp, 28, report.DelaySinceLastSenderReport);
-
-            return rtcp;
-        }
-
-        private static void WriteRtcpHeader(byte[] rtcp, int reportCount, int length, uint ssrc)
-        {
-            const int version = 2;
-            const int paddingBit = 0;
-            const int packetType = 201; // Receiver Report
-
-            rtcp[0] = (byte)((version << 6) + (paddingBit << 5) + reportCount);
-            rtcp[1] = packetType;
-            rtcp[2] = (byte)((length >> 8) & 0xFF);
-            rtcp[3] = (byte)(length & 0xFF);
-
-            WriteUInt32(rtcp, 4, ssrc);
-        }
-
-        private static void WriteUInt32(byte[] target, int at, uint value)
-        {
-            target[at] = (byte)((value >> 24) & 0xFF);
-            target[at + 1] = (byte)((value >> 16) & 0xFF);
-            target[at + 2] = (byte)((value >> 8) & 0xFF);
-            target[at + 3] = (byte)(value & 0xFF);
+            return RtcpUtils.CreateReceiverReport(receiverReport);
         }
 
         /// <summary>
@@ -1357,7 +1315,7 @@ namespace SharpRTSPClient
                 // and what arrived, so the report sent back says something
                 track.Rtcp.Reception.RecordPacket((ushort)rtpPacket.SequenceNumber, rtpPacket.Timestamp, track.Rtcp.ClockRate);
 
-                EventHandler<TrackRawRtpEventArgs> anyTrackListener = ReceivedRawRTP;
+                EventHandler<TrackRawRtpEventArgs> anyTrackListener = ReceivedRawRtp;
 
                 // Built only where something will read it. It was made for every packet of every
                 // stream whether or not anyone had subscribed.
@@ -1382,7 +1340,7 @@ namespace SharpRTSPClient
                         new TrackRawRtpEventArgs(track.Index, track.Kind, track.Codec, raw));
                 }
 
-                if (!ProcessRTP)
+                if (!ProcessRtp)
                 {
                     return;
                 }
@@ -1448,13 +1406,13 @@ namespace SharpRTSPClient
 
                 var raw = new RawRtcpDataEventArgs(rtcpData);
 
-                ReceivedRawRTCP?.Invoke(this,
+                ReceivedRawRtcp?.Invoke(this,
                     new TrackRawRtcpEventArgs(track.Index, track.Kind, track.Codec, raw));
 
-                if (!ProcessRTCP)
+                if (!ProcessRtcp)
                     return;
 
-                var reports = ParseRTCPAndGenerateResponse(rtcpData, SsrcOf(track), track.Rtcp);
+                var reports = ParseRtcpAndGenerateResponse(rtcpData, SsrcOf(track), track.Rtcp);
 
                 foreach (var report in reports)
                 {
@@ -1482,10 +1440,7 @@ namespace SharpRTSPClient
             return track.Ssrc;
         }
 
-        private const int RTCP_HEADER_SIZE = 8;
-        private const int RTCP_SENDER_REPORT_SIZE = 20;
-
-        internal List<byte[]> ParseRTCPAndGenerateResponse(Memory<byte> data, uint ssrc, RtcpChannelState channel)
+        internal List<byte[]> ParseRtcpAndGenerateResponse(Memory<byte> data, uint ssrc, ChannelState channel)
         {
             List<byte[]> reports = new List<byte[]>();
 
@@ -1503,7 +1458,7 @@ namespace SharpRTSPClient
             int packetIndex = 0;
             var span = data.Span;
 
-            while (packetIndex + RTCP_HEADER_SIZE <= data.Length)
+            while (packetIndex + RtcpUtils.HeaderLength <= data.Length)
             {
                 //int rtcpVersion = (span[packetIndex + 0] >> 6);
                 //int rtcpPadding = (span[packetIndex + 0] >> 5) & 0x01;
@@ -1513,7 +1468,7 @@ namespace SharpRTSPClient
                 int rtcpPacketLength = (rtcpLength + 1) * 4;
 
                 // a packet in a compound RTCP packet must not claim to run past the end of the datagram
-                if (rtcpPacketLength < RTCP_HEADER_SIZE || packetIndex + rtcpPacketLength > data.Length)
+                if (rtcpPacketLength < RtcpUtils.HeaderLength || packetIndex + rtcpPacketLength > data.Length)
                 {
                     _logger.LogWarning("Discarding malformed RTCP packet of declared length {rtcpPacketLength} at offset {packetIndex} of {length}",
                         rtcpPacketLength, packetIndex, data.Length);
@@ -1537,34 +1492,16 @@ namespace SharpRTSPClient
                     // We have received a Sender Report
                     // Use it to convert the RTP timestamp into the UTC time
 
-                    if (rtcpPacketLength < RTCP_SENDER_REPORT_SIZE)
+                    // all of its 28 bytes, its packet count among them (RFC 3550 6.4.1)
+                    if (!RtcpUtils.TryReadSenderReport(span.Slice(packetIndex, rtcpPacketLength), out SenderReport senderReport))
                     {
                         _logger.LogWarning("Discarding truncated RTCP Sender Report of length {rtcpPacketLength}", rtcpPacketLength);
                     }
                     else
                     {
-                        UInt32 ntpMswSeconds = (uint)(span[packetIndex + 8] << 24) + (uint)(span[packetIndex + 9] << 16)
-                        + (uint)(span[packetIndex + 10] << 8) + span[packetIndex + 11];
-
-                        UInt32 ntpLswFractions = (uint)(span[packetIndex + 12] << 24) + (uint)(span[packetIndex + 13] << 16)
-                        + (uint)(span[packetIndex + 14] << 8) + span[packetIndex + 15];
-
-                        UInt32 rtpTimestamp = (uint)(span[packetIndex + 16] << 24) + (uint)(span[packetIndex + 17] << 16)
-                        + (uint)(span[packetIndex + 18] << 8) + span[packetIndex + 19];
-
-                        UInt32 senderPacketCount = (uint)(span[packetIndex + 20] << 24) + (uint)(span[packetIndex + 21] << 16)
-                        + (uint)(span[packetIndex + 22] << 8) + span[packetIndex + 23];
-
-                        // The fraction matters. Lip sync is a matter of tens of milliseconds and the
-                        // seconds word alone is a second wide, so reading only that would be two
-                        // orders of magnitude too coarse to be worth anything. Divided by 2^32 as a
-                        // double, because uint over uint is integer division and comes out zero -
-                        // which is what the line that used to be commented out here would have done.
-                        double ntpSeconds = ntpMswSeconds + ntpLswFractions / 4294967296.0;
-
-                        // NTP Most Significant Word is relative to 0h, 1 Jan 1900
-                        // This will wrap around in 2036
-                        var time = new DateTime(1900, 1, 1, 0, 0, 0, DateTimeKind.Utc).AddSeconds(ntpSeconds);
+                        uint rtpTimestamp = senderReport.RtpTimestamp;
+                        uint senderPacketCount = senderReport.PacketCount;
+                        var time = senderReport.NtpTime;
 
                         // What makes the two streams of a session comparable: this pairs a wall clock
                         // time with the RTP timestamp of that same instant on this stream.
@@ -1577,8 +1514,7 @@ namespace SharpRTSPClient
                         // The middle of the timestamp is what a report echoes back, and the moment it
                         // arrived is what says how long the answer waited here. Between them the
                         // sender can work out the round trip, which it has no other way of knowing.
-                        uint middle32 = (ntpMswSeconds << 16) | (ntpLswFractions >> 16);
-                        channel.Reception.RecordSenderReportArrival(middle32);
+                        channel.Reception.RecordSenderReportArrival(senderReport.CompactNtp);
 
                         _logger.LogDebug("RTCP time (UTC) for RTP timestamp {timestamp} is {time}", rtpTimestamp, time);
 
@@ -2783,14 +2719,14 @@ namespace SharpRTSPClient
             {
                 // Server interleaves the RTP packets over the RTSP connection
                 // Example for TCP mode (RTP over RTSP)   Transport: RTP/AVP/TCP;interleaved=0-1
-                case RTPTransport.TCP:
+                case RtpTransport.TCP:
                     return new RtspTransport()
                     {
                         LowerTransport = RtspTransport.LowerTransportType.TCP,
                         // Eg Channel 0 for RTP video data. Channel 1 for RTCP status reports
                         Interleaved = (transport as RtpTcpTransport)?.Channels ?? throw new InvalidOperationException("TCP transport asked and no tcp channel allocated"),
                     };
-                case RTPTransport.UDP:
+                case RtpTransport.UDP:
                     return new RtspTransport()
                     {
                         LowerTransport = RtspTransport.LowerTransportType.UDP,
@@ -2800,7 +2736,7 @@ namespace SharpRTSPClient
                 // Server sends the RTP packets to a Pair of UDP ports (one for data, one for rtcp control messages)
                 // using Multicast Address and Ports that are in the reply to the SETUP message
                 // Example for MULTICAST mode     Transport: RTP/AVP;multicast
-                case RTPTransport.MULTICAST:
+                case RtpTransport.MULTICAST:
                     return new RtspTransport()
                     {
                         LowerTransport = RtspTransport.LowerTransportType.UDP,
@@ -2873,7 +2809,7 @@ namespace SharpRTSPClient
         // Stopped says which it was, so the caller can decide whether to reconnect.
 
         /// <summary>
-        /// How long <see cref="Connect(Uri, RTPTransport, System.Net.NetworkCredential, bool, System.Net.Security.RemoteCertificateValidationCallback, bool)"/>
+        /// How long <see cref="Connect(Uri, RtpTransport, System.Net.NetworkCredential, bool, System.Net.Security.RemoteCertificateValidationCallback, bool)"/>
         /// waits for the TCP connection, and for rtsps the TLS handshake as well.
         /// <see cref="Timeout.InfiniteTimeSpan"/> (the default) leaves it to the operating system.
         /// </summary>
@@ -3225,7 +3161,7 @@ namespace SharpRTSPClient
 
                     // Media that did not come over the connection may still be coming: the tracks
                     // are kept, and only the connection is made again
-                    resume = reconnect && _rtpTransport != RTPTransport.TCP && !string.IsNullOrEmpty(_session);
+                    resume = reconnect && _rtpTransport != RtpTransport.TCP && !string.IsNullOrEmpty(_session);
                     if (resume)
                     {
                         CloseConnection();
@@ -3498,17 +3434,17 @@ namespace SharpRTSPClient
         EncryptionUnavailable,
 
         /// <summary>
-        /// No connection within <see cref="RTSPClient.ConnectTimeout"/>.
+        /// No connection within <see cref="RtspClient.ConnectTimeout"/>.
         /// </summary>
         ConnectTimeout,
 
         /// <summary>
-        /// A request went unanswered for longer than <see cref="RTSPClient.ResponseTimeout"/>.
+        /// A request went unanswered for longer than <see cref="RtspClient.ResponseTimeout"/>.
         /// </summary>
         ResponseTimeout,
 
         /// <summary>
-        /// No media arrived for longer than <see cref="RTSPClient.ReceiveTimeout"/> while playing.
+        /// No media arrived for longer than <see cref="RtspClient.ReceiveTimeout"/> while playing.
         /// </summary>
         ReceiveTimeout,
 
@@ -3640,7 +3576,7 @@ namespace SharpRTSPClient
         }
     }
 
-    public static class RTSPMessageAuthExtensions
+    public static class RtspMessageAuthExtensions
     {
         public static void AddAuthorization(this RtspRequest request, Authentication authentication, Uri uri, uint commandCounter)
         {
@@ -3662,7 +3598,7 @@ namespace SharpRTSPClient
     /// </summary>
     /// <remarks>
     /// What a client builds for itself when it is not given an <see cref="ILoggerFactory"/>. The
-    /// logger is looked up per message rather than captured, so <see cref="RTSPClient.Logger"/>
+    /// logger is looked up per message rather than captured, so <see cref="RtspClient.Logger"/>
     /// can be assigned after the client exists.
     /// </remarks>
     public class CustomLoggerFactory : ILoggerFactory
@@ -3716,7 +3652,7 @@ namespace SharpRTSPClient
     /// joins the two.
     /// <para>
     /// The logger is read through a delegate rather than held, so that assigning
-    /// <see cref="RTSPClient.Logger"/> after the client is built takes effect. It used to read a
+    /// <see cref="RtspClient.Logger"/> after the client is built takes effect. It used to read a
     /// static class, which is why every client in a process shared one.
     /// </para>
     /// </remarks>

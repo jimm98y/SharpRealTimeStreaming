@@ -78,18 +78,18 @@ namespace SharpRTSPClient.Tests
             var receiver = SrtpProtocol.CreateSrtpSessionContext(keys);
 
             byte[] plaintext = SenderReport();
-            byte[] onTheWire = RTSPClient.ProtectRtcp(sender, plaintext);
+            byte[] onTheWire = RtspClient.ProtectRtcp(sender, plaintext);
 
-            using var client = new RTSPClient { ProcessRTCP = false };
+            using var client = new RtspClient { ProcessRtcp = false };
 
             ClientTrack track = client.AddTrack(kind);
             track.Context = receiver;
 
             byte[] seen = null;
             int trackIndex = -1;
-            client.ReceivedRawRTCP += (s, e) => { seen = e.Data.Data.ToArray(); trackIndex = e.TrackIndex; };
+            client.ReceivedRawRtcp += (s, e) => { seen = e.Data.Data.ToArray(); trackIndex = e.TrackIndex; };
 
-            MethodInfo handler = typeof(RTSPClient).GetMethod("RtcpControlDataReceived",
+            MethodInfo handler = typeof(RtspClient).GetMethod("RtcpControlDataReceived",
                 BindingFlags.Instance | BindingFlags.NonPublic);
             Assert.IsNotNull(handler, "RtcpControlDataReceived is not where the test expects it");
 

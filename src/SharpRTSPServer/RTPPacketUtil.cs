@@ -24,7 +24,7 @@ using System.Buffers.Binary;
 
 namespace SharpRTSPServer
 {
-    public static class RTPPacketUtil
+    public static class RtpPacketUtil
     {
         public const int RTP_VERSION = 2;
 
@@ -51,23 +51,23 @@ namespace SharpRTSPServer
             return BinaryPrimitives.ReadUInt16BigEndian(rtpPacket.Slice(2));
         }
 
-        public static uint ReadSSRC(ReadOnlySpan<byte> rtpPacket)
+        public static uint ReadSsrc(ReadOnlySpan<byte> rtpPacket)
         {
             return BinaryPrimitives.ReadUInt32BigEndian(rtpPacket.Slice(8));
         }
 
-        public static void WriteSSRC(Span<byte> rtp_packet, uint ssrc)
+        public static void WriteSsrc(Span<byte> rtp_packet, uint ssrc)
         {
             BinaryPrimitives.WriteUInt32BigEndian(rtp_packet.Slice(8), ssrc);
         }
 
-        public static uint ReadTS(byte[] data)
+        public static uint ReadTimestamp(byte[] data)
         {
             uint rtpTimestamp = ((uint)data[4] << 24) + (uint)(data[5] << 16) + (uint)(data[6] << 8) + data[7];
             return rtpTimestamp;
         }
 
-        public static void WriteTS(Span<byte> rtp_packet, uint ts)
+        public static void WriteTimestamp(Span<byte> rtp_packet, uint ts)
         {
             BinaryPrimitives.WriteUInt32BigEndian(rtp_packet.Slice(4), ts);
         }

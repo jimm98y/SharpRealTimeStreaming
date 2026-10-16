@@ -56,7 +56,7 @@ namespace SharpRTSPServer.Tests
             return client;
         }
 
-        private static (int Rtp, int Rtcp) Exchange(RTSPServer server, H264Track track, RtspTestClient client, int frames)
+        private static (int Rtp, int Rtcp) Exchange(RtspServer server, H264Track track, RtspTestClient client, int frames)
         {
             for (int i = 0; i < frames; i++)
             {
@@ -85,14 +85,14 @@ namespace SharpRTSPServer.Tests
         public void OneReportStartsTheStreamAndThenTheyAreRare()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"))
+            using var server = new RtspServer(port, new InMemoryUserRepository("admin", "password"))
             {
                 // far longer than this test runs, so only the opening report should appear
                 RtcpSenderReportInterval = TimeSpan.FromMinutes(5)
             };
 
             var videoTrack = new H264Track(Sps, Pps);
-            server.AddStreamSource(new RTSPStreamSource("stream1", videoTrack, null));
+            server.AddStreamSource(new RtspStreamSource("stream1", videoTrack, null));
             server.StartListen();
 
             using var client = Play(port, "rtsp://127.0.0.1:" + port + "/stream1");
@@ -107,13 +107,13 @@ namespace SharpRTSPServer.Tests
         public void TheOpeningReportIsSentStraightAway()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"))
+            using var server = new RtspServer(port, new InMemoryUserRepository("admin", "password"))
             {
                 RtcpSenderReportInterval = TimeSpan.FromMinutes(5)
             };
 
             var videoTrack = new H264Track(Sps, Pps);
-            server.AddStreamSource(new RTSPStreamSource("stream1", videoTrack, null));
+            server.AddStreamSource(new RtspStreamSource("stream1", videoTrack, null));
             server.StartListen();
 
             using var client = Play(port, "rtsp://127.0.0.1:" + port + "/stream1");
@@ -130,13 +130,13 @@ namespace SharpRTSPServer.Tests
         public void ReportsComeRoundAgainOnTheInterval()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"))
+            using var server = new RtspServer(port, new InMemoryUserRepository("admin", "password"))
             {
                 RtcpSenderReportInterval = TimeSpan.FromMilliseconds(200)
             };
 
             var videoTrack = new H264Track(Sps, Pps);
-            server.AddStreamSource(new RTSPStreamSource("stream1", videoTrack, null));
+            server.AddStreamSource(new RtspStreamSource("stream1", videoTrack, null));
             server.StartListen();
 
             using var client = Play(port, "rtsp://127.0.0.1:" + port + "/stream1");

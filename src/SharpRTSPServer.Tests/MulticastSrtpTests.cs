@@ -49,10 +49,10 @@ namespace SharpRTSPServer.Tests
 
         private const string Group = "239.255.42.98";
 
-        private static RTSPServer NewServer(int port, out H264Track videoTrack, int multicastPortStart,
+        private static RtspServer NewServer(int port, out H264Track videoTrack, int multicastPortStart,
             bool sharedKey = true)
         {
-            var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"), false, null,
+            var server = new RtspServer(port, new InMemoryUserRepository("admin", "password"), false, null,
                 SrtpCryptoSuites.AES_CM_128_HMAC_SHA1_80, null)
             {
                 MulticastEnabled = true, // not the default: a group is published to the whole segment
@@ -64,7 +64,7 @@ namespace SharpRTSPServer.Tests
 
             videoTrack = new H264Track(Sps, Pps) { RtpProfile = RtpProfiles.SAVP };
 
-            server.AddStreamSource(new RTSPStreamSource("stream1", videoTrack, null)
+            server.AddStreamSource(new RtspStreamSource("stream1", videoTrack, null)
             {
                 SharedSrtpKey = sharedKey,
             });

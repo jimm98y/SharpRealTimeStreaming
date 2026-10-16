@@ -32,7 +32,7 @@ namespace SharpRTSPServer
     /// <remarks>
     /// <para>
     /// It owns copies of the packets. The buffers the producer hands to
-    /// <see cref="IRtpSender.FeedInRawRTP"/> are released as soon as that call returns, so anything
+    /// <see cref="IRtpSender.FeedInRawRtp"/> are released as soon as that call returns, so anything
     /// written later has to have its own.
     /// </para>
     /// <para>

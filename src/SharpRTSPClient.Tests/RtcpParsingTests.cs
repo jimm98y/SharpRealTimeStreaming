@@ -19,6 +19,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+using SharpRTCP;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -59,18 +60,18 @@ namespace SharpRTSPClient.Tests
 
         private static byte[] SenderReportPacket(uint ssrc) => Packet(SenderReport, ssrc, bodyBytes: 20);
 
-        private static List<byte[]> Parse(RTSPClient client, byte[] data, RtcpChannelState channel)
+        private static List<byte[]> Parse(RtspClient client, byte[] data, ChannelState channel)
         {
-            return client.ParseRTCPAndGenerateResponse(new Memory<byte>(data), OurSsrc, channel);
+            return client.ParseRtcpAndGenerateResponse(new Memory<byte>(data), OurSsrc, channel);
         }
 
         /// <summary>A channel that has not seen any RTP yet.</summary>
-        private static RtcpChannelState FreshChannel() => new RtcpChannelState();
+        private static ChannelState FreshChannel() => new ChannelState();
 
         /// <summary>A channel already streaming from the given SSRC.</summary>
-        private static RtcpChannelState ChannelStreamingFrom(uint ssrc)
+        private static ChannelState ChannelStreamingFrom(uint ssrc)
         {
-            var channel = new RtcpChannelState();
+            var channel = new ChannelState();
             channel.LearnRemoteSsrc(ssrc);
             return channel;
         }
@@ -78,7 +79,7 @@ namespace SharpRTSPClient.Tests
         [TestMethod]
         public void SenderReport_IsAnsweredWithAReceiverReportCarryingOurSsrc()
         {
-            using var client = new RTSPClient();
+            using var client = new RtspClient();
             var reports = Parse(client, SenderReportPacket(ServerSsrc), FreshChannel());
 
             byte[] report = Assert.ContainsSingle(reports);
@@ -93,7 +94,7 @@ namespace SharpRTSPClient.Tests
         {
             // answering every report, so that what is counted here is how far the walk got rather
             // than how often this client chooses to answer
-            using var client = new RTSPClient { ReceiverReportInterval = TimeSpan.Zero };
+            using var client = new RtspClient { ReceiverReportInterval = TimeSpan.Zero };
 
             // Receiver Report, then two Sender Reports - we should answer both SRs and not fall off the end
             byte[] data = Packet(ReceiverReport, ServerSsrc)
@@ -115,14 +116,14 @@ namespace SharpRTSPClient.Tests
         [DataRow(7)]
         public void TruncatedHeader_IsIgnoredInsteadOfThrowing(int length)
         {
-            using var client = new RTSPClient();
+            using var client = new RtspClient();
             Assert.IsEmpty(Parse(client, new byte[length], FreshChannel()));
         }
 
         [TestMethod]
         public void PacketDeclaringMoreBytesThanTheDatagramHolds_IsIgnored()
         {
-            using var client = new RTSPClient();
+            using var client = new RtspClient();
             // an 8 byte datagram claiming to be 0xFFFF words long
             byte[] data = { 0x80, SenderReport, 0xFF, 0xFF, 1, 2, 3, 4 };
 
@@ -132,15 +133,27 @@ namespace SharpRTSPClient.Tests
         [TestMethod]
         public void SenderReportTruncatedBeforeTheRtpTimestamp_IsIgnored()
         {
-            using var client = new RTSPClient();
+            using var client = new RtspClient();
             // a well formed but too short Sender Report - the timestamp fields are simply not there
             Assert.IsEmpty(Parse(client, Packet(SenderReport, ServerSsrc, bodyBytes: 4), FreshChannel()));
         }
 
         [TestMethod]
+        [DataRow(12)]
+        [DataRow(16)]
+        public void SenderReportTruncatedBeforeItsPacketCount_IsIgnored(int bodyBytes)
+        {
+            using var client = new RtspClient();
+            // its timestamps there, but not all of what follows them - the packet count among it
+            var channel = FreshChannel();
+            Assert.IsEmpty(Parse(client, Packet(SenderReport, ServerSsrc, bodyBytes), channel));
+            Assert.IsFalse(channel.HasSenderSync, "nothing of a report that is not all there is used");
+        }
+
+        [TestMethod]
         public void PacketDeclaringZeroLength_DoesNotLoopForever()
         {
-            using var client = new RTSPClient();
+            using var client = new RtspClient();
             byte[] data = { 0x80, SenderReport, 0x00, 0x00, 1, 2, 3, 4 };
 
             // must return rather than spin on a packet that advances the cursor by nothing
@@ -150,7 +163,7 @@ namespace SharpRTSPClient.Tests
         [TestMethod]
         public void RandomBytes_NeverThrow()
         {
-            using var client = new RTSPClient();
+            using var client = new RtspClient();
             var random = new Random(20240607);
 
             for (int i = 0; i < 20_000; i++)
@@ -179,7 +192,7 @@ namespace SharpRTSPClient.Tests
         [TestMethod]
         public void Bye_FromTheStreamingSource_StopsTheClient()
         {
-            using var client = new RTSPClient();
+            using var client = new RtspClient();
             StoppedReason? reason = null;
             client.Stopped += (s, e) => reason = e.Reason;
 
@@ -191,7 +204,7 @@ namespace SharpRTSPClient.Tests
         [TestMethod]
         public void Bye_BeforeAnyMediaHasArrived_StopsTheClient()
         {
-            using var client = new RTSPClient();
+            using var client = new RtspClient();
             StoppedReason? reason = null;
             client.Stopped += (s, e) => reason = e.Reason;
 
@@ -204,7 +217,7 @@ namespace SharpRTSPClient.Tests
         [TestMethod]
         public void Bye_FromAnSsrcWeAreNotStreamingFrom_IsIgnored()
         {
-            using var client = new RTSPClient();
+            using var client = new RtspClient();
             StoppedReason? reason = null;
             client.Stopped += (s, e) => reason = e.Reason;
 

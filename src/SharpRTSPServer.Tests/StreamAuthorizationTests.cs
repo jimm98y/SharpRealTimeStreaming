@@ -37,15 +37,15 @@ namespace SharpRTSPServer.Tests
 
         private const string TcpTransport = "Transport: RTP/AVP/TCP;unicast;interleaved=0-1";
 
-        private readonly RTSPServer _server;
+        private readonly RtspServer _server;
         private readonly int _port;
 
         public StreamAuthorizationTests()
         {
             _port = TestPorts.FindFree();
-            _server = new RTSPServer(_port, new InMemoryUserRepository(UserName, Password));
-            _server.AddStreamSource(new RTSPStreamSource("mine", new H264Track(Sps, Pps), null));
-            _server.AddStreamSource(new RTSPStreamSource("theirs", new H264Track(Sps, Pps), null));
+            _server = new RtspServer(_port, new InMemoryUserRepository(UserName, Password));
+            _server.AddStreamSource(new RtspStreamSource("mine", new H264Track(Sps, Pps), null));
+            _server.AddStreamSource(new RtspStreamSource("theirs", new H264Track(Sps, Pps), null));
             _server.StartListen();
         }
 

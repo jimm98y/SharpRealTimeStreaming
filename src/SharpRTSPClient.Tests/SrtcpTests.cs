@@ -49,7 +49,7 @@ namespace SharpRTSPClient.Tests
         {
             byte[] report = ReceiverReport(0xDEADBEEF);
 
-            byte[] protectedRtcp = RTSPClient.ProtectRtcp(NewContext(), report);
+            byte[] protectedRtcp = RtspClient.ProtectRtcp(NewContext(), report);
 
             // The first 8 bytes of an SRTCP packet stay in the clear, so they must still be our report.
             // They used to come out as zeros because the payload was never copied into the output buffer.
@@ -59,7 +59,7 @@ namespace SharpRTSPClient.Tests
         [TestMethod]
         public void ProtectedRtcpIsNotAllZeros()
         {
-            byte[] protectedRtcp = RTSPClient.ProtectRtcp(NewContext(), ReceiverReport(0x11223344));
+            byte[] protectedRtcp = RtspClient.ProtectRtcp(NewContext(), ReceiverReport(0x11223344));
 
             Assert.Contains(b => b != 0, protectedRtcp);
         }
@@ -69,7 +69,7 @@ namespace SharpRTSPClient.Tests
         {
             byte[] report = ReceiverReport(0x11223344);
 
-            byte[] protectedRtcp = RTSPClient.ProtectRtcp(NewContext(), report);
+            byte[] protectedRtcp = RtspClient.ProtectRtcp(NewContext(), report);
 
             Assert.IsGreaterThan(report.Length, protectedRtcp.Length,
                 "SRTCP appends an index and an authentication tag, so the result must grow");
@@ -84,7 +84,7 @@ namespace SharpRTSPClient.Tests
             var receiver = SrtpProtocol.CreateSrtpSessionContext(keys);
 
             byte[] report = ReceiverReport(0x0BADF00D);
-            byte[] protectedRtcp = RTSPClient.ProtectRtcp(sender, report);
+            byte[] protectedRtcp = RtspClient.ProtectRtcp(sender, report);
 
             byte[] buffer = protectedRtcp.ToArray();
             int result = receiver.DecodeRtcpContext.UnprotectRtcp(buffer, buffer.Length, out int length);
@@ -98,8 +98,8 @@ namespace SharpRTSPClient.Tests
         {
             var context = NewContext();
 
-            byte[] first = RTSPClient.ProtectRtcp(context, ReceiverReport(0x11111111));
-            byte[] second = RTSPClient.ProtectRtcp(context, ReceiverReport(0x22222222));
+            byte[] first = RtspClient.ProtectRtcp(context, ReceiverReport(0x11111111));
+            byte[] second = RtspClient.ProtectRtcp(context, ReceiverReport(0x22222222));
 
             Assert.AreNotSequenceEqual(first, second);
         }

@@ -29,7 +29,7 @@ string rtspUri = config["Uri"];
 string userName = config["UserName"];
 string password = config["Password"];
 
-using (RTSPClient client = new RTSPClient())
+using (RtspClient client = new RtspClient())
 {
     // Every track the stream offers, and which one each frame belongs to. The events named after
     // a kind reported the first video track and the first audio track and nothing else.
@@ -53,7 +53,7 @@ using (RTSPClient client = new RTSPClient())
     // unset for that older behaviour, or narrow it: t => t.Kind == TrackKind.Video, t => t.Codec == "H265".
     client.AcceptTrack = _ => true;
 
-    client.Connect(rtspUri, RTPTransport.TCP, userName, password, false, null, true);
+    client.Connect(rtspUri, RtpTransport.TCP, userName, password, false, null, true);
 
     Console.WriteLine("Press any key to exit");
     // Asking whether a key has been pressed throws outright when there is no console, or when

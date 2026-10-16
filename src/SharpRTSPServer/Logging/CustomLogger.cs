@@ -36,7 +36,7 @@ namespace SharpRTSPServer.Logging
     /// joins the two.
     /// <para>
     /// The logger is read through a delegate rather than held, so that assigning
-    /// <see cref="RTSPServer.Logger"/> after the server is built takes effect. It used to read a
+    /// <see cref="RtspServer.Logger"/> after the server is built takes effect. It used to read a
     /// static class, which is why every server in a process shared one.
     /// </para>
     /// </remarks>

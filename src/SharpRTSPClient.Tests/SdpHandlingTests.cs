@@ -55,7 +55,7 @@ namespace SharpRTSPClient.Tests
         {
             var result = new Result();
             using var server = new FakeRtspServer(SdpHeader + sdp);
-            using var client = new RTSPClient();
+            using var client = new RtspClient();
 
             var settled = new ManualResetEventSlim(false);
 
@@ -84,7 +84,7 @@ namespace SharpRTSPClient.Tests
                 client.AcceptTrack = acceptTrack;
             }
 
-            client.Connect(server.BaseUri, RTPTransport.TCP);
+            client.Connect(server.BaseUri, RtpTransport.TCP);
 
             settled.Wait(5000);
             client.Stop();
@@ -435,12 +435,12 @@ namespace SharpRTSPClient.Tests
         {
             using var server = new FakeRtspServer(SdpHeader +
                 "m=video 0 RTP/AVP 96\r\na=control:trackID=0\r\na=rtpmap:96 H264/90000\r\n");
-            using var client = new RTSPClient { AutoPlay = false };
+            using var client = new RtspClient { AutoPlay = false };
 
             var settled = new ManualResetEventSlim(false);
             client.SetupMessageCompleted += (s, e) => settled.Set();
 
-            client.Connect(server.BaseUri, RTPTransport.TCP);
+            client.Connect(server.BaseUri, RtpTransport.TCP);
             Assert.IsTrue(settled.Wait(5000), "the client never finished the SETUP handshake");
             client.Stop();
 
@@ -452,9 +452,9 @@ namespace SharpRTSPClient.Tests
         {
             using var server = new FakeRtspServer(SdpHeader +
                 "m=video 0 RTP/AVP 96\r\na=control:trackID=0\r\na=rtpmap:96 H264/90000\r\n");
-            using var client = new RTSPClient { AutoPlay = true };
+            using var client = new RtspClient { AutoPlay = true };
 
-            client.Connect(server.BaseUri, RTPTransport.TCP);
+            client.Connect(server.BaseUri, RtpTransport.TCP);
 
             Assert.IsTrue(server.WaitForRequest("PLAY"), "AutoPlay should have sent a PLAY");
             client.Stop();
@@ -465,12 +465,12 @@ namespace SharpRTSPClient.Tests
         {
             using var server = new FakeRtspServer(SdpHeader +
                 "m=video 0 RTP/AVP 96\r\na=control:trackID=0\r\na=rtpmap:96 H264/90000\r\n");
-            using var client = new RTSPClient { AutoPlay = false };
+            using var client = new RtspClient { AutoPlay = false };
 
             var settled = new ManualResetEventSlim(false);
             client.SetupMessageCompleted += (s, e) => settled.Set();
 
-            client.Connect(server.BaseUri, RTPTransport.TCP);
+            client.Connect(server.BaseUri, RtpTransport.TCP);
             settled.Wait(5000);
             client.Stop();
 

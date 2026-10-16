@@ -118,7 +118,7 @@ namespace SharpRTSPServer.Tests
             var track = NewTrack();
             track.ID = 1;
 
-            string sdp = track.BuildSDP(new System.Text.StringBuilder()).ToString();
+            string sdp = track.BuildSdp(new System.Text.StringBuilder()).ToString();
 
             StringAssert.Contains(sdp, "m=audio 0 RTP/AVP 97");
             StringAssert.Contains(sdp, "a=control:trackID=1");

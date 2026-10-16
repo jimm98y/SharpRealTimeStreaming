@@ -62,8 +62,8 @@ namespace SharpRTSPServer.Tests
         public void AFailedTlsHandshakeDoesNotStopTheServerAccepting()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"), false, ServerCertificate(), null);
-            server.AddStreamSource(new RTSPStreamSource("stream1", new H264Track(Sps, Pps), null));
+            using var server = new RtspServer(port, new InMemoryUserRepository("admin", "password"), false, ServerCertificate(), null);
+            server.AddStreamSource(new RtspStreamSource("stream1", new H264Track(Sps, Pps), null));
             server.StartListen();
 
             // Anyone at all could send this. The handshake happens inside the accept, and its failure
@@ -82,8 +82,8 @@ namespace SharpRTSPServer.Tests
         public void RepeatedBadHandshakesDoNotStopTheServerAccepting()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"), false, ServerCertificate(), null);
-            server.AddStreamSource(new RTSPStreamSource("stream1", new H264Track(Sps, Pps), null));
+            using var server = new RtspServer(port, new InMemoryUserRepository("admin", "password"), false, ServerCertificate(), null);
+            server.AddStreamSource(new RtspStreamSource("stream1", new H264Track(Sps, Pps), null));
             server.StartListen();
 
             for (int i = 0; i < 20; i++)
@@ -101,8 +101,8 @@ namespace SharpRTSPServer.Tests
         public void ConnectionsThatNeverSpeakDoNotStopOtherClientsGettingIn()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"), false, ServerCertificate(), null);
-            server.AddStreamSource(new RTSPStreamSource("stream1", new H264Track(Sps, Pps), null));
+            using var server = new RtspServer(port, new InMemoryUserRepository("admin", "password"), false, ServerCertificate(), null);
+            server.AddStreamSource(new RtspStreamSource("stream1", new H264Track(Sps, Pps), null));
             server.StartListen();
 
             // The TLS handshake used to happen inside the accept, so a client that connected and then
@@ -144,8 +144,8 @@ namespace SharpRTSPServer.Tests
         public void AClientThatConnectsAndLeavesDoesNotStopTheServerAccepting()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
-            server.AddStreamSource(new RTSPStreamSource("stream1", new H264Track(Sps, Pps), null));
+            using var server = new RtspServer(port, new InMemoryUserRepository("admin", "password"));
+            server.AddStreamSource(new RtspStreamSource("stream1", new H264Track(Sps, Pps), null));
             server.StartListen();
 
             for (int i = 0; i < 20; i++)

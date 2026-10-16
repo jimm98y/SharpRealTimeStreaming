@@ -93,11 +93,11 @@ namespace SharpRTSPServer.Tests
         public void VideoAndAudioAreSentUnderTheirOwnSsrc()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
+            using var server = new RtspServer(port, new InMemoryUserRepository("admin", "password"));
 
             var videoTrack = new H264Track(Sps, Pps);
             var audioTrack = new AACTrack(new byte[] { 0x12, 0x10 }, 44100, 2);
-            server.AddStreamSource(new RTSPStreamSource("stream1", videoTrack, audioTrack));
+            server.AddStreamSource(new RtspStreamSource("stream1", videoTrack, audioTrack));
             server.StartListen();
 
             using var client = Play(port);
@@ -111,8 +111,8 @@ namespace SharpRTSPServer.Tests
             // The SSRC used to live on the connection, so the second SETUP overwrote the first and
             // both streams went out under one SSRC - contradicting the SETUP replies, which had
             // already announced a different one for each track.
-            Assert.AreEqual(videoTrack.SSRC, videoSsrc, "video RTP should carry the video track's SSRC");
-            Assert.AreEqual(audioTrack.SSRC, audioSsrc, "audio RTP should carry the audio track's SSRC");
+            Assert.AreEqual(videoTrack.Ssrc, videoSsrc, "video RTP should carry the video track's SSRC");
+            Assert.AreEqual(audioTrack.Ssrc, audioSsrc, "audio RTP should carry the audio track's SSRC");
             Assert.AreNotEqual(videoSsrc, audioSsrc, "two streams of one session must not share an SSRC");
         }
 
@@ -120,11 +120,11 @@ namespace SharpRTSPServer.Tests
         public void TheSetupReplyAnnouncesTheSsrcTheRtpCarries()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
+            using var server = new RtspServer(port, new InMemoryUserRepository("admin", "password"));
 
             var videoTrack = new H264Track(Sps, Pps);
             var audioTrack = new AACTrack(new byte[] { 0x12, 0x10 }, 44100, 2);
-            server.AddStreamSource(new RTSPStreamSource("stream1", videoTrack, audioTrack));
+            server.AddStreamSource(new RtspStreamSource("stream1", videoTrack, audioTrack));
             server.StartListen();
 
             string baseUri = "rtsp://127.0.0.1:" + port + "/stream1";
@@ -156,12 +156,12 @@ namespace SharpRTSPServer.Tests
         public void AProxyTrackInPassthroughForwardsTheSourceSsrcAndSequenceNumbers()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
+            using var server = new RtspServer(port, new InMemoryUserRepository("admin", "password"));
 
             var videoTrack = new ProxyTrack(TrackType.Video) { PreserveSourceHeaders = true };
             var audioTrack = new ProxyTrack(TrackType.Audio) { PreserveSourceHeaders = true };
-            var streamSource = new RTSPStreamSource("stream1", videoTrack, audioTrack);
-            streamSource.OverrideSDP(Sdp, true);
+            var streamSource = new RtspStreamSource("stream1", videoTrack, audioTrack);
+            streamSource.OverrideSdp(Sdp, true);
             server.AddStreamSource(streamSource);
             videoTrack.Start();
             audioTrack.Start();
@@ -184,12 +184,12 @@ namespace SharpRTSPServer.Tests
         public void AProxyTrackWithoutPassthroughIsStillRestamped()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
+            using var server = new RtspServer(port, new InMemoryUserRepository("admin", "password"));
 
             var videoTrack = new ProxyTrack(TrackType.Video);
             var audioTrack = new ProxyTrack(TrackType.Audio);
-            var streamSource = new RTSPStreamSource("stream1", videoTrack, audioTrack);
-            streamSource.OverrideSDP(Sdp, true);
+            var streamSource = new RtspStreamSource("stream1", videoTrack, audioTrack);
+            streamSource.OverrideSdp(Sdp, true);
             server.AddStreamSource(streamSource);
             videoTrack.Start();
             audioTrack.Start();
@@ -200,7 +200,7 @@ namespace SharpRTSPServer.Tests
             videoTrack.FeedInRawSamples(9000, One(RtpPacket(40000, 0x3C790025)));
 
             byte[] sent = NextOn(client, VideoChannel);
-            Assert.AreEqual(videoTrack.SSRC, Ssrc(sent), "the default is still the server's own SSRC");
+            Assert.AreEqual(videoTrack.Ssrc, Ssrc(sent), "the default is still the server's own SSRC");
             Assert.AreNotEqual((ushort)40000, Seq(sent), "the default is still the server's own numbering");
         }
 

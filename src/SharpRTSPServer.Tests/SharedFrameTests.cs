@@ -68,9 +68,9 @@ namespace SharpRTSPServer.Tests
         public void EveryClientGetsTheWholeFrameIntact()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
+            using var server = new RtspServer(port, new InMemoryUserRepository("admin", "password"));
             var videoTrack = new H264Track(Sps, Pps);
-            server.AddStreamSource(new RTSPStreamSource("stream1", videoTrack, null));
+            server.AddStreamSource(new RtspStreamSource("stream1", videoTrack, null));
             server.StartListen();
 
             string baseUri = "rtsp://127.0.0.1:" + port + "/stream1";
@@ -105,9 +105,9 @@ namespace SharpRTSPServer.Tests
         public void EachClientGetsItsOwnSequenceNumbering()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
+            using var server = new RtspServer(port, new InMemoryUserRepository("admin", "password"));
             var videoTrack = new H264Track(Sps, Pps);
-            server.AddStreamSource(new RTSPStreamSource("stream1", videoTrack, null));
+            server.AddStreamSource(new RtspStreamSource("stream1", videoTrack, null));
             server.StartListen();
 
             string baseUri = "rtsp://127.0.0.1:" + port + "/stream1";
@@ -139,9 +139,9 @@ namespace SharpRTSPServer.Tests
         public void SamplesWithNothingInThemAreNotSent()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
+            using var server = new RtspServer(port, new InMemoryUserRepository("admin", "password"));
             var videoTrack = new H264Track(Sps, Pps);
-            server.AddStreamSource(new RTSPStreamSource("stream1", videoTrack, null));
+            server.AddStreamSource(new RtspStreamSource("stream1", videoTrack, null));
             server.StartListen();
 
             using var client = Play(port, "rtsp://127.0.0.1:" + port + "/stream1");
@@ -170,9 +170,9 @@ namespace SharpRTSPServer.Tests
         public void ASampleListOfNothingButEmptiesSendsNothing()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
+            using var server = new RtspServer(port, new InMemoryUserRepository("admin", "password"));
             var videoTrack = new H264Track(Sps, Pps);
-            server.AddStreamSource(new RTSPStreamSource("stream1", videoTrack, null));
+            server.AddStreamSource(new RtspStreamSource("stream1", videoTrack, null));
             server.StartListen();
 
             using var client = Play(port, "rtsp://127.0.0.1:" + port + "/stream1");

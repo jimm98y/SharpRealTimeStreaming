@@ -28,7 +28,7 @@ namespace SharpRTSPServer
     /// <summary>
     /// The RTSP client connection.
     /// </summary>
-    public class RTSPConnection
+    public class RtspConnection
     {
         /// <summary>
         /// RTSP conneciton listener.
@@ -133,7 +133,7 @@ namespace SharpRTSPServer
         }
 
         // SSRC used to live here, as the SSRC of whichever track was set up last - a single value
-        // describing one of however many streams a connection carries. Read RTPStream.SSRC off the
+        // describing one of however many streams a connection carries. Read RtpStream.Ssrc off the
         // stream you mean, from Streams or StreamOrNull.
 
         /// <summary>
@@ -146,7 +146,7 @@ namespace SharpRTSPServer
         // a track's ID is its place in the stream rather than what sort of media it carries. Use
         // Streams, or StreamOrNull with the track ID you mean.
 
-        private RTPStream[] _streams = new RTPStream[0];
+        private RtpStream[] _streams = new RtpStream[0];
 
         private readonly object _streamsLock = new object();
 
@@ -159,12 +159,12 @@ namespace SharpRTSPServer
         /// track with ID 3 has four of these, the first three unused - which costs nothing and means
         /// the index is always the track's own ID.
         /// </remarks>
-        public RTPStream[] Streams => _streams;
+        public RtpStream[] Streams => _streams;
 
         /// <summary>
         /// This connection's stream for a track, made if this is the first time it is asked for.
         /// </summary>
-        public RTPStream StreamFor(int trackId)
+        public RtpStream StreamFor(int trackId)
         {
             if (trackId < 0)
             {
@@ -175,12 +175,12 @@ namespace SharpRTSPServer
             {
                 if (trackId >= _streams.Length)
                 {
-                    var grown = new RTPStream[trackId + 1];
+                    var grown = new RtpStream[trackId + 1];
                     Array.Copy(_streams, grown, _streams.Length);
 
                     for (int i = _streams.Length; i < grown.Length; i++)
                     {
-                        grown[i] = new RTPStream();
+                        grown[i] = new RtpStream();
                     }
 
                     _streams = grown;
@@ -193,9 +193,9 @@ namespace SharpRTSPServer
         /// <summary>
         /// This connection's stream for a track, or null if it never set that one up.
         /// </summary>
-        public RTPStream StreamOrNull(int trackId)
+        public RtpStream StreamOrNull(int trackId)
         {
-            RTPStream[] streams = _streams;
+            RtpStream[] streams = _streams;
 
             return trackId >= 0 && trackId < streams.Length ? streams[trackId] : null;
         }

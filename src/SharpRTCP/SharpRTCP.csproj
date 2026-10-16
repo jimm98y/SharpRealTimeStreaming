@@ -1,0 +1,20 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>netstandard2.0;net481;net8.0;net10.0</TargetFrameworks>
+    <LangVersion>latest</LangVersion>
+    <Description>RTCP of RTP (RFC 3550): sender and receiver reports, reception statistics, source descriptions and Picture Loss Indications.</Description>
+    <PackageTags>rtcp;rtp;rtsp;webrtc;netstandard20;net10</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.0' Or '$(TargetFramework)' == 'net481'">
+    <PackageReference Include="System.Memory" Version="4.6.3" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <!-- the public API is documented, but not every member yet - do not fail the build over it -->
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+</Project>

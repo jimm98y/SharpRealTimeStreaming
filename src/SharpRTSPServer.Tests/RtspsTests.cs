@@ -78,14 +78,14 @@ namespace SharpRTSPServer.Tests
             return X509CertificateLoader.LoadPkcs12(ephemeral.Export(X509ContentType.Pfx), null);
         }
 
-        private static RTSPServer StartTlsServer(X509Certificate2 certificate, int port)
+        private static RtspServer StartTlsServer(X509Certificate2 certificate, int port)
         {
-            var server = new RTSPServer(port, new InMemoryUserRepository(UserName, Password),
+            var server = new RtspServer(port, new InMemoryUserRepository(UserName, Password),
                 useHttpTunnel: false,
                 tlsCertificate: certificate,
                 loggerFactory: null);
 
-            server.AddStreamSource(new RTSPStreamSource(StreamId, new H264Track(Sps, Pps), null));
+            server.AddStreamSource(new RtspStreamSource(StreamId, new H264Track(Sps, Pps), null));
             server.StartListen();
             return server;
         }
@@ -95,7 +95,7 @@ namespace SharpRTSPServer.Tests
         {
             int port = TestPorts.FindFree();
             using X509Certificate2 certificate = CreateServerCertificate();
-            using RTSPServer server = StartTlsServer(certificate, port);
+            using RtspServer server = StartTlsServer(certificate, port);
 
             using var client = new RtspTestClient(port, UserName, Password, useTls: true);
 
@@ -109,7 +109,7 @@ namespace SharpRTSPServer.Tests
         {
             int port = TestPorts.FindFree();
             using X509Certificate2 certificate = CreateServerCertificate();
-            using RTSPServer server = StartTlsServer(certificate, port);
+            using RtspServer server = StartTlsServer(certificate, port);
 
             using var anonymous = new RtspTestClient(port, null, null, useTls: true);
 
@@ -124,7 +124,7 @@ namespace SharpRTSPServer.Tests
         {
             int port = TestPorts.FindFree();
             using X509Certificate2 certificate = CreateServerCertificate();
-            using RTSPServer server = StartTlsServer(certificate, port);
+            using RtspServer server = StartTlsServer(certificate, port);
 
             string baseUri = $"rtsps://127.0.0.1:{port}/{StreamId}";
             using var client = new RtspTestClient(port, UserName, Password, useTls: true);
@@ -141,7 +141,7 @@ namespace SharpRTSPServer.Tests
         {
             int port = TestPorts.FindFree();
             using X509Certificate2 certificate = CreateServerCertificate();
-            using RTSPServer server = StartTlsServer(certificate, port);
+            using RtspServer server = StartTlsServer(certificate, port);
 
             Assert.IsNotNull(server.TlsCertificate);
             Assert.AreEqual(certificate.Thumbprint, server.TlsCertificate.Thumbprint);

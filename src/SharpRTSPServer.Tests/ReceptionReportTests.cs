@@ -46,7 +46,7 @@ namespace SharpRTSPServer.Tests
 
         private sealed class Session : IDisposable
         {
-            public RTSPServer Server;
+            public RtspServer Server;
             public H264Track Video;
             public RtspTestClient Client;
             public UdpClient Rtp;
@@ -71,11 +71,11 @@ namespace SharpRTSPServer.Tests
             var session = new Session();
 
             int port = TestPorts.FindFree();
-            session.Server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
+            session.Server = new RtspServer(port, new InMemoryUserRepository("admin", "password"));
             session.Server.SetRtpPortRange(58000, 58200);
 
             session.Video = new H264Track(Sps, Pps);
-            session.Server.AddStreamSource(new RTSPStreamSource("stream1", session.Video, null));
+            session.Server.AddStreamSource(new RtspStreamSource("stream1", session.Video, null));
             session.Server.StartListen();
 
             session.Rtp = new UdpClient(new IPEndPoint(IPAddress.Loopback, firstClientPort));

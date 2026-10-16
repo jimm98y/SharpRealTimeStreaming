@@ -80,7 +80,7 @@ namespace SharpRTSPServer.Tests
 
         private sealed class Session : IDisposable
         {
-            public RTSPServer Server;
+            public RtspServer Server;
             public RtspTestClient Client;
             public string BaseUri;
             public string SessionId;
@@ -98,9 +98,9 @@ namespace SharpRTSPServer.Tests
             var session = new Session { Playback = playback };
 
             int port = TestPorts.FindFree();
-            session.Server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
+            session.Server = new RtspServer(port, new InMemoryUserRepository("admin", "password"));
 
-            session.Server.AddStreamSource(new RTSPStreamSource("stream1", new H264Track(Sps, Pps), null)
+            session.Server.AddStreamSource(new RtspStreamSource("stream1", new H264Track(Sps, Pps), null)
             {
                 PlaybackControl = playback,
             });
@@ -202,10 +202,10 @@ namespace SharpRTSPServer.Tests
         public void ALiveStreamSaysItCannotBePlayedFromAPoint()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
+            using var server = new RtspServer(port, new InMemoryUserRepository("admin", "password"));
 
             // no playback control at all, which is what a camera looks like
-            server.AddStreamSource(new RTSPStreamSource("stream1", new H264Track(Sps, Pps), null));
+            server.AddStreamSource(new RtspStreamSource("stream1", new H264Track(Sps, Pps), null));
             server.StartListen();
 
             string baseUri = $"rtsp://127.0.0.1:{port}/stream1";
@@ -232,8 +232,8 @@ namespace SharpRTSPServer.Tests
             // means the beginning of whatever the server has, which on a live stream is now - not a
             // seek. Reading it as one and refusing turned away every client there is.
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
-            server.AddStreamSource(new RTSPStreamSource("stream1", new H264Track(Sps, Pps), null));
+            using var server = new RtspServer(port, new InMemoryUserRepository("admin", "password"));
+            server.AddStreamSource(new RtspStreamSource("stream1", new H264Track(Sps, Pps), null));
             server.StartListen();
 
             string baseUri = $"rtsp://127.0.0.1:{port}/stream1";
@@ -254,9 +254,9 @@ namespace SharpRTSPServer.Tests
         {
             // Answering 200 is not enough: the point of PLAY is what follows it.
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
+            using var server = new RtspServer(port, new InMemoryUserRepository("admin", "password"));
             var video = new H264Track(Sps, Pps);
-            server.AddStreamSource(new RTSPStreamSource("stream1", video, null));
+            server.AddStreamSource(new RtspStreamSource("stream1", video, null));
             server.StartListen();
 
             string baseUri = $"rtsp://127.0.0.1:{port}/stream1";
@@ -294,8 +294,8 @@ namespace SharpRTSPServer.Tests
         public void ALiveStreamStillPlaysFromNow()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
-            server.AddStreamSource(new RTSPStreamSource("stream1", new H264Track(Sps, Pps), null));
+            using var server = new RtspServer(port, new InMemoryUserRepository("admin", "password"));
+            server.AddStreamSource(new RtspStreamSource("stream1", new H264Track(Sps, Pps), null));
             server.StartListen();
 
             string baseUri = $"rtsp://127.0.0.1:{port}/stream1";
@@ -429,8 +429,8 @@ namespace SharpRTSPServer.Tests
         public void ALiveDescriptionPromisesNoRange()
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
-            server.AddStreamSource(new RTSPStreamSource("stream1", new H264Track(Sps, Pps), null));
+            using var server = new RtspServer(port, new InMemoryUserRepository("admin", "password"));
+            server.AddStreamSource(new RtspStreamSource("stream1", new H264Track(Sps, Pps), null));
             server.StartListen();
 
             using var client = new RtspTestClient(port, "admin", "password");

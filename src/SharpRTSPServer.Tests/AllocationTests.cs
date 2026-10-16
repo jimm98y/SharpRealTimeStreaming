@@ -73,10 +73,10 @@ namespace SharpRTSPServer.Tests
             const int Clients = 3;
 
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
+            using var server = new RtspServer(port, new InMemoryUserRepository("admin", "password"));
 
             var video = new H264Track(Sps, Pps);
-            server.AddStreamSource(new RTSPStreamSource("stream1", video, null));
+            server.AddStreamSource(new RtspStreamSource("stream1", video, null));
             server.StartListen();
 
             string baseUri = $"rtsp://127.0.0.1:{port}/stream1";

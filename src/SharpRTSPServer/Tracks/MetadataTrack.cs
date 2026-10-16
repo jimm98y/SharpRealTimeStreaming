@@ -93,7 +93,7 @@ namespace SharpRTSPServer
         /// pictures. A client that does not know the media type passes over the section and sets up
         /// the rest of the stream as it would have anyway.
         /// </remarks>
-        public override StringBuilder BuildSDP(StringBuilder sdp)
+        public override StringBuilder BuildSdp(StringBuilder sdp)
         {
             sdp.Append($"m=application 0 RTP/{RtpProfile} {PayloadType}\r\n");
             sdp.Append($"a=control:trackID={ID}\r\n");
@@ -156,9 +156,9 @@ namespace SharpRTSPServer
                     // stop collecting and start reading.
                     bool rtpMarker = endOfDocument && isLastSample;
 
-                    RTPPacketUtil.WriteHeader(rtpPacket.Span,
-                        RTPPacketUtil.RTP_VERSION, false, false, 0, rtpMarker, PayloadType);
-                    RTPPacketUtil.WriteTS(rtpPacket.Span, rtpTimestamp);
+                    RtpPacketUtil.WriteHeader(rtpPacket.Span,
+                        RtpPacketUtil.RTP_VERSION, false, false, 0, rtpMarker, PayloadType);
+                    RtpPacketUtil.WriteTimestamp(rtpPacket.Span, rtpTimestamp);
 
                     document.Slice(at, take).CopyTo(rtpPacket.Slice(12));
 

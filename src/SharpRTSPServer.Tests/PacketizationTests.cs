@@ -129,7 +129,7 @@ namespace SharpRTSPServer.Tests
         {
             var track = new H265Track(new byte[] { 0x40, 0x01 }, new byte[] { 0x42, 0x01 }, new byte[] { 0x44, 0x01 }) { ID = 0 };
 
-            string sdp = track.BuildSDP(new StringBuilder()).ToString();
+            string sdp = track.BuildSdp(new StringBuilder()).ToString();
 
             StringAssert.Contains(sdp, "a=rtpmap:96 H265/90000");
             StringAssert.Contains(sdp, "sprop-vps=");
@@ -155,7 +155,7 @@ namespace SharpRTSPServer.Tests
             var track = new H265Track();
             track.SetParameterSets(null, new byte[] { 0x42, 0x01 }, new byte[] { 0x44, 0x01 });
 
-            string sdp = track.BuildSDP(new StringBuilder()).ToString();
+            string sdp = track.BuildSdp(new StringBuilder()).ToString();
 
             StringAssert.Contains(sdp, "sprop-sps=");
             StringAssert.Contains(sdp, "sprop-pps=");
@@ -345,7 +345,7 @@ namespace SharpRTSPServer.Tests
         {
             var track = (ITrack)Activator.CreateInstance(trackType);
 
-            string sdp = track.BuildSDP(new StringBuilder()).ToString();
+            string sdp = track.BuildSdp(new StringBuilder()).ToString();
 
             StringAssert.Contains(sdp, $"m=audio 0 RTP/AVP {payloadType}");
             StringAssert.Contains(sdp, expectedRtpMap);
@@ -354,7 +354,7 @@ namespace SharpRTSPServer.Tests
         [TestMethod]
         public void OpusSdpAdvertisesFortyEightKilohertzStereo()
         {
-            string sdp = new OpusTrack().BuildSDP(new StringBuilder()).ToString();
+            string sdp = new OpusTrack().BuildSdp(new StringBuilder()).ToString();
 
             StringAssert.Contains(sdp, "opus/48000/2");
         }

@@ -191,7 +191,7 @@ namespace SharpRTSPServer.Tests
         {
             var track = new H264Track(Sps, Pps, profileIdc: 77, profileIop: 0, level: 42) { ID = 0 };
 
-            string sdp = track.BuildSDP(new System.Text.StringBuilder()).ToString();
+            string sdp = track.BuildSdp(new System.Text.StringBuilder()).ToString();
 
             StringAssert.Contains(sdp, "m=video 0 RTP/AVP 96");
             StringAssert.Contains(sdp, "a=control:trackID=0");

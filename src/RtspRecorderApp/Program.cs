@@ -38,7 +38,7 @@ using (Stream output = new BufferedStream(new FileStream("recording_out.mp4", Fi
 {
     IMp4Builder outputBuilder = new FragmentedMp4Builder(new SingleStreamOutput(output), 2000);
 
-    using (RTSPClient client = new RTSPClient())
+    using (RtspClient client = new RtspClient())
     {
         // One handler for every track the stream offers, rather than a pair per kind. The client
         // reports which track each frame came from, so the mapping from its tracks to the output
@@ -166,7 +166,7 @@ using (Stream output = new BufferedStream(new FileStream("recording_out.mp4", Fi
         // in NewTrack above.
         client.AcceptTrack = _ => true;
 
-        client.Connect(rtspUri, RTPTransport.TCP, userName, password, false, null, true);
+        client.Connect(rtspUri, RtpTransport.TCP, userName, password, false, null, true);
 
         Console.WriteLine("Press any key to exit");
         // Asking whether a key has been pressed throws outright when there is no console, or when

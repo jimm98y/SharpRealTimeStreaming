@@ -92,7 +92,7 @@ namespace SharpRTSPServer.Tests
         public void TheSdpNamesVp9AtNinetyKilohertz()
         {
             var track = new VP9Track { ID = 1 };
-            string sdp = track.BuildSDP(new StringBuilder()).ToString();
+            string sdp = track.BuildSdp(new StringBuilder()).ToString();
 
             Assert.Contains("m=video 0 RTP/AVP 97", sdp, sdp);
             Assert.Contains("a=rtpmap:97 VP9/90000", sdp, sdp);
@@ -112,10 +112,10 @@ namespace SharpRTSPServer.Tests
             track.CreateRtpPackets(One(KeyFrame(320, 240, 100, profile: 2)), 0, packets);
             packets.Release();
 
-            Assert.Contains("a=fmtp:96 profile-id=2", track.BuildSDP(new StringBuilder()).ToString());
+            Assert.Contains("a=fmtp:96 profile-id=2", track.BuildSdp(new StringBuilder()).ToString());
 
             track.ProfileId = 1;
-            Assert.Contains("a=fmtp:96 profile-id=1", track.BuildSDP(new StringBuilder()).ToString(),
+            Assert.Contains("a=fmtp:96 profile-id=1", track.BuildSdp(new StringBuilder()).ToString(),
                 "a profile set on the track is what it announces");
         }
 

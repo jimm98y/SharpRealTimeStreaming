@@ -100,7 +100,7 @@ namespace SharpRTSPServer
         /// The octet-align parameter is not a preference: a receiver that misses it will try to read
         /// the payload bit packed and make nothing of it.
         /// </remarks>
-        public override StringBuilder BuildSDP(StringBuilder sdp)
+        public override StringBuilder BuildSdp(StringBuilder sdp)
         {
             sdp.Append($"m=audio 0 RTP/{RtpProfile} {PayloadType}\r\n");
             sdp.Append($"a=control:trackID={ID}\r\n");
@@ -165,9 +165,9 @@ namespace SharpRTSPServer
 
                 Memory<byte> rtpPacket = packets.Rent(size);
 
-                RTPPacketUtil.WriteHeader(rtpPacket.Span,
-                    RTPPacketUtil.RTP_VERSION, false, false, 0, true, PayloadType);
-                RTPPacketUtil.WriteTS(rtpPacket.Span, rtpTimestamp);
+                RtpPacketUtil.WriteHeader(rtpPacket.Span,
+                    RtpPacketUtil.RTP_VERSION, false, false, 0, true, PayloadType);
+                RtpPacketUtil.WriteTimestamp(rtpPacket.Span, rtpTimestamp);
 
                 Span<byte> payload = rtpPacket.Span.Slice(12);
                 payload[0] = NO_CODEC_MODE_REQUEST;

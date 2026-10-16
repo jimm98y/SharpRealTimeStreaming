@@ -38,9 +38,9 @@ namespace SharpRTSPClient.Tests
             "m=video 0 RTP/AVP 96\r\na=control:trackID=0\r\na=rtpmap:96 H264/90000\r\n" +
             "a=fmtp:96 packetization-mode=1; sprop-parameter-sets=Z0IAHpZUBaHogA==,aM48gA==\r\n";
 
-        private static RTSPClient NewClient(BlockingCollection<StoppedReason> stops)
+        private static RtspClient NewClient(BlockingCollection<StoppedReason> stops)
         {
-            var client = new RTSPClient();
+            var client = new RtspClient();
             client.Stopped += (s, e) => stops.Add(e.Reason);
             client.AcceptTrack = t => t.Kind == TrackKind.Video;
             return client;
@@ -59,10 +59,10 @@ namespace SharpRTSPClient.Tests
             using var client = NewClient(stops);
             client.ResponseTimeout = TimeSpan.FromMilliseconds(500);
 
-            client.Connect(server.BaseUri, RTPTransport.TCP);
+            client.Connect(server.BaseUri, RtpTransport.TCP);
 
             Assert.AreEqual(StoppedReason.ResponseTimeout, WaitForStop(stops, 5000));
-            Assert.AreEqual(RTSPClient.RtspStatus.WaitingToConnect, client.GetRtspStatus());
+            Assert.AreEqual(RtspClient.RtspStatus.WaitingToConnect, client.GetRtspStatus());
         }
 
         [TestMethod]
@@ -73,7 +73,7 @@ namespace SharpRTSPClient.Tests
             var stops = new BlockingCollection<StoppedReason>();
             using var client = NewClient(stops);
 
-            client.Connect(server.BaseUri, RTPTransport.TCP);
+            client.Connect(server.BaseUri, RtpTransport.TCP);
 
             Assert.IsTrue(server.WaitForRequest("DESCRIBE"));
             Assert.IsNull(WaitForStop(stops, 1500));
@@ -87,7 +87,7 @@ namespace SharpRTSPClient.Tests
             using var client = NewClient(stops);
             client.ResponseTimeout = TimeSpan.FromMilliseconds(500);
 
-            client.Connect(server.BaseUri, RTPTransport.TCP);
+            client.Connect(server.BaseUri, RtpTransport.TCP);
 
             Assert.IsTrue(server.WaitForRequest("PLAY"));
             Assert.IsNull(WaitForStop(stops, 1500));
@@ -102,7 +102,7 @@ namespace SharpRTSPClient.Tests
             using var client = NewClient(stops);
             client.ReceiveTimeout = TimeSpan.FromMilliseconds(750);
 
-            client.Connect(server.BaseUri, RTPTransport.TCP);
+            client.Connect(server.BaseUri, RtpTransport.TCP);
 
             Assert.IsTrue(server.WaitForRequest("PLAY"));
             Assert.AreEqual(StoppedReason.ReceiveTimeout, WaitForStop(stops, 5000));
@@ -117,7 +117,7 @@ namespace SharpRTSPClient.Tests
             client.AutoPlay = false;
             client.ReceiveTimeout = TimeSpan.FromMilliseconds(500);
 
-            client.Connect(server.BaseUri, RTPTransport.TCP);
+            client.Connect(server.BaseUri, RtpTransport.TCP);
 
             Assert.IsTrue(server.WaitForRequest("SETUP"));
             Assert.IsNull(WaitForStop(stops, 1500));
@@ -131,7 +131,7 @@ namespace SharpRTSPClient.Tests
             using var client = NewClient(stops);
             client.ReceiveTimeout = TimeSpan.FromMilliseconds(1000);
 
-            client.Connect(server.BaseUri, RTPTransport.TCP);
+            client.Connect(server.BaseUri, RtpTransport.TCP);
             Assert.IsTrue(server.WaitForRequest("PLAY"));
             client.Pause();
 
@@ -146,7 +146,7 @@ namespace SharpRTSPClient.Tests
             var stops = new BlockingCollection<StoppedReason>();
             using var client = NewClient(stops);
 
-            client.Connect(server.BaseUri, RTPTransport.TCP);
+            client.Connect(server.BaseUri, RtpTransport.TCP);
 
             Assert.AreEqual(StoppedReason.ConnectionLost, WaitForStop(stops, 5000));
         }
@@ -160,7 +160,7 @@ namespace SharpRTSPClient.Tests
             client.ResponseTimeout = TimeSpan.FromMilliseconds(500);
             client.ReceiveTimeout = TimeSpan.FromMilliseconds(500);
 
-            client.Connect(server.BaseUri, RTPTransport.TCP);
+            client.Connect(server.BaseUri, RtpTransport.TCP);
             Assert.IsTrue(server.WaitForRequest("PLAY"));
             client.Stop();
 
@@ -177,12 +177,12 @@ namespace SharpRTSPClient.Tests
             client.ConnectTimeout = TimeSpan.FromMilliseconds(750);
 
             var elapsed = Stopwatch.StartNew();
-            client.Connect($"rtsps://127.0.0.1:{server.Port}/stream1", RTPTransport.TCP);
+            client.Connect($"rtsps://127.0.0.1:{server.Port}/stream1", RtpTransport.TCP);
             elapsed.Stop();
 
             Assert.AreEqual(StoppedReason.ConnectTimeout, WaitForStop(stops, 0));
             Assert.IsLessThan(TimeSpan.FromSeconds(5), elapsed.Elapsed, "Connect did not honour the timeout");
-            Assert.AreEqual(RTSPClient.RtspStatus.ConnectFailed, client.GetRtspStatus());
+            Assert.AreEqual(RtspClient.RtspStatus.ConnectFailed, client.GetRtspStatus());
         }
 
         [TestMethod]
@@ -194,7 +194,7 @@ namespace SharpRTSPClient.Tests
             client.ConnectTimeout = TimeSpan.FromMilliseconds(750);
 
             var elapsed = Stopwatch.StartNew();
-            client.Connect("rtsp://192.0.2.1:554/stream1", RTPTransport.TCP);
+            client.Connect("rtsp://192.0.2.1:554/stream1", RtpTransport.TCP);
             elapsed.Stop();
 
             StoppedReason? reason = WaitForStop(stops, 0);
@@ -217,7 +217,7 @@ namespace SharpRTSPClient.Tests
             using var client = NewClient(stops);
             client.ConnectTimeout = TimeSpan.FromSeconds(5);
 
-            client.Connect($"rtsp://localhost:{server.Port}/stream1", RTPTransport.TCP);
+            client.Connect($"rtsp://localhost:{server.Port}/stream1", RtpTransport.TCP);
 
             Assert.IsTrue(server.WaitForRequest("PLAY"));
             Assert.IsNull(WaitForStop(stops, 0));
@@ -237,7 +237,7 @@ namespace SharpRTSPClient.Tests
             using var client = NewClient(stops);
             client.ConnectTimeout = TimeSpan.FromSeconds(5);
 
-            client.Connect(server.BaseUri, RTPTransport.TCP);
+            client.Connect(server.BaseUri, RtpTransport.TCP);
 
             Assert.IsTrue(server.WaitForRequest("PLAY"));
             Assert.IsNull(WaitForStop(stops, 0));
@@ -258,7 +258,7 @@ namespace SharpRTSPClient.Tests
             client.ConnectTimeout = TimeSpan.FromSeconds(5);
 
             var elapsed = Stopwatch.StartNew();
-            client.Connect($"rtsp://127.0.0.1:{port}/stream1", RTPTransport.TCP);
+            client.Connect($"rtsp://127.0.0.1:{port}/stream1", RtpTransport.TCP);
             elapsed.Stop();
 
             Assert.AreEqual(StoppedReason.ConnectionFailed, WaitForStop(stops, 0));
@@ -277,14 +277,14 @@ namespace SharpRTSPClient.Tests
                 using var client = NewClient(stops);
                 client.ResponseTimeout = TimeSpan.FromMilliseconds(300);
 
-                client.Connect(server.BaseUri, RTPTransport.TCP);
+                client.Connect(server.BaseUri, RtpTransport.TCP);
                 Assert.IsTrue(server.WaitForRequest("DESCRIBE"));
                 Thread.Sleep(250 + 10 * (i % 10));
                 client.Stop();
 
                 Thread.Sleep(600);
                 Assert.IsLessThanOrEqualTo(1, stops.Count, $"run {i}: {string.Join(", ", stops)}");
-                Assert.AreEqual(RTSPClient.RtspStatus.WaitingToConnect, client.GetRtspStatus());
+                Assert.AreEqual(RtspClient.RtspStatus.WaitingToConnect, client.GetRtspStatus());
             }
         }
 
@@ -296,7 +296,7 @@ namespace SharpRTSPClient.Tests
             // work to a UI thread does, finds no lock held
             using var hung = new FakeRtspServer(Sdp) { IgnoreMethod = "DESCRIBE" };
             using var answering = new FakeRtspServer(Sdp);
-            using var client = new RTSPClient { ResponseTimeout = TimeSpan.FromMilliseconds(300) };
+            using var client = new RtspClient { ResponseTimeout = TimeSpan.FromMilliseconds(300) };
             client.AcceptTrack = t => t.Kind == TrackKind.Video;
 
             int handled = 0;
@@ -309,14 +309,14 @@ namespace SharpRTSPClient.Tests
                 var other = new Thread(() =>
                 {
                     client.Stop();
-                    client.Connect(answering.BaseUri, RTPTransport.TCP);
+                    client.Connect(answering.BaseUri, RtpTransport.TCP);
                 });
                 other.Start();
                 if (other.Join(3000))
                     returned.Set();
             };
 
-            client.Connect(hung.BaseUri, RTPTransport.TCP);
+            client.Connect(hung.BaseUri, RtpTransport.TCP);
             Assert.IsTrue(returned.Wait(5000), "the Stopped handler never returned");
             Assert.IsTrue(answering.WaitForRequest("PLAY"));
         }
@@ -348,7 +348,7 @@ namespace SharpRTSPClient.Tests
             WaitForCount(server, "PLAY", plays, timeoutMs);
 
         /// <summary>Plays from a server, then has the server drop the connection.</summary>
-        private static void PlayThenDrop(FakeRtspServer server, RTSPClient client, RTPTransport transport = RTPTransport.TCP)
+        private static void PlayThenDrop(FakeRtspServer server, RtspClient client, RtpTransport transport = RtpTransport.TCP)
         {
             client.Connect(server.BaseUri, transport, autoReconnect: true);
             Assert.IsTrue(server.WaitForRequest("PLAY"));
@@ -392,7 +392,7 @@ namespace SharpRTSPClient.Tests
             var stops = new BlockingCollection<StoppedReason>();
             using var client = NewClient(stops);
 
-            client.Connect(server.BaseUri, RTPTransport.TCP, autoReconnect: true);
+            client.Connect(server.BaseUri, RtpTransport.TCP, autoReconnect: true);
             Assert.IsTrue(server.WaitForRequest("PLAY"));
             Thread.Sleep(300);
             server.Dispose(); // gone, and nothing listens any more
@@ -409,7 +409,7 @@ namespace SharpRTSPClient.Tests
             var stops = new BlockingCollection<StoppedReason>();
             using var client = NewClient(stops);
 
-            client.Connect(server.BaseUri, RTPTransport.TCP, autoReconnect: true);
+            client.Connect(server.BaseUri, RtpTransport.TCP, autoReconnect: true);
 
             Assert.AreEqual(StoppedReason.ConnectionLost, WaitForStop(stops, 5000));
             Thread.Sleep(500);
@@ -419,7 +419,7 @@ namespace SharpRTSPClient.Tests
         [TestMethod]
         public void StoppingAsTheConnectionIsLostStaysStopped()
         {
-            foreach (RTPTransport transport in new[] { RTPTransport.TCP, RTPTransport.UDP })
+            foreach (RtpTransport transport in new[] { RtpTransport.TCP, RtpTransport.UDP })
             {
                 using var server = new FakeRtspServer(Sdp);
                 var stops = new BlockingCollection<StoppedReason>();
@@ -430,7 +430,7 @@ namespace SharpRTSPClient.Tests
 
                 Thread.Sleep(1000);
                 Assert.AreEqual(1, server.Connections, transport.ToString());
-                Assert.AreEqual(RTSPClient.RtspStatus.WaitingToConnect, client.GetRtspStatus(), transport.ToString());
+                Assert.AreEqual(RtspClient.RtspStatus.WaitingToConnect, client.GetRtspStatus(), transport.ToString());
                 Assert.IsNull(WaitForStop(stops, 0), transport.ToString());
             }
         }
@@ -446,7 +446,7 @@ namespace SharpRTSPClient.Tests
             int tracks = 0;
             client.NewTrack += (s, e) => Interlocked.Increment(ref tracks);
 
-            PlayThenDrop(server, client, RTPTransport.UDP);
+            PlayThenDrop(server, client, RtpTransport.UDP);
 
             Assert.IsTrue(WaitForCount(server, "GET_PARAMETER", 1, 5000), string.Join(", ", server.Requests));
             Thread.Sleep(500);
@@ -454,7 +454,7 @@ namespace SharpRTSPClient.Tests
             Assert.AreEqual(1, Count(server, "DESCRIBE"), string.Join(", ", server.Requests));
             Assert.AreEqual(1, Count(server, "PLAY"));
             Assert.AreEqual(1, tracks);
-            Assert.AreEqual(RTSPClient.RtspStatus.Connected, client.GetRtspStatus());
+            Assert.AreEqual(RtspClient.RtspStatus.Connected, client.GetRtspStatus());
             Assert.IsNull(WaitForStop(stops, 0));
         }
 
@@ -467,7 +467,7 @@ namespace SharpRTSPClient.Tests
             int tracks = 0;
             client.NewTrack += (s, e) => Interlocked.Increment(ref tracks);
 
-            PlayThenDrop(server, client, RTPTransport.UDP);
+            PlayThenDrop(server, client, RtpTransport.UDP);
 
             Assert.IsTrue(WaitForPlays(server, 2, 5000), string.Join(", ", server.Requests));
             Assert.AreEqual(1, Count(server, "GET_PARAMETER"), string.Join(", ", server.Requests));
@@ -485,7 +485,7 @@ namespace SharpRTSPClient.Tests
             var stops = new BlockingCollection<StoppedReason>();
             using var client = NewClient(stops);
 
-            PlayThenDrop(server, client, RTPTransport.UDP);
+            PlayThenDrop(server, client, RtpTransport.UDP);
             Assert.IsTrue(server.WaitForRequest("GET_PARAMETER"));
             server.DropConnection();
 

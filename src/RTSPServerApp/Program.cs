@@ -24,7 +24,7 @@ using Microsoft.Extensions.Hosting;
 using RTSPServerApp;
 
 var builder = Host.CreateApplicationBuilder(args);
-builder.Services.AddHostedService<RTSPServerWorker>();
+builder.Services.AddHostedService<RtspServerWorker>();
 
 var host = builder.Build();
 host.Run();
