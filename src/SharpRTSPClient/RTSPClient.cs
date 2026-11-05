@@ -996,6 +996,7 @@ namespace SharpRTSPClient
                 RtspUri = _uri,
                 Session = _session,
             };
+            playMessage.AddAuthorization(_authentication, _uri, _rtspSocket.NextCommandIndex());
             playMessage.AddPlayback(seekTime, speed);
             if (_playbackSession)
             {
@@ -1021,6 +1022,7 @@ namespace SharpRTSPClient
                 RtspUri = _uri,
                 Session = _session,
             };
+            playMessage.AddAuthorization(_authentication, _uri, _rtspSocket.NextCommandIndex());
             playMessage.AddPlayback(seekTimeFrom, seekTimeTo, speed);
             if (_playbackSession)
             {
