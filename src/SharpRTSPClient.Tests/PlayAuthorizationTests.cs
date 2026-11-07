@@ -66,16 +66,16 @@ namespace SharpRTSPClient.Tests
             AssertPlayIsAuthorized(playbackSession, client => client.Play(From, To));
         }
 
-        private static void AssertPlayIsAuthorized(bool playbackSession, Action<RtspClient> play)
+        private static void AssertPlayIsAuthorized(bool playbackSession, Action<RTSPClient> play)
         {
             using var server = new FakeRtspServer(Sdp) { RequireAuthentication = true };
 
             using var setUp = new ManualResetEventSlim();
-            using var client = new RtspClient { AutoPlay = false };
+            using var client = new RTSPClient { AutoPlay = false };
             client.AcceptTrack = t => t.Kind == TrackKind.Video;
             client.SetupMessageCompleted += (s, e) => setUp.Set();
 
-            client.Connect(server.BaseUri, RtpTransport.TCP, "admin", "password", playbackSession);
+            client.Connect(server.BaseUri, RTPTransport.TCP, "admin", "password", playbackSession);
 
             Assert.IsTrue(setUp.Wait(8000), "the client never finished SETUP");
             Assert.IsFalse(server.Requests.Contains("PLAY"), "PLAY went out before the test asked for it");

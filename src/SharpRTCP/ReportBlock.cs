@@ -33,7 +33,7 @@ namespace SharpRTCP
         /// The source the block is about: of a block read, as it says; of one taken of <see cref="ReceptionStatistics"/>,
         /// none, which is set before it is written - the statistics are kept before the source is known.
         /// </summary>
-        public uint Ssrc { get; set; }
+        public uint SSRC { get; set; }
 
         /// <summary>What share of the packets expected since the last report did not arrive, out of 256.</summary>
         public byte FractionLost { get; set; }

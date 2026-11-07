@@ -33,7 +33,7 @@ namespace SharpRTCP
     /// of a CNAME, Picture Loss Indications (RFC 4585 6.3.1) and goodbyes; and RTCP told from the RTP it is multiplexed with
     /// (RFC 5761).
     /// </summary>
-    public static class RtcpUtils
+    public static class RTCPUtilities
     {
         /// <summary>The version of RTP and RTCP.</summary>
         public const int Version = 2;
@@ -56,7 +56,7 @@ namespace SharpRTCP
         // a sender report's header, then its sender information: the NTP and RTP timestamps and its counts of packets and octets
         private const int SenderInformationEnd = 28;
 
-        private const int SdesItemCname = 1;
+        private const int SDESItemCNAME = 1;
         private const int PsfbFormatPictureLossIndication = 1;
 
         #region Packets
@@ -77,7 +77,7 @@ namespace SharpRTCP
         /// Whether a datagram of RTP's range of first bytes (RFC 7983: 128 to 191) is RTCP: of a second byte that is a packet
         /// type of RTCP, 192 to 223, which the payload types of RTP multiplexed with it leave free (RFC 5761 4).
         /// </summary>
-        public static bool IsRtcp(ReadOnlySpan<byte> datagram)
+        public static bool IsRTCP(ReadOnlySpan<byte> datagram)
             => datagram.Length >= HeaderLength && (datagram[0] & 0xC0) == 0x80 && datagram[1] >= 192 && datagram[1] <= 223;
 
         /// <summary>
@@ -143,7 +143,7 @@ namespace SharpRTCP
             return new ReportBlock
             {
                 HasData = true,
-                Ssrc = BinaryPrimitives.ReadUInt32BigEndian(block),
+                SSRC = BinaryPrimitives.ReadUInt32BigEndian(block),
                 FractionLost = block[4],
                 CumulativeLost = cumulative,
                 ExtendedHighestSequence = BinaryPrimitives.ReadUInt32BigEndian(block.Slice(8)),
@@ -161,7 +161,7 @@ namespace SharpRTCP
             int lost = report.CumulativeLost;
             lost = lost > 0x7FFFFF ? 0x7FFFFF : lost < -0x800000 ? -0x800000 : lost;
 
-            BinaryPrimitives.WriteUInt32BigEndian(block, report.Ssrc);
+            BinaryPrimitives.WriteUInt32BigEndian(block, report.SSRC);
             block[4] = report.FractionLost;
             block[5] = (byte)((lost >> 16) & 0xFF);
             block[6] = (byte)((lost >> 8) & 0xFF);
@@ -210,14 +210,14 @@ namespace SharpRTCP
                 {
                     foreach (var block in receiverReport.Reports)
                     {
-                        blocks.Add((receiverReport.Ssrc, block));
+                        blocks.Add((receiverReport.SSRC, block));
                     }
                 }
                 else if (TryReadSenderReport(packet, out SenderReport senderReport))
                 {
                     foreach (var block in senderReport.Reports)
                     {
-                        blocks.Add((senderReport.Ssrc, block));
+                        blocks.Add((senderReport.SSRC, block));
                     }
                 }
             }
@@ -237,9 +237,9 @@ namespace SharpRTCP
         {
             int count = BlockCount(report.Reports);
             int length = GetSenderReportLength(count);
-            WriteHeader(packet, count, PacketType.SenderReport, length / 4 - 1, report.Ssrc);
-            BinaryPrimitives.WriteUInt64BigEndian(packet.Slice(8), report.NtpTimestamp);
-            BinaryPrimitives.WriteUInt32BigEndian(packet.Slice(16), report.RtpTimestamp);
+            WriteHeader(packet, count, PacketType.SenderReport, length / 4 - 1, report.SSRC);
+            BinaryPrimitives.WriteUInt64BigEndian(packet.Slice(8), report.NTPTimestamp);
+            BinaryPrimitives.WriteUInt32BigEndian(packet.Slice(16), report.RTPTimestamp);
             BinaryPrimitives.WriteUInt32BigEndian(packet.Slice(20), report.PacketCount);
             BinaryPrimitives.WriteUInt32BigEndian(packet.Slice(24), report.OctetCount);
             return WriteReportBlocks(packet, SenderInformationEnd, report.Reports, count);
@@ -264,9 +264,9 @@ namespace SharpRTCP
 
             report = new SenderReport
             {
-                Ssrc = BinaryPrimitives.ReadUInt32BigEndian(packet.Slice(4)),
-                NtpTimestamp = BinaryPrimitives.ReadUInt64BigEndian(packet.Slice(8)),
-                RtpTimestamp = BinaryPrimitives.ReadUInt32BigEndian(packet.Slice(16)),
+                SSRC = BinaryPrimitives.ReadUInt32BigEndian(packet.Slice(4)),
+                NTPTimestamp = BinaryPrimitives.ReadUInt64BigEndian(packet.Slice(8)),
+                RTPTimestamp = BinaryPrimitives.ReadUInt32BigEndian(packet.Slice(16)),
                 PacketCount = BinaryPrimitives.ReadUInt32BigEndian(packet.Slice(20)),
                 OctetCount = BinaryPrimitives.ReadUInt32BigEndian(packet.Slice(24)),
             };
@@ -303,7 +303,7 @@ namespace SharpRTCP
         public static int WriteReceiverReport(Span<byte> packet, ReceiverReport report)
         {
             int count = BlockCount(report.Reports);
-            WriteHeader(packet, count, PacketType.ReceiverReport, GetReceiverReportLength(count) / 4 - 1, report.Ssrc);
+            WriteHeader(packet, count, PacketType.ReceiverReport, GetReceiverReportLength(count) / 4 - 1, report.SSRC);
             return WriteReportBlocks(packet, HeaderLength, report.Reports, count);
         }
 
@@ -324,7 +324,7 @@ namespace SharpRTCP
                 return false;
             }
 
-            report = new ReceiverReport { Ssrc = BinaryPrimitives.ReadUInt32BigEndian(packet.Slice(4)) };
+            report = new ReceiverReport { SSRC = BinaryPrimitives.ReadUInt32BigEndian(packet.Slice(4)) };
             ReadReportBlocks(packet, HeaderLength, report.Reports);
             return true;
         }
@@ -369,7 +369,7 @@ namespace SharpRTCP
 
             packet.Slice(0, length).Clear();
             WriteHeader(packet, 1, PacketType.SourceDescription, length / 4 - 1, ssrc);
-            packet[8] = SdesItemCname;
+            packet[8] = SDESItemCNAME;
             packet[9] = (byte)nameLength;
             name.AsSpan(0, nameLength).CopyTo(packet.Slice(10));
             return length;
@@ -389,19 +389,19 @@ namespace SharpRTCP
 
         /// <summary>A Picture Loss Indication (RFC 4585 6.3.1): asks the sender of a source for a key frame.</summary>
         /// <returns><see cref="PictureLossIndicationLength"/>.</returns>
-        public static int WritePictureLossIndication(Span<byte> packet, uint ssrc, uint mediaSsrc)
+        public static int WritePictureLossIndication(Span<byte> packet, uint ssrc, uint mediaSSRC)
         {
             // its format in the field a report's count is in, and of no feedback control information
             WriteHeader(packet, PsfbFormatPictureLossIndication, PacketType.PayloadFeedback, PictureLossIndicationLength / 4 - 1, ssrc);
-            BinaryPrimitives.WriteUInt32BigEndian(packet.Slice(8), mediaSsrc);
+            BinaryPrimitives.WriteUInt32BigEndian(packet.Slice(8), mediaSSRC);
             return PictureLossIndicationLength;
         }
 
         /// <summary>A Picture Loss Indication, in a new array.</summary>
-        public static byte[] CreatePictureLossIndication(uint ssrc, uint mediaSsrc)
+        public static byte[] CreatePictureLossIndication(uint ssrc, uint mediaSSRC)
         {
             byte[] packet = new byte[PictureLossIndicationLength];
-            WritePictureLossIndication(packet, ssrc, mediaSsrc);
+            WritePictureLossIndication(packet, ssrc, mediaSSRC);
             return packet;
         }
 

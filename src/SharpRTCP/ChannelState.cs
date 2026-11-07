@@ -35,18 +35,18 @@ namespace SharpRTCP
     {
         private const long Unknown = -1;
 
-        private long _remoteSsrc = Unknown;
+        private long _remoteSSRC = Unknown;
 
         /// <summary>
         /// SSRC of the server we are actually receiving media from, or null until the first RTP packet
         /// has arrived. RTCP that does not belong to this SSRC is not ours to act on.
         /// </summary>
-        public uint? RemoteSsrc
+        public uint? RemoteSSRC
         {
             get
             {
-                long remoteSsrc = Interlocked.Read(ref _remoteSsrc);
-                return remoteSsrc == Unknown ? (uint?)null : (uint)remoteSsrc;
+                long remoteSSRC = Interlocked.Read(ref _remoteSSRC);
+                return remoteSSRC == Unknown ? (uint?)null : (uint)remoteSSRC;
             }
         }
 
@@ -55,9 +55,9 @@ namespace SharpRTCP
         /// packet claiming a different SSRC must not be able to take the channel over.
         /// </summary>
         /// <param name="ssrc">SSRC taken from a received RTP packet.</param>
-        public void LearnRemoteSsrc(uint ssrc)
+        public void LearnRemoteSSRC(uint ssrc)
         {
-            Interlocked.CompareExchange(ref _remoteSsrc, ssrc, Unknown);
+            Interlocked.CompareExchange(ref _remoteSSRC, ssrc, Unknown);
         }
 
         private long _lastReceiverReportTicks;
@@ -70,7 +70,7 @@ namespace SharpRTCP
         private readonly object _syncGate = new object();
         private bool _hasSync;
         private DateTime _syncSenderTime;
-        private uint _syncRtpTimestamp;
+        private uint _syncRTPTimestamp;
 
         /// <summary>
         /// Ticks of this stream's RTP clock per second, from the SDP. 90000 for video, the sampling
@@ -122,7 +122,7 @@ namespace SharpRTCP
             {
                 _hasSync = true;
                 _syncSenderTime = senderTimeUtc;
-                _syncRtpTimestamp = rtpTimestamp;
+                _syncRTPTimestamp = rtpTimestamp;
             }
         }
 
@@ -144,7 +144,7 @@ namespace SharpRTCP
 
                 // Subtracted as a signed 32 bit difference, so it reads correctly either side of the
                 // point where a 32 bit RTP clock wraps - about every thirteen hours at 90 kHz.
-                int elapsed = unchecked((int)(rtpTimestamp - _syncRtpTimestamp));
+                int elapsed = unchecked((int)(rtpTimestamp - _syncRTPTimestamp));
 
                 senderTimeUtc = _syncSenderTime.AddSeconds(elapsed / (double)clockRate);
                 return true;
@@ -185,7 +185,7 @@ namespace SharpRTCP
         /// </summary>
         public void Reset()
         {
-            Interlocked.Exchange(ref _remoteSsrc, Unknown);
+            Interlocked.Exchange(ref _remoteSSRC, Unknown);
             Interlocked.Exchange(ref _lastReceiverReportTicks, 0);
 
             Reception.Reset();

@@ -31,15 +31,15 @@ namespace SharpRTCP
     public sealed class SenderReport
     {
         // NTP Most Significant Word is relative to 0h, 1 Jan 1900. This will wrap around in 2036
-        private static readonly DateTime NtpEpoch = new DateTime(1900, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        private static readonly DateTime NTPEpoch = new DateTime(1900, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
         /// <summary>The sender's SSRC.</summary>
-        public uint Ssrc { get; set; }
+        public uint SSRC { get; set; }
 
         /// <summary>The NTP timestamp as it was sent: 32 bits of seconds since 1900, then 32 of their fraction.</summary>
-        public ulong NtpTimestamp { get; set; }
+        public ulong NTPTimestamp { get; set; }
 
-        public uint RtpTimestamp { get; set; }
+        public uint RTPTimestamp { get; set; }
 
         /// <summary>How many RTP packets the sender has sent: 0 of one that has sent nothing yet, whose pairing is of no stream.</summary>
         public uint PacketCount { get; set; }
@@ -56,23 +56,23 @@ namespace SharpRTCP
         /// The NTP timestamp as a time. The fraction matters: lip sync is a matter of tens of milliseconds, and the seconds
         /// word alone is a second wide. Divided by 2^32 as a double.
         /// </summary>
-        public DateTime NtpTime => NtpEpoch.AddSeconds((NtpTimestamp >> 32) + (NtpTimestamp & 0xFFFFFFFF) / 4294967296.0);
+        public DateTime NTPTime => NTPEpoch.AddSeconds((NTPTimestamp >> 32) + (NTPTimestamp & 0xFFFFFFFF) / 4294967296.0);
 
         /// <summary>
         /// The middle 32 bits of the NTP timestamp: what a report block echoes back as its last sender report, which the
         /// sender matches to the report it sent and works out the round trip of.
         /// </summary>
-        public uint CompactNtp => (uint)(NtpTimestamp >> 16);
+        public uint CompactNTP => (uint)(NTPTimestamp >> 16);
 
         /// <summary>A time as an NTP timestamp: of 32 bits of seconds since 1900, then 32 of their fraction - of 2^32ths.</summary>
-        public static ulong ToNtpTimestamp(DateTime time)
+        public static ulong ToNTPTimestamp(DateTime time)
         {
-            double seconds = (time.ToUniversalTime() - NtpEpoch).TotalSeconds;
+            double seconds = (time.ToUniversalTime() - NTPEpoch).TotalSeconds;
             ulong whole = (ulong)Math.Floor(seconds);
             ulong fraction = (ulong)((seconds - whole) * 4294967296.0);
             return (whole << 32) | Math.Min(fraction, 0xFFFFFFFFUL);
         }
 
-        public override string ToString() => $"SR {Ssrc:X8} NTP {NtpTime:O} RTP {RtpTimestamp} of {Reports.Count} blocks";
+        public override string ToString() => $"SR {SSRC:X8} NTP {NTPTime:O} RTP {RTPTimestamp} of {Reports.Count} blocks";
     }
 }

@@ -6,12 +6,12 @@ const SharpRTCP.PacketType.ReceiverReport = 201 -> int
 const SharpRTCP.PacketType.SenderReport = 200 -> int
 const SharpRTCP.PacketType.SourceDescription = 202 -> int
 const SharpRTCP.PacketType.TransportFeedback = 205 -> int
-const SharpRTCP.RtcpUtils.GoodbyeLength = 8 -> int
-const SharpRTCP.RtcpUtils.HeaderLength = 8 -> int
-const SharpRTCP.RtcpUtils.MaxReportBlocks = 31 -> int
-const SharpRTCP.RtcpUtils.PictureLossIndicationLength = 12 -> int
-const SharpRTCP.RtcpUtils.ReportBlockLength = 24 -> int
-const SharpRTCP.RtcpUtils.Version = 2 -> int
+const SharpRTCP.RTCPUtilities.GoodbyeLength = 8 -> int
+const SharpRTCP.RTCPUtilities.HeaderLength = 8 -> int
+const SharpRTCP.RTCPUtilities.MaxReportBlocks = 31 -> int
+const SharpRTCP.RTCPUtilities.PictureLossIndicationLength = 12 -> int
+const SharpRTCP.RTCPUtilities.ReportBlockLength = 24 -> int
+const SharpRTCP.RTCPUtilities.Version = 2 -> int
 override SharpRTCP.ReceiverReport.ToString() -> string
 override SharpRTCP.SenderReport.ToString() -> string
 SharpRTCP.ChannelState
@@ -20,23 +20,23 @@ SharpRTCP.ChannelState.ClaimReceiverReportSlot(System.TimeSpan interval) -> bool
 SharpRTCP.ChannelState.ClockRate.get -> int
 SharpRTCP.ChannelState.ClockRate.set -> void
 SharpRTCP.ChannelState.HasSenderSync.get -> bool
-SharpRTCP.ChannelState.LearnRemoteSsrc(uint ssrc) -> void
+SharpRTCP.ChannelState.LearnRemoteSSRC(uint ssrc) -> void
 SharpRTCP.ChannelState.Reception.get -> SharpRTCP.ReceptionStatistics
 SharpRTCP.ChannelState.RecordSenderReport(System.DateTime senderTimeUtc, uint rtpTimestamp) -> void
 SharpRTCP.ChannelState.RecordSenderReport(System.DateTime senderTimeUtc, uint rtpTimestamp, uint senderPacketCount) -> bool
-SharpRTCP.ChannelState.RemoteSsrc.get -> uint?
+SharpRTCP.ChannelState.RemoteSSRC.get -> uint?
 SharpRTCP.ChannelState.Reset() -> void
 SharpRTCP.ChannelState.TryMapToSenderClock(uint rtpTimestamp, out System.DateTime senderTimeUtc) -> bool
 SharpRTCP.PacketType
 SharpRTCP.ReceiverReport
 SharpRTCP.ReceiverReport.ReceiverReport() -> void
 SharpRTCP.ReceiverReport.Reports.get -> System.Collections.Generic.List<SharpRTCP.ReportBlock>
-SharpRTCP.ReceiverReport.Ssrc.get -> uint
-SharpRTCP.ReceiverReport.Ssrc.set -> void
+SharpRTCP.ReceiverReport.SSRC.get -> uint
+SharpRTCP.ReceiverReport.SSRC.set -> void
 SharpRTCP.ReceptionStatistics
 SharpRTCP.ReceptionStatistics.ReceptionStatistics() -> void
 SharpRTCP.ReceptionStatistics.RecordPacket(ushort sequenceNumber, uint rtpTimestamp, int clockRate) -> void
-SharpRTCP.ReceptionStatistics.RecordSenderReportArrival(uint middle32OfNtp) -> void
+SharpRTCP.ReceptionStatistics.RecordSenderReportArrival(uint middle32OfNTP) -> void
 SharpRTCP.ReceptionStatistics.Reset() -> void
 SharpRTCP.ReceptionStatistics.TakeReport() -> SharpRTCP.ReportBlock
 SharpRTCP.ReportBlock
@@ -55,46 +55,46 @@ SharpRTCP.ReportBlock.Jitter.set -> void
 SharpRTCP.ReportBlock.LastSenderReport.get -> uint
 SharpRTCP.ReportBlock.LastSenderReport.set -> void
 SharpRTCP.ReportBlock.ReportBlock() -> void
-SharpRTCP.ReportBlock.Ssrc.get -> uint
-SharpRTCP.ReportBlock.Ssrc.set -> void
-SharpRTCP.RtcpUtils
+SharpRTCP.ReportBlock.SSRC.get -> uint
+SharpRTCP.ReportBlock.SSRC.set -> void
+SharpRTCP.RTCPUtilities
 SharpRTCP.SenderReport
-SharpRTCP.SenderReport.CompactNtp.get -> uint
-SharpRTCP.SenderReport.NtpTime.get -> System.DateTime
-SharpRTCP.SenderReport.NtpTimestamp.get -> ulong
-SharpRTCP.SenderReport.NtpTimestamp.set -> void
+SharpRTCP.SenderReport.CompactNTP.get -> uint
+SharpRTCP.SenderReport.NTPTime.get -> System.DateTime
+SharpRTCP.SenderReport.NTPTimestamp.get -> ulong
+SharpRTCP.SenderReport.NTPTimestamp.set -> void
 SharpRTCP.SenderReport.OctetCount.get -> uint
 SharpRTCP.SenderReport.OctetCount.set -> void
 SharpRTCP.SenderReport.PacketCount.get -> uint
 SharpRTCP.SenderReport.PacketCount.set -> void
 SharpRTCP.SenderReport.Reports.get -> System.Collections.Generic.List<SharpRTCP.ReportBlock>
-SharpRTCP.SenderReport.RtpTimestamp.get -> uint
-SharpRTCP.SenderReport.RtpTimestamp.set -> void
+SharpRTCP.SenderReport.RTPTimestamp.get -> uint
+SharpRTCP.SenderReport.RTPTimestamp.set -> void
 SharpRTCP.SenderReport.SenderReport() -> void
-SharpRTCP.SenderReport.Ssrc.get -> uint
-SharpRTCP.SenderReport.Ssrc.set -> void
-static SharpRTCP.RtcpUtils.CreateCompoundPacket(params byte[][] packets) -> byte[]
-static SharpRTCP.RtcpUtils.CreateGoodbye(uint ssrc) -> byte[]
-static SharpRTCP.RtcpUtils.CreatePictureLossIndication(uint ssrc, uint mediaSsrc) -> byte[]
-static SharpRTCP.RtcpUtils.CreateReceiverReport(SharpRTCP.ReceiverReport report) -> byte[]
-static SharpRTCP.RtcpUtils.CreateSenderReport(SharpRTCP.SenderReport report) -> byte[]
-static SharpRTCP.RtcpUtils.CreateSourceDescription(uint ssrc, string cname) -> byte[]
-static SharpRTCP.RtcpUtils.GetReceiverReportLength(int blockCount) -> int
-static SharpRTCP.RtcpUtils.GetSenderReportLength(int blockCount) -> int
-static SharpRTCP.RtcpUtils.GetSourceDescriptionLength(string cname) -> int
-static SharpRTCP.RtcpUtils.IsRtcp(System.ReadOnlySpan<byte> datagram) -> bool
-static SharpRTCP.RtcpUtils.ReadReceiverReports(System.ReadOnlySpan<byte> compound) -> System.Collections.Generic.List<SharpRTCP.ReceiverReport>
-static SharpRTCP.RtcpUtils.ReadReportBlock(System.ReadOnlySpan<byte> block) -> SharpRTCP.ReportBlock
-static SharpRTCP.RtcpUtils.ReadReportBlocks(System.ReadOnlySpan<byte> compound) -> System.Collections.Generic.List<(uint Reporter, SharpRTCP.ReportBlock Block)>
-static SharpRTCP.RtcpUtils.ReadSenderReports(System.ReadOnlySpan<byte> compound) -> System.Collections.Generic.List<SharpRTCP.SenderReport>
-static SharpRTCP.RtcpUtils.SplitCompoundPacket(System.ReadOnlySpan<byte> compound) -> System.Collections.Generic.List<(int Offset, int Length)>
-static SharpRTCP.RtcpUtils.TryReadReceiverReport(System.ReadOnlySpan<byte> packet, out SharpRTCP.ReceiverReport report) -> bool
-static SharpRTCP.RtcpUtils.TryReadSenderReport(System.ReadOnlySpan<byte> packet, out SharpRTCP.SenderReport report) -> bool
-static SharpRTCP.RtcpUtils.WriteGoodbye(System.Span<byte> packet, uint ssrc) -> int
-static SharpRTCP.RtcpUtils.WriteHeader(System.Span<byte> packet, int count, int packetType, int length, uint ssrc, bool hasPadding = false) -> void
-static SharpRTCP.RtcpUtils.WritePictureLossIndication(System.Span<byte> packet, uint ssrc, uint mediaSsrc) -> int
-static SharpRTCP.RtcpUtils.WriteReceiverReport(System.Span<byte> packet, SharpRTCP.ReceiverReport report) -> int
-static SharpRTCP.RtcpUtils.WriteReportBlock(System.Span<byte> block, SharpRTCP.ReportBlock report) -> int
-static SharpRTCP.RtcpUtils.WriteSenderReport(System.Span<byte> packet, SharpRTCP.SenderReport report) -> int
-static SharpRTCP.RtcpUtils.WriteSourceDescription(System.Span<byte> packet, uint ssrc, string cname) -> int
-static SharpRTCP.SenderReport.ToNtpTimestamp(System.DateTime time) -> ulong
+SharpRTCP.SenderReport.SSRC.get -> uint
+SharpRTCP.SenderReport.SSRC.set -> void
+static SharpRTCP.RTCPUtilities.CreateCompoundPacket(params byte[][] packets) -> byte[]
+static SharpRTCP.RTCPUtilities.CreateGoodbye(uint ssrc) -> byte[]
+static SharpRTCP.RTCPUtilities.CreatePictureLossIndication(uint ssrc, uint mediaSSRC) -> byte[]
+static SharpRTCP.RTCPUtilities.CreateReceiverReport(SharpRTCP.ReceiverReport report) -> byte[]
+static SharpRTCP.RTCPUtilities.CreateSenderReport(SharpRTCP.SenderReport report) -> byte[]
+static SharpRTCP.RTCPUtilities.CreateSourceDescription(uint ssrc, string cname) -> byte[]
+static SharpRTCP.RTCPUtilities.GetReceiverReportLength(int blockCount) -> int
+static SharpRTCP.RTCPUtilities.GetSenderReportLength(int blockCount) -> int
+static SharpRTCP.RTCPUtilities.GetSourceDescriptionLength(string cname) -> int
+static SharpRTCP.RTCPUtilities.IsRTCP(System.ReadOnlySpan<byte> datagram) -> bool
+static SharpRTCP.RTCPUtilities.ReadReceiverReports(System.ReadOnlySpan<byte> compound) -> System.Collections.Generic.List<SharpRTCP.ReceiverReport>
+static SharpRTCP.RTCPUtilities.ReadReportBlock(System.ReadOnlySpan<byte> block) -> SharpRTCP.ReportBlock
+static SharpRTCP.RTCPUtilities.ReadReportBlocks(System.ReadOnlySpan<byte> compound) -> System.Collections.Generic.List<(uint Reporter, SharpRTCP.ReportBlock Block)>
+static SharpRTCP.RTCPUtilities.ReadSenderReports(System.ReadOnlySpan<byte> compound) -> System.Collections.Generic.List<SharpRTCP.SenderReport>
+static SharpRTCP.RTCPUtilities.SplitCompoundPacket(System.ReadOnlySpan<byte> compound) -> System.Collections.Generic.List<(int Offset, int Length)>
+static SharpRTCP.RTCPUtilities.TryReadReceiverReport(System.ReadOnlySpan<byte> packet, out SharpRTCP.ReceiverReport report) -> bool
+static SharpRTCP.RTCPUtilities.TryReadSenderReport(System.ReadOnlySpan<byte> packet, out SharpRTCP.SenderReport report) -> bool
+static SharpRTCP.RTCPUtilities.WriteGoodbye(System.Span<byte> packet, uint ssrc) -> int
+static SharpRTCP.RTCPUtilities.WriteHeader(System.Span<byte> packet, int count, int packetType, int length, uint ssrc, bool hasPadding = false) -> void
+static SharpRTCP.RTCPUtilities.WritePictureLossIndication(System.Span<byte> packet, uint ssrc, uint mediaSSRC) -> int
+static SharpRTCP.RTCPUtilities.WriteReceiverReport(System.Span<byte> packet, SharpRTCP.ReceiverReport report) -> int
+static SharpRTCP.RTCPUtilities.WriteReportBlock(System.Span<byte> block, SharpRTCP.ReportBlock report) -> int
+static SharpRTCP.RTCPUtilities.WriteSenderReport(System.Span<byte> packet, SharpRTCP.SenderReport report) -> int
+static SharpRTCP.RTCPUtilities.WriteSourceDescription(System.Span<byte> packet, uint ssrc, string cname) -> int
+static SharpRTCP.SenderReport.ToNTPTimestamp(System.DateTime time) -> ulong

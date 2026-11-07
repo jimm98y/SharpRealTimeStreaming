@@ -304,6 +304,33 @@ never sent any of its media. `e.UserName` is the user the request actually prove
 else on the request came from the client. A handler that throws refuses the request. With no handler
 the server behaves as it always did: any client that authenticates reaches every stream.
 
+## SharpRTCP
+
+The RTCP both the client and the server speak (RFC 3550): sender and receiver reports, report
+blocks, source descriptions, Picture Loss Indications and goodbyes, each read, written into a buffer
+or created. It is referenced by both, and can be used without either.
+
+[![NuGet version](https://img.shields.io/nuget/v/SharpRTCP.svg?style=flat-square)](https://www.nuget.org/packages/SharpRTCP)
+
+Reading what a compound packet carries:
+```cs
+foreach (var (offset, length) in RTCPUtilities.SplitCompoundPacket(datagram))
+{
+    ReadOnlySpan<byte> packet = datagram.AsSpan(offset, length);
+    if (RTCPUtilities.TryReadSenderReport(packet, out SenderReport report))
+    {
+        Console.WriteLine($"{report.SSRC:X8} sent RTP {report.RTPTimestamp} at {report.NTPTime:O}");
+    }
+}
+```
+
+Writing one:
+```cs
+byte[] rtcp = RTCPUtilities.CreateCompoundPacket(
+    RTCPUtilities.CreateReceiverReport(new ReceiverReport { SSRC = ssrc }),
+    RTCPUtilities.CreateSourceDescription(ssrc, "client@example.com"));
+```
+
 ## Logging
 
 Both libraries report through an `ILog` that belongs to the client or server rather than to the

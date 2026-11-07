@@ -58,7 +58,7 @@ namespace SharpRTSPClient.Tests
 
         private static byte[] ReportFor(ChannelState channel)
         {
-            using var client = new RtspClient();
+            using var client = new RTSPClient();
             return client.BuildRtcpReceiverReport(Us, Them, channel);
         }
 

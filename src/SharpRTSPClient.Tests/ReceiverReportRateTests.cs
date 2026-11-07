@@ -55,12 +55,12 @@ namespace SharpRTSPClient.Tests
             return packet;
         }
 
-        private static int ReportsFor(RtspClient client, ChannelState channel, int senderReports)
+        private static int ReportsFor(RTSPClient client, ChannelState channel, int senderReports)
         {
             int total = 0;
             for (int i = 0; i < senderReports; i++)
             {
-                total += client.ParseRtcpAndGenerateResponse(
+                total += client.ParseRTCPAndGenerateResponse(
                     new Memory<byte>(SenderReportPacket(ServerSsrc)), OurSsrc, channel).Count;
             }
             return total;
@@ -69,7 +69,7 @@ namespace SharpRTSPClient.Tests
         [TestMethod]
         public void ABurstOfSenderReportsIsAnsweredOnce()
         {
-            using var client = new RtspClient { ReceiverReportInterval = TimeSpan.FromMinutes(5) };
+            using var client = new RTSPClient { ReceiverReportInterval = TimeSpan.FromMinutes(5) };
             var channel = new ChannelState();
 
             // thirty reports in a row, as a server reporting per frame would send
@@ -80,7 +80,7 @@ namespace SharpRTSPClient.Tests
         [TestMethod]
         public void TheFirstSenderReportIsAnsweredStraightAway()
         {
-            using var client = new RtspClient { ReceiverReportInterval = TimeSpan.FromMinutes(5) };
+            using var client = new RTSPClient { ReceiverReportInterval = TimeSpan.FromMinutes(5) };
             var channel = new ChannelState();
 
             // the far end is waiting to hear that we are here, so the first one is not held back
@@ -90,7 +90,7 @@ namespace SharpRTSPClient.Tests
         [TestMethod]
         public void TheIntervalComesRoundAgain()
         {
-            using var client = new RtspClient { ReceiverReportInterval = TimeSpan.FromMilliseconds(100) };
+            using var client = new RTSPClient { ReceiverReportInterval = TimeSpan.FromMilliseconds(100) };
             var channel = new ChannelState();
 
             Assert.AreEqual(1, ReportsFor(client, channel, 5));
@@ -101,7 +101,7 @@ namespace SharpRTSPClient.Tests
         [TestMethod]
         public void AnIntervalOfZeroAnswersEveryReport()
         {
-            using var client = new RtspClient { ReceiverReportInterval = TimeSpan.Zero };
+            using var client = new RTSPClient { ReceiverReportInterval = TimeSpan.Zero };
             var channel = new ChannelState();
 
             Assert.AreEqual(5, ReportsFor(client, channel, 5));
@@ -110,7 +110,7 @@ namespace SharpRTSPClient.Tests
         [TestMethod]
         public void AReconnectStartsTheIntervalAgain()
         {
-            using var client = new RtspClient { ReceiverReportInterval = TimeSpan.FromMinutes(5) };
+            using var client = new RTSPClient { ReceiverReportInterval = TimeSpan.FromMinutes(5) };
             var channel = new ChannelState();
 
             Assert.AreEqual(1, ReportsFor(client, channel, 5));

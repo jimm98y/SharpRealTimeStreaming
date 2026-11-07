@@ -50,10 +50,13 @@ rebuild and validates whatever binaries are already in `bin`.
    SharpRTCP (which has had no release to compare with), and delete the `CompatibilitySuppressions.xml`
    files: what they excused is in the baseline now.
 
-## Until 0.9.0 is released
+## Against 0.8.0
 
-The baseline is 0.8.0, and since then most public types were renamed (`RTSPClient` is
-`RtspClient`, and so on). The suppressions excuse those renames as a whole, which leaves package
-validation nothing in 0.8.0 to compare a renamed type's members with: removing
-`RtspClient.Pause()` today fails only on RS0017. Types that kept their names, such as `TrackOffer`,
-are checked by both. Once 0.9.0 is the baseline, every type is.
+The client and the server are compatible with 0.8.0 but for one change, recorded in
+`src/SharpRTSPClient/CompatibilitySuppressions.xml`: `IStreamConfigurationData` gained `Fmtp`, which
+a class of your own that implements it has to add (see [migration.md](migration.md)). What 0.8.0
+had and is now done differently, such as `SharpRTSPServer.RTCPUtils`, is kept and marked obsolete
+rather than removed.
+
+Names keep the convention 0.8.0 had, acronyms in capitals (`RTSPClient`, `RTPStream`, `SSRC`), and
+SharpRTCP follows it too (`RTCPUtilities`, `NTPTimestamp`).

@@ -57,7 +57,7 @@ namespace SharpRTSPServer
     /// <remarks>
     /// Stream with ffmpeg: ffmpeg.exe -re -stream_loop -1 -i frag_bunny.mp4 -vcodec copy -an -f rtp rtp://127.0.0.1:11111 -vn -acodec copy -f rtp rtp://127.0.0.1:11113
     /// </remarks>
-    public class RtspServer : IRtpSender, IDisposable
+    public class RTSPServer : IRtpSender, IDisposable
     {
         /// <summary>
         /// Dynamic RTP payload type.
@@ -229,7 +229,7 @@ namespace SharpRTSPServer
         /// </summary>
         public string SessionName { get; set; } = "SharpRTSP";
 
-        private readonly List<RtspConnection> _connectionList = new List<RtspConnection>(); // list of RTSP Listeners
+        private readonly List<RTSPConnection> _connectionList = new List<RTSPConnection>(); // list of RTSP Listeners
 
         /// <summary>
         /// The threads that write media to clients, shared by all of them. Made when the server
@@ -299,7 +299,7 @@ namespace SharpRTSPServer
                 // the ones already added are brought along rather than left pointing at the old one.
                 lock (_connectionList)
                 {
-                    foreach (RtspStreamSource streamSource in StreamSources)
+                    foreach (RTSPStreamSource streamSource in StreamSources)
                     {
                         foreach (ITrack track in streamSource.Tracks)
                         {
@@ -556,7 +556,7 @@ namespace SharpRTSPServer
         /// <para>
         /// Turn it on where that is the intent. <see cref="MulticastTimeToLive"/> keeps it on the
         /// local link, and pairing it with SAVP and
-        /// <see cref="RtspStreamSource.SharedSrtpKey"/> means only clients that were given the key
+        /// <see cref="RTSPStreamSource.SharedSrtpKey"/> means only clients that were given the key
         /// can read what the group carries. Clients refused a group fall back to a transport of
         /// their own, as they did when it was not implemented.
         /// </para>
@@ -636,7 +636,7 @@ namespace SharpRTSPServer
         /// <summary>
         /// The streams this server offers. Guarded by the connection list lock.
         /// </summary>
-        private readonly List<RtspStreamSource> StreamSources = new List<RtspStreamSource>();
+        private readonly List<RTSPStreamSource> StreamSources = new List<RTSPStreamSource>();
 
         /// <summary>
         /// TLS certificate used for RTSPS and HTTPS.
@@ -649,21 +649,21 @@ namespace SharpRTSPServer
         public bool UseHttpTunnel { get; private set; } = false;
 
         /// <summary>
-        /// Initializes a new instance of the <see cref="RtspServer"/> class.
+        /// Initializes a new instance of the <see cref="RTSPServer"/> class.
         /// </summary>
         /// <param name="portNumber">Port number.</param>
         /// <param name="users">
         /// Where the server looks a user up, or null for a server that does not authenticate at all
         /// - which is only appropriate on a trusted network.
         /// </param>
-        public RtspServer(
+        public RTSPServer(
             int portNumber,
             IUserRepository users)
             : this(portNumber, users, (ILoggerFactory)null)
         { }
 
         /// <summary>
-        /// Initializes a new instance of the <see cref="RtspServer"/> class.
+        /// Initializes a new instance of the <see cref="RTSPServer"/> class.
         /// </summary>
         /// <param name="portNumber">Port number.</param>
         /// <param name="users">
@@ -671,7 +671,7 @@ namespace SharpRTSPServer
         /// - which is only appropriate on a trusted network.
         /// </param>
         /// <param name="loggerFactory">Logger factory.</param>
-        public RtspServer(
+        public RTSPServer(
             int portNumber,
             IUserRepository users,
             ILoggerFactory loggerFactory)
@@ -679,7 +679,7 @@ namespace SharpRTSPServer
         { }
 
         /// <summary>
-        /// Initializes a new instance of the <see cref="RtspServer"/> class.
+        /// Initializes a new instance of the <see cref="RTSPServer"/> class.
         /// </summary>
         /// <param name="portNumber">Port number.</param>
         /// <param name="users">
@@ -690,7 +690,7 @@ namespace SharpRTSPServer
         /// <param name="tlsCertificate">TLS certificate used for RTSPS and HTTPS.</param>
         /// <param name="loggerFactory">Logger factory.</param>
         /// <param name="userCertificateValidationCallback">Certificate validation callback.</param>
-        public RtspServer(
+        public RTSPServer(
             int portNumber,
             IUserRepository users,
             bool useHttpTunnel,
@@ -701,7 +701,7 @@ namespace SharpRTSPServer
         { }
 
         /// <summary>
-        /// Initializes a new instance of the <see cref="RtspServer"/> class.
+        /// Initializes a new instance of the <see cref="RTSPServer"/> class.
         /// </summary>
         /// <param name="portNumber">Port number.</param>
         /// <param name="users">
@@ -713,7 +713,7 @@ namespace SharpRTSPServer
         /// <param name="srtpCryptoSuite">SRTP crypto suite <see cref="SrtpCryptoSuites"/>.</param>
         /// <param name="loggerFactory">Logger factory.</param>
         /// <param name="userCertificateValidationCallback">Certificate validation callback.</param>
-        public RtspServer(
+        public RTSPServer(
             int portNumber,
             IUserRepository users,
             bool useHttpTunnel,
@@ -734,7 +734,7 @@ namespace SharpRTSPServer
                 loggerFactory = new CustomLoggerFactory(() => Logger);
 
             _loggerFactory = loggerFactory;
-            _logger = loggerFactory.CreateLogger<RtspServer>();
+            _logger = loggerFactory.CreateLogger<RTSPServer>();
 
             this.UseHttpTunnel = useHttpTunnel;
             this.TlsCertificate = tlsCertificate;
@@ -1341,12 +1341,12 @@ namespace SharpRTSPServer
             _logger.LogDebug("Connection from {remoteEndPoint}", rtspSocket.RemoteEndPoint);
 
             RtspListener newListener = new RtspListener(rtspSocket, _loggerFactory.CreateLogger<RtspListener>());
-            newListener.MessageReceived += RtspMessageReceived;
+            newListener.MessageReceived += RTSPMessageReceived;
 
             // Built before the lock is taken. The accept loop is single threaded, so every moment
             // spent holding this lock is a moment the next connection waits to be counted - and the
             // limit is only as accurate as that counting is prompt.
-            var candidate = new RtspConnection()
+            var candidate = new RTSPConnection()
             {
                 Listener = newListener,
                 Transport = rtspSocket
@@ -1397,7 +1397,7 @@ namespace SharpRTSPServer
             {
                 _logger.LogWarning("Refusing connection from {remoteEndPoint}, the limit of {maxConnections} connections is reached",
                     rtspSocket.RemoteEndPoint, MaxConnections);
-                newListener.MessageReceived -= RtspMessageReceived;
+                newListener.MessageReceived -= RTSPMessageReceived;
                 newListener.Dispose();
                 return null;
             }
@@ -1415,7 +1415,7 @@ namespace SharpRTSPServer
 
             lock (_connectionList)
             {
-                foreach (RtspConnection connection in _connectionList.Where(c => c.Listener == listener).ToArray())
+                foreach (RTSPConnection connection in _connectionList.Where(c => c.Listener == listener).ToArray())
                 {
                     DetachSession(connection, pending);
                 }
@@ -1455,7 +1455,7 @@ namespace SharpRTSPServer
         {
             if (_disposed)
             {
-                throw new ObjectDisposedException(nameof(RtspServer));
+                throw new ObjectDisposedException(nameof(RTSPServer));
             }
         }
 
@@ -1587,7 +1587,7 @@ namespace SharpRTSPServer
             stopping?.Dispose();
         }
 
-        private void RtspMessageReceived(object sender, RtspChunkEventArgs e)
+        private void RTSPMessageReceived(object sender, RtspChunkEventArgs e)
         {
             // Cast the 'sender' and 'e' into the RTSP Listener (the Socket) and the RTSP Message
             RtspListener listener = sender as RtspListener ?? throw new ArgumentException("Invalid sender", nameof(sender));
@@ -1878,7 +1878,7 @@ namespace SharpRTSPServer
                         // than naming a time that means nothing.
                         // A client listening to a group has no stream of its own, so what it is told
                         // about is the group's - which is the numbering it will actually receive.
-                        RtpStream[] playing = connection.Streams
+                        RTPStream[] playing = connection.Streams
                             .Select((stream, trackId) => stream.IsMulticast
                                 ? streamSource.Multicast?.Sender.Streams[trackId]
                                 : stream.RtpChannel != null ? stream : null)
@@ -1952,7 +1952,7 @@ namespace SharpRTSPServer
                         // Only now is it known which stream this connection is watching, so this is
                         // where it learns what that stream can be expected to produce and what it
                         // may fall back on.
-                        RtspStreamSource watching = streamSource;
+                        RTSPStreamSource watching = streamSource;
                         connection.Outbound.StreamProducesKeyFrames = () => watching.HasProducedKeyFrame;
 
                         if (streamSource.KeepLastKeyFrame)
@@ -2179,7 +2179,7 @@ namespace SharpRTSPServer
             MulticastDelivery multicastDelivery = null;
 
 
-            RtspStreamSource streamSource = GetStreamSource(setupMessage.RtspUri);
+            RTSPStreamSource streamSource = GetStreamSource(setupMessage.RtspUri);
             if (streamSource == null)
             {
                 // track not found
@@ -2212,7 +2212,7 @@ namespace SharpRTSPServer
                 return;
             }
 
-            uint trackSsrc = setupTrack.Ssrc;
+            uint trackSSRC = setupTrack.SSRC;
             int trackId = setupTrack.ID;
             TrackType trackType = setupTrack.Kind;
 
@@ -2248,7 +2248,7 @@ namespace SharpRTSPServer
                     return;
                 }
 
-                RtspConnection existingConnection = ConnectionByListener(listener);
+                RTSPConnection existingConnection = ConnectionByListener(listener);
                 if (existingConnection == null || existingConnection.StreamFor(trackId).Context == null)
                 {
                     _logger.LogWarning(
@@ -2281,7 +2281,7 @@ namespace SharpRTSPServer
                 // RTP over RTSP mode
                 transportReply = new RtspTransport()
                 {
-                    SSrc = trackSsrc.ToString("X8"), // Convert to Hex, padded to 8 characters,
+                    SSrc = trackSSRC.ToString("X8"), // Convert to Hex, padded to 8 characters,
                     LowerTransport = RtspTransport.LowerTransportType.TCP,
                     Interleaved = new PortCouple(transport.Interleaved.First, transport.Interleaved.Second)
                 };
@@ -2348,7 +2348,7 @@ namespace SharpRTSPServer
                 // Pass the Port of the two sockets back in the reply
                 transportReply = new RtspTransport()
                 {
-                    SSrc = trackSsrc.ToString("X8"), // Convert to Hex, padded to 8 characters,
+                    SSrc = trackSSRC.ToString("X8"), // Convert to Hex, padded to 8 characters,
                     LowerTransport = RtspTransport.LowerTransportType.UDP,
                     IsMulticast = false,
                     ServerPort = new PortCouple(udpPair.DataPort, udpPair.ControlPort),
@@ -2412,7 +2412,7 @@ namespace SharpRTSPServer
 
                 transportReply = new RtspTransport()
                 {
-                    SSrc = delivery.Sender.StreamFor(trackId).Ssrc.ToString("X8"),
+                    SSrc = delivery.Sender.StreamFor(trackId).SSRC.ToString("X8"),
                     LowerTransport = RtspTransport.LowerTransportType.UDP,
                     IsMulticast = true,
                     Destination = delivery.GroupAddress,
@@ -2446,7 +2446,7 @@ namespace SharpRTSPServer
                         // there is no writer to wait for.
                         if (multicastDelivery != null && multicastDelivery.Listeners.Count == 0)
                         {
-                            RtspConnection orphan = CloseMulticastGroup(streamSource);
+                            RTSPConnection orphan = CloseMulticastGroup(streamSource);
 
                             if (orphan != null)
                             {
@@ -2461,7 +2461,7 @@ namespace SharpRTSPServer
                     }
 
                     // In the SDP the H264/H265 video track is TrackID 0 and the Audio Track is TrackID 1
-                    RtpStream stream = connection.StreamFor(trackId);
+                    RTPStream stream = connection.StreamFor(trackId);
 
                     // The SSRC belongs to the stream this SETUP is for. Putting it on the connection
                     // meant the second SETUP overwrote the first, so both streams went out under one
@@ -2471,12 +2471,12 @@ namespace SharpRTSPServer
                     // keeps that safe is that no two senders share an SSRC - so a client sent the
                     // media one to one is given one nothing has used before. A client listening to a
                     // group sends nothing itself and takes the group's.
-                    stream.Ssrc = streamSource.SharedSrtpKey && multicastDelivery == null
+                    stream.SSRC = streamSource.SharedSrtpKey && multicastDelivery == null
                         ? streamSource.ReserveSsrc()
-                        : trackSsrc;
+                        : trackSSRC;
 
                     // and the reply has to name the one it will actually hear
-                    transportReply.SSrc = stream.Ssrc.ToString("X8");
+                    transportReply.SSrc = stream.SSRC.ToString("X8");
                     stream.RequiresSrtp = setupTrack.RtpProfile == RtpProfiles.SAVP;
 
                     // a repeated SETUP for the same track would otherwise leak the sockets of the previous one
@@ -2552,7 +2552,7 @@ namespace SharpRTSPServer
                 return;
             }
 
-            string sdp = GenerateSdp(StreamSource, listener);
+            string sdp = GenerateSDP(StreamSource, listener);
             if (sdp == null)
             {
                 // the connection went away between this request arriving and being handled
@@ -2582,13 +2582,13 @@ namespace SharpRTSPServer
         /// The key lives in the SDP, which is why it is made here: a client that never receives the
         /// SDP has no way to read anything the server would send it.
         /// </remarks>
-        private string BuildCryptoAttribute(RtspStreamSource streamSource, RtpStream stream, int trackId)
+        private string BuildCryptoAttribute(RTSPStreamSource streamSource, RTPStream stream, int trackId)
         {
             if (string.IsNullOrEmpty(SrtpCryptoSuite))
             {
                 throw new InvalidOperationException(
                     "A track asked for the SAVP profile but the server has no SRTP crypto suite configured. " +
-                    "Pass one to the RtspServer constructor, or leave the track on AVP.");
+                    "Pass one to the RTSPServer constructor, or leave the track on AVP.");
             }
 
             WarnIfSrtpKeysTravelInTheClear();
@@ -2597,7 +2597,7 @@ namespace SharpRTSPServer
             // everybody, which is the only way a group can read what is sent to it. The client's own
             // stream is given the same keys, so that the SETUP which follows can tell this client has
             // been told them.
-            RtpStream keyHolder = streamSource.SharedSrtpKey ? streamSource.GroupKey(trackId) : stream;
+            RTPStream keyHolder = streamSource.SharedSrtpKey ? streamSource.GroupKey(trackId) : stream;
 
             byte[] masterKeySalt = keyHolder.PrepareSrtpContext(SrtpCryptoSuite);
 
@@ -2665,7 +2665,7 @@ namespace SharpRTSPServer
         /// set. A section that already has a crypto attribute is left alone - whoever wrote that SDP
         /// is managing the keys themselves, and SETUP will tell them if the server disagrees.
         /// </remarks>
-        private string AddMissingCryptoAttributes(string sdp, RtspStreamSource streamSource, RtspConnection connection)
+        private string AddMissingCryptoAttributes(string sdp, RTSPStreamSource streamSource, RTSPConnection connection)
         {
             if (!streamSource.Tracks.Any(track => track.RtpProfile == RtpProfiles.SAVP))
             {
@@ -2686,7 +2686,7 @@ namespace SharpRTSPServer
             // Sections are matched to tracks by their media type, not their position. An SDP that
             // lists audio before video used to get each track's keys written into the other one's
             // section, so the client decrypted with the wrong key and simply saw nothing.
-            List<RtspStreamSource.MediaSection> sections = RtspStreamSource.ParseMediaSections(sdp);
+            List<RTSPStreamSource.MediaSection> sections = RTSPStreamSource.ParseMediaSections(sdp);
             List<ITrack> describes = streamSource.TrackOfEachSection(sections);
 
             StringBuilder builder = new StringBuilder();
@@ -2712,7 +2712,7 @@ namespace SharpRTSPServer
 
                 if (track != null && track.RtpProfile == RtpProfiles.SAVP)
                 {
-                    RtpStream stream = connection.StreamFor(track.ID);
+                    RTPStream stream = connection.StreamFor(track.ID);
                     builder.Append(BuildCryptoAttribute(streamSource, stream, track.ID)).Append(SDP_LINE_ENDING);
                 }
             }
@@ -2762,7 +2762,7 @@ namespace SharpRTSPServer
                 || string.Equals(path, wanted, StringComparison.OrdinalIgnoreCase);
         }
 
-        private RtspStreamSource GetStreamSource(Uri rtspUri)
+        private RTSPStreamSource GetStreamSource(Uri rtspUri)
         {
             string streamID = rtspUri.AbsolutePath.TrimStart('/').Split('/').First();
             return GetStreamSource(streamID);
@@ -2772,7 +2772,7 @@ namespace SharpRTSPServer
         /// Takes the connection list lock, which also guards <see cref="StreamSources"/>. The lock is
         /// re-entrant, so callers that already hold it can call this too.
         /// </remarks>
-        private RtspStreamSource GetStreamSource(string streamID)
+        private RTSPStreamSource GetStreamSource(string streamID)
         {
             lock (_connectionList)
             {
@@ -2782,7 +2782,7 @@ namespace SharpRTSPServer
                 // closure and a delegate to throw away.
                 for (int i = 0; i < StreamSources.Count; i++)
                 {
-                    RtspStreamSource candidate = StreamSources[i];
+                    RTSPStreamSource candidate = StreamSources[i];
 
                     if (candidate.StreamID == streamID)
                     {
@@ -2794,9 +2794,9 @@ namespace SharpRTSPServer
             }
         }
 
-        private string GenerateSdp(RtspStreamSource streamSource, RtspListener listener)
+        private string GenerateSDP(RTSPStreamSource streamSource, RtspListener listener)
         {
-            RtspConnection connection = ConnectionByListener(listener);
+            RTSPConnection connection = ConnectionByListener(listener);
             if (connection == null)
             {
                 // dropped between the request arriving and being handled
@@ -2835,7 +2835,7 @@ namespace SharpRTSPServer
             // matching them up by position to agree with this.
             foreach (ITrack track in streamSource.Tracks)
             {
-                track.BuildSdp(sdp);
+                track.BuildSDP(sdp);
 
                 if (track.RtpProfile == RtpProfiles.SAVP)
                 {
@@ -2847,7 +2847,7 @@ namespace SharpRTSPServer
             return sdp.ToString();
         }
 
-        private RtspConnection ConnectionByRtpTransport(IRtpTransport rtpTransport)
+        private RTSPConnection ConnectionByRtpTransport(IRtpTransport rtpTransport)
         {
             if (rtpTransport == null)
                 return null;
@@ -2859,9 +2859,9 @@ namespace SharpRTSPServer
                 // UDP pair of any track after those two found no connection at all: its keepalive
                 // was never refreshed, so the idle sweep dropped a session whose client was talking,
                 // and its reception reports were thrown away.
-                foreach (RtspConnection connection in _connectionList)
+                foreach (RTSPConnection connection in _connectionList)
                 {
-                    foreach (RtpStream stream in connection.Streams)
+                    foreach (RTPStream stream in connection.Streams)
                     {
                         if (stream.RtpChannel == rtpTransport)
                         {
@@ -2874,7 +2874,7 @@ namespace SharpRTSPServer
             }
         }
 
-        private RtspConnection ConnectionBySessionId(string sessionId)
+        private RTSPConnection ConnectionBySessionId(string sessionId)
         {
             if (sessionId == null)
                 return null;
@@ -2885,7 +2885,7 @@ namespace SharpRTSPServer
             }
         }
 
-        private RtspConnection ConnectionByListener(RtspListener listener)
+        private RTSPConnection ConnectionByListener(RtspListener listener)
         {
             if (listener == null)
                 return null;
@@ -2896,9 +2896,9 @@ namespace SharpRTSPServer
             }
         }
 
-        public void SendRawRtp(RtspConnection connection, RtpStream stream, List<Memory<byte>> rtpPackets)
+        public void SendRawRTP(RTSPConnection connection, RTPStream stream, List<Memory<byte>> rtpPackets)
         {
-            SendRawRtp(connection, stream, rtpPackets, false);
+            SendRawRTP(connection, stream, rtpPackets, false);
         }
 
         /// <summary>
@@ -2911,11 +2911,11 @@ namespace SharpRTSPServer
         /// Leave the SSRC and sequence numbers already in the packets alone, for a track forwarding
         /// RTP produced elsewhere. Otherwise both are overwritten with this server's own.
         /// </param>
-        public void SendRawRtp(RtspConnection connection, RtpStream stream, List<Memory<byte>> rtpPackets, bool preserveSourceHeaders)
+        public void SendRawRTP(RTSPConnection connection, RTPStream stream, List<Memory<byte>> rtpPackets, bool preserveSourceHeaders)
         {
-            if (!TrySendRawRtp(connection, stream, rtpPackets, preserveSourceHeaders))
+            if (!TrySendRawRTP(connection, stream, rtpPackets, preserveSourceHeaders))
             {
-                // outside the send lock: see RtspConnection.SendLock for why that order matters
+                // outside the send lock: see RTSPConnection.SendLock for why that order matters
                 RemoveSession(connection);
             }
         }
@@ -2928,7 +2928,7 @@ namespace SharpRTSPServer
         /// was queued, so that they describe what is actually going out and in what order - a frame
         /// dropped while waiting must not leave a gap in the numbering the client is given.
         /// </remarks>
-        private void WriteQueuedFrame(RtspConnection connection, QueuedFrame frame)
+        private void WriteQueuedFrame(RTSPConnection connection, QueuedFrame frame)
         {
             bool dropConnection = false;
 
@@ -2939,7 +2939,7 @@ namespace SharpRTSPServer
                     return;
                 }
 
-                RtpStream stream = connection.Streams[frame.StreamType];
+                RTPStream stream = connection.Streams[frame.StreamType];
                 if (stream.RtpChannel == null)
                 {
                     return;
@@ -2947,7 +2947,7 @@ namespace SharpRTSPServer
 
                 if (frame.PreserveSourceHeaders)
                 {
-                    stream.Ssrc = frame.SourceSsrc;
+                    stream.SSRC = frame.SourceSsrc;
                 }
 
                 // Trace, not debug, and asked first. This is a line per frame per client watching -
@@ -2970,7 +2970,7 @@ namespace SharpRTSPServer
                 bool replayed = connection.Outbound != null && connection.Outbound.TakeReplayedKeyFrame(frame);
                 if (!replayed && IsSenderReportDue(stream))
                 {
-                    if (SendRtcpSenderReport(frame.RtpTimestamp, connection, stream))
+                    if (SendRTCPSenderReport(frame.RtpTimestamp, connection, stream))
                     {
                         stream.MustSendRtcpPacket = false;
                         stream.LastSenderReportUtc = DateTime.UtcNow;
@@ -2981,10 +2981,10 @@ namespace SharpRTSPServer
                 // connection's own, which is nothing beside the copy of every packet that used to
                 // happen before that - and is just as unnecessary, since sending does not change
                 // them.
-                dropConnection = !TrySendRawRtp(connection, stream, frame.Packets.Items, frame.PreserveSourceHeaders);
+                dropConnection = !TrySendRawRTP(connection, stream, frame.Packets.Items, frame.PreserveSourceHeaders);
             }
 
-            // outside the send lock: see RtspConnection.SendLock for why that order matters
+            // outside the send lock: see RTSPConnection.SendLock for why that order matters
             if (dropConnection)
             {
                 RemoveSession(connection);
@@ -3009,31 +3009,31 @@ namespace SharpRTSPServer
         /// packet may carry blocks about several sources, and only the ones about this server's own
         /// streams mean anything here.
         /// </remarks>
-        private void ReadReceptionReports(RtspConnection connection, ReadOnlySpan<byte> rtcp)
+        private void ReadReceptionReports(RTSPConnection connection, ReadOnlySpan<byte> rtcp)
         {
             if (connection == null)
             {
                 return;
             }
 
-            foreach (var (reporter, block) in RtcpUtils.ReadReportBlocks(rtcp))
+            foreach (var (reporter, block) in RTCPUtilities.ReadReportBlocks(rtcp))
             {
                 ReadOneReport(connection, reporter, block);
             }
         }
 
-        private void ReadOneReport(RtspConnection connection, uint reporter, ReportBlock block)
+        private void ReadOneReport(RTSPConnection connection, uint reporter, ReportBlock block)
         {
-            uint aboutSsrc = block.Ssrc;
+            uint aboutSsrc = block.SSRC;
 
-            RtpStream stream = null;
+            RTPStream stream = null;
             int trackId = -1;
 
-            RtpStream[] streams = connection.Streams;
+            RTPStream[] streams = connection.Streams;
 
             for (int i = 0; i < streams.Length; i++)
             {
-                if (streams[i] != null && streams[i].Ssrc == aboutSsrc && streams[i].RtpChannel != null)
+                if (streams[i] != null && streams[i].SSRC == aboutSsrc && streams[i].RtpChannel != null)
                 {
                     stream = streams[i];
                     trackId = i;
@@ -3097,7 +3097,7 @@ namespace SharpRTSPServer
         /// drop, people stop watching. It used to be three warnings and a stack trace each time, which
         /// buries the failures that are worth looking at among the ones that are not.
         /// </remarks>
-        private void ReportWriteFailure(RtspConnection connection, Exception exception, string what)
+        private void ReportWriteFailure(RTSPConnection connection, Exception exception, string what)
         {
             string remoteEndPoint = DescribeRemoteEndPoint(connection);
 
@@ -3152,7 +3152,7 @@ namespace SharpRTSPServer
         /// <summary>
         /// The remote end point of a connection that may already have been torn down, for a log line.
         /// </summary>
-        private static string DescribeRemoteEndPoint(RtspConnection connection)
+        private static string DescribeRemoteEndPoint(RTSPConnection connection)
         {
             try
             {
@@ -3172,7 +3172,7 @@ namespace SharpRTSPServer
         /// answered and the caller should stop.
         /// </returns>
         private bool TryStartPlaying(RtspListener listener, RtspRequest playMessage,
-            RtspStreamSource streamSource, out string range, out string scale)
+            RTSPStreamSource streamSource, out string range, out string scale)
         {
             range = null;
             scale = null;
@@ -3294,11 +3294,11 @@ namespace SharpRTSPServer
         /// One client pausing must not stop the media for the others. A stream is only really paused
         /// when nobody is left watching it.
         /// </remarks>
-        private bool NobodyElseIsPlaying(RtspStreamSource streamSource, RtspConnection except)
+        private bool NobodyElseIsPlaying(RTSPStreamSource streamSource, RTSPConnection except)
         {
             lock (_connectionList)
             {
-                foreach (RtspConnection connection in streamSource.ConnectionList)
+                foreach (RTSPConnection connection in streamSource.ConnectionList)
                 {
                     if (!ReferenceEquals(connection, except) && connection.Play)
                     {
@@ -3332,7 +3332,7 @@ namespace SharpRTSPServer
         /// One as soon as the stream starts playing, so the client gets the mapping between wall
         /// clock and RTP timestamps straight away, and then one per interval.
         /// </remarks>
-        private bool IsSenderReportDue(RtpStream stream)
+        private bool IsSenderReportDue(RTPStream stream)
         {
             if (stream.MustSendRtcpPacket)
             {
@@ -3352,7 +3352,7 @@ namespace SharpRTSPServer
         /// Writes RTP to one connection, reporting whether it got there rather than acting on it.
         /// </summary>
         /// <returns>False if the connection could not be written to and should be dropped.</returns>
-        private bool TrySendRawRtp(RtspConnection connection, RtpStream stream, List<Memory<byte>> rtpPackets, bool preserveSourceHeaders)
+        private bool TrySendRawRTP(RTSPConnection connection, RTPStream stream, List<Memory<byte>> rtpPackets, bool preserveSourceHeaders)
         {
             lock (connection.SendLock)
             {
@@ -3382,7 +3382,7 @@ namespace SharpRTSPServer
                 {
                     // Forwarded untouched. The sequence number is still followed, so the RTP-Info of a
                     // later PLAY and anything else reading it reports what actually went out.
-                    stream.SequenceNumber = (ushort)(RtpPacketUtil.ReadSequenceNumber(rtpPacket.Span) + 1);
+                    stream.SequenceNumber = (ushort)(RTPPacketUtil.ReadSequenceNumber(rtpPacket.Span) + 1);
                 }
                 else
                 {
@@ -3397,11 +3397,11 @@ namespace SharpRTSPServer
                     rtpPacket = stamped.AsMemory(0, rtpPacket.Length);
 
                     // Add the specific data for each transmission
-                    RtpPacketUtil.WriteSequenceNumber(rtpPacket.Span, stream.SequenceNumber);
+                    RTPPacketUtil.WriteSequenceNumber(rtpPacket.Span, stream.SequenceNumber);
                     stream.SequenceNumber++;
 
                     // Add the specific SSRC for each transmission
-                    RtpPacketUtil.WriteSsrc(rtpPacket.Span, stream.Ssrc);
+                    RTPPacketUtil.WriteSSRC(rtpPacket.Span, stream.SSRC);
                 }
 
                 if (stream.Context != null)
@@ -3483,49 +3483,49 @@ namespace SharpRTSPServer
             }
         }
 
-        private bool SendRtcpSenderReport(uint rtpTimestamp, RtspConnection connection, RtpStream stream)
+        private bool SendRTCPSenderReport(uint rtpTimestamp, RTSPConnection connection, RTPStream stream)
         {
             // an empty report: of no report blocks, as this server receives nothing
-            int length = RtcpUtils.GetSenderReportLength(0);
+            int length = RTCPUtilities.GetSenderReportLength(0);
             using (var rtcpOwner = MemoryPool<byte>.Shared.Rent(length))
             {
                 var rtcpSenderReport = rtcpOwner.Memory.Slice(0, length).Span;
                 DateTime sentAt = DateTime.UtcNow;
                 var report = new SenderReport
                 {
-                    Ssrc = stream.Ssrc,
-                    NtpTimestamp = SenderReport.ToNtpTimestamp(sentAt),
-                    RtpTimestamp = rtpTimestamp,
+                    SSRC = stream.SSRC,
+                    NTPTimestamp = SenderReport.ToNTPTimestamp(sentAt),
+                    RTPTimestamp = rtpTimestamp,
                     PacketCount = stream.RtpPacketCount,
                     OctetCount = stream.OctetCount,
                 };
-                RtcpUtils.WriteSenderReport(rtcpSenderReport, report);
+                RTCPUtilities.WriteSenderReport(rtcpSenderReport, report);
 
                 // Noted before it goes, so that a report answering it can be matched to it: the
                 // middle of the timestamp is the part a receiver echoes back.
-                stream.LastSenderReportMiddle32 = report.CompactNtp;
+                stream.LastSenderReportMiddle32 = report.CompactNTP;
 
                 stream.LastSenderReportSentUtc = sentAt;
 
-                return SendRawRtcp(connection, stream, rtcpSenderReport);
+                return SendRawRTCP(connection, stream, rtcpSenderReport);
 
                 // Clear the flag. A timer may set this to True again at some point to send regular Sender Reports
                 //HACK  connection.must_send_rtcp_packet = false; // A Timer may set this to true again later in case it is used as a Keepalive (eg IndigoVision)
             }
         }
 
-        private bool SendRtcpBye(RtspConnection connection, RtpStream stream)
+        private bool SendRTCPBye(RTSPConnection connection, RTPStream stream)
         {
-            using (var rtcpOwner = MemoryPool<byte>.Shared.Rent(RtcpUtils.GoodbyeLength))
+            using (var rtcpOwner = MemoryPool<byte>.Shared.Rent(RTCPUtilities.GoodbyeLength))
             {
-                var rtcpBye = rtcpOwner.Memory.Slice(0, RtcpUtils.GoodbyeLength).Span;
-                RtcpUtils.WriteGoodbye(rtcpBye, stream.Ssrc);
+                var rtcpBye = rtcpOwner.Memory.Slice(0, RTCPUtilities.GoodbyeLength).Span;
+                RTCPUtilities.WriteGoodbye(rtcpBye, stream.SSRC);
 
-                return SendRawRtcp(connection, stream, rtcpBye);
+                return SendRawRTCP(connection, stream, rtcpBye);
             }
         }
 
-        public bool SendRawRtcp(RtspConnection connection, RtpStream stream, Span<byte> rtcpSenderReport)
+        public bool SendRawRTCP(RTSPConnection connection, RTPStream stream, Span<byte> rtcpSenderReport)
         {
             if (!CanSend(stream, "RTCP"))
                 return false;
@@ -3595,19 +3595,19 @@ namespace SharpRTSPServer
         /// </remarks>
         private readonly struct PendingTeardown
         {
-            public PendingTeardown(RtspConnection connection, RtspListener listener, List<RtspConnection> finishedGroups)
+            public PendingTeardown(RTSPConnection connection, RtspListener listener, List<RTSPConnection> finishedGroups)
             {
                 Connection = connection;
                 Listener = listener;
                 FinishedGroups = finishedGroups;
             }
 
-            public RtspConnection Connection { get; }
+            public RTSPConnection Connection { get; }
 
             public RtspListener Listener { get; }
 
             /// <summary>Groups this connection was the last listener of, or null for none.</summary>
-            public List<RtspConnection> FinishedGroups { get; }
+            public List<RTSPConnection> FinishedGroups { get; }
         }
 
         /// <summary>
@@ -3619,7 +3619,7 @@ namespace SharpRTSPServer
         /// go - otherwise the slow half of this runs under that lock, which is the stall the
         /// outbound queue exists to prevent.
         /// </remarks>
-        private void RemoveSession(RtspConnection connection)
+        private void RemoveSession(RTSPConnection connection)
         {
             var pending = new List<PendingTeardown>(1);
 
@@ -3643,7 +3643,7 @@ namespace SharpRTSPServer
         /// The caller must hold the connection list lock.
         /// </para>
         /// </remarks>
-        private void DetachSession(RtspConnection connection, List<PendingTeardown> pending)
+        private void DetachSession(RTSPConnection connection, List<PendingTeardown> pending)
         {
             Debug.Assert(Monitor.IsEntered(_connectionList), "DetachSession is bookkeeping under the connection list lock");
 
@@ -3661,7 +3661,7 @@ namespace SharpRTSPServer
 
             // Before the connection is taken off the lists, since that is where the groups it was
             // listening to are found. What it leaves empty is shut down outside the lock.
-            List<RtspConnection> finishedGroups = LeaveMulticastGroups(connection);
+            List<RTSPConnection> finishedGroups = LeaveMulticastGroups(connection);
 
             // stops the writer taking any more work, and hands back what it was still holding
             connection.Outbound?.Dispose();
@@ -3764,7 +3764,7 @@ namespace SharpRTSPServer
         /// Called under the connection list lock, which is what keeps two clients setting up the same
         /// track at the same time from opening two groups for it.
         /// </remarks>
-        private MulticastDelivery JoinMulticastGroup(RtspStreamSource streamSource, ITrack track)
+        private MulticastDelivery JoinMulticastGroup(RTSPStreamSource streamSource, ITrack track)
         {
             int trackId = track.ID;
 
@@ -3777,7 +3777,7 @@ namespace SharpRTSPServer
                     delivery = new MulticastDelivery
                     {
                         GroupAddress = MulticastAddress,
-                        Sender = new RtspConnection
+                        Sender = new RTSPConnection
                         {
                             SessionId = "multicast " + streamSource.StreamID,
                         },
@@ -3824,7 +3824,7 @@ namespace SharpRTSPServer
                         throw;
                     }
 
-                    RtpStream stream = delivery.Sender.StreamFor(trackId);
+                    RTPStream stream = delivery.Sender.StreamFor(trackId);
                     stream.RtpChannel = group;
 
                     // Under the key the SDP announced to everybody, which is what makes what the
@@ -3832,11 +3832,11 @@ namespace SharpRTSPServer
                     stream.Context = streamSource.SharedSrtpKey
                         ? streamSource.GroupKey(trackId).CreateSeparateContext()
                         : null;
-                    stream.Ssrc = track.Ssrc;
+                    stream.SSRC = track.SSRC;
 
                     // Put beyond use, so that no client sent the stream one to one is ever handed the
                     // SSRC the group is already sending under.
-                    streamSource.ReserveSsrc(stream.Ssrc);
+                    streamSource.ReserveSsrc(stream.SSRC);
                     stream.MustSendRtcpPacket = true;
 
                     delivery.RtpPort[trackId] = groupPort;
@@ -3887,11 +3887,11 @@ namespace SharpRTSPServer
         /// is. It is the second of those that makes it a group: the media does not restart, pause or
         /// stop because one of the clients did.
         /// </remarks>
-        private void StartMulticastIfListening(RtspConnection connection, RtspStreamSource streamSource)
+        private void StartMulticastIfListening(RTSPConnection connection, RTSPStreamSource streamSource)
         {
             bool listening = false;
 
-            foreach (RtpStream stream in connection.Streams)
+            foreach (RTPStream stream in connection.Streams)
             {
                 listening |= stream.IsMulticast;
             }
@@ -3921,11 +3921,11 @@ namespace SharpRTSPServer
         /// <remarks>
         /// Called while the connection list lock is held, as the session is being removed.
         /// </remarks>
-        private List<RtspConnection> LeaveMulticastGroups(RtspConnection connection)
+        private List<RTSPConnection> LeaveMulticastGroups(RTSPConnection connection)
         {
-            List<RtspConnection> finished = null;
+            List<RTSPConnection> finished = null;
 
-            foreach (RtspStreamSource streamSource in StreamSources)
+            foreach (RTSPStreamSource streamSource in StreamSources)
             {
                 MulticastDelivery delivery = streamSource.Multicast;
 
@@ -3943,7 +3943,7 @@ namespace SharpRTSPServer
                 _logger.LogInformation("Nobody is listening to the {streamID} multicast group any more, shutting it down",
                     streamSource.StreamID);
 
-                (finished = finished ?? new List<RtspConnection>()).Add(CloseMulticastGroup(streamSource));
+                (finished = finished ?? new List<RTSPConnection>()).Add(CloseMulticastGroup(streamSource));
             }
 
             return finished;
@@ -3959,7 +3959,7 @@ namespace SharpRTSPServer
         /// writing the group, and every other connection and request on the server is waiting behind
         /// this lock. <see cref="ShutDownMulticastSenders"/> does those, outside it.
         /// </remarks>
-        private RtspConnection CloseMulticastGroup(RtspStreamSource streamSource)
+        private RTSPConnection CloseMulticastGroup(RTSPStreamSource streamSource)
         {
             MulticastDelivery delivery = streamSource.Multicast;
 
@@ -3987,25 +3987,25 @@ namespace SharpRTSPServer
         /// <summary>
         /// Says goodbye to a group that nobody is listening to any more, and lets its sockets go.
         /// </summary>
-        private void ShutDownMulticastSenders(List<RtspConnection> senders)
+        private void ShutDownMulticastSenders(List<RTSPConnection> senders)
         {
             if (senders == null)
             {
                 return;
             }
 
-            foreach (RtspConnection sender in senders)
+            foreach (RTSPConnection sender in senders)
             {
                 if (sender == null)
                 {
                     continue;
                 }
 
-                foreach (RtpStream stream in sender.Streams)
+                foreach (RTPStream stream in sender.Streams)
                 {
                     if (stream.RtpChannel != null)
                     {
-                        SendRtcpBye(sender, stream);
+                        SendRTCPBye(sender, stream);
                     }
                 }
 
@@ -4026,7 +4026,7 @@ namespace SharpRTSPServer
         /// a write that loses the race throws where it is already handled.
         /// </para>
         /// </remarks>
-        private void ReleaseUdpTransports(RtspConnection connection)
+        private void ReleaseUdpTransports(RTSPConnection connection)
         {
             if (!connection.Streams.Any(stream => IsUdp(stream.RtpChannel)))
             {
@@ -4066,9 +4066,9 @@ namespace SharpRTSPServer
         /// which case it will find the connection no longer playing - or has finished the one it was
         /// in. Either way no write sees half of this.
         /// </remarks>
-        private void DetachAndRelease(RtspConnection connection, Func<IRtpTransport, bool> matches)
+        private void DetachAndRelease(RTSPConnection connection, Func<IRtpTransport, bool> matches)
         {
-            foreach (RtpStream stream in connection.Streams)
+            foreach (RTPStream stream in connection.Streams)
             {
                 IRtpTransport transport = stream.RtpChannel;
 
@@ -4092,7 +4092,7 @@ namespace SharpRTSPServer
         /// would stall every other connection, every request and every other stream for that minute,
         /// which is the stall the outbound queue exists to prevent in the first place.
         /// </remarks>
-        private void CloseConnection(RtspConnection connection, RtspListener listener)
+        private void CloseConnection(RTSPConnection connection, RtspListener listener)
         {
             Action close = () =>
             {
@@ -4210,7 +4210,7 @@ namespace SharpRTSPServer
         /// Sending it in the clear would be worse than sending nothing: the server was configured to
         /// encrypt, and nothing downstream would report that it had not.
         /// </remarks>
-        private bool CanSend(RtpStream stream, string what)
+        private bool CanSend(RTPStream stream, string what)
         {
             if (!stream.RequiresSrtp || stream.Context != null)
             {
@@ -4305,7 +4305,7 @@ namespace SharpRTSPServer
 
                 DisconnectAllClients();
 
-                List<RtspStreamSource> streamSources;
+                List<RTSPStreamSource> streamSources;
                 lock (_connectionList)
                 {
                     streamSources = StreamSources.ToList();
@@ -4333,7 +4333,7 @@ namespace SharpRTSPServer
         /// </summary>
         private void DisconnectAllClients()
         {
-            RtspConnection[] connections;
+            RTSPConnection[] connections;
 
             lock (_connectionList)
             {
@@ -4342,13 +4342,13 @@ namespace SharpRTSPServer
 
             // Saying goodbye waits on each connection's writer, so it happens with the list lock let
             // go, like the teardown that follows it.
-            foreach (RtspConnection connection in connections)
+            foreach (RTSPConnection connection in connections)
             {
                 foreach (var stream in connection.Streams)
                 {
                     if (stream.RtpChannel != null)
                     {
-                        SendRtcpBye(connection, stream);
+                        SendRTCPBye(connection, stream);
                     }
                 }
 
@@ -4411,7 +4411,7 @@ namespace SharpRTSPServer
             DateTime timeOut = DateTime.UtcNow.AddSeconds(-RTSP_TIMEOUT);
 
             // Convert to Array to allow us to delete from the connection list while iterating
-            foreach (RtspConnection connection in _connectionList.ToArray())
+            foreach (RTSPConnection connection in _connectionList.ToArray())
             {
                 // A client that goes away without a TEARDOWN would otherwise keep its UDP port pair
                 // for the whole RTSP timeout. There are only 500 pairs, so a client that reconnects
@@ -4439,7 +4439,7 @@ namespace SharpRTSPServer
             // listening, so that a producer can skip packetizing into the void.
             lock (_connectionList)
             {
-                RtspStreamSource streamSource = GetStreamSource(streamID);
+                RTSPStreamSource streamSource = GetStreamSource(streamID);
 
                 if (streamSource == null)
                 {
@@ -4499,7 +4499,7 @@ namespace SharpRTSPServer
         /// </remarks>
         public TimeSpan KeyFrameWait { get; set; } = OutboundQueue.DEFAULT_KEY_FRAME_WAIT;
 
-        private void OnKeyFrameNeeded(RtspConnection connection)
+        private void OnKeyFrameNeeded(RTSPConnection connection)
         {
             EventHandler<KeyFrameNeededEventArgs> handler = KeyFrameNeeded;
             if (handler == null)
@@ -4510,7 +4510,7 @@ namespace SharpRTSPServer
             handler(this, new KeyFrameNeededEventArgs(connection.SessionId));
         }
 
-        public void FeedInRawRtp(string streamID, int streamType, uint rtpTimestamp, RtpPackets rtpPackets)
+        public void FeedInRawRTP(string streamID, int streamType, uint rtpTimestamp, RtpPackets rtpPackets)
         {
             // Taken over before anything can go wrong, so that every way out of here - a stream that
             // does not exist, a track that does not, an exception - still releases what the caller
@@ -4536,7 +4536,7 @@ namespace SharpRTSPServer
             if (streamType < 0)
                 throw new ArgumentOutOfRangeException(nameof(streamType), streamType, "A track ID is not negative.");
 
-            RtspConnection[] connections;
+            RTSPConnection[] connections;
             int listening;
             ITrack track;
             bool preserveSourceHeaders;
@@ -4590,7 +4590,7 @@ namespace SharpRTSPServer
                 // away at the end of the method. Borrowed and given back on this thread, which is
                 // where a pool with a cache per thread is at its best.
                 listening = streamSource.ConnectionList.Count;
-                connections = ArrayPool<RtspConnection>.Shared.Rent(listening);
+                connections = ArrayPool<RTSPConnection>.Shared.Rent(listening);
                 streamSource.ConnectionList.CopyTo(connections, 0);
             }
 
@@ -4600,7 +4600,7 @@ namespace SharpRTSPServer
 
             // The RTP keeps the source's SSRC, so the sender reports have to name it too - a
             // receiver ties the two together by SSRC and ignores one that does not match.
-            frame.SourceSsrc = preserveSourceHeaders ? track.Ssrc : 0u;
+            frame.SourceSsrc = preserveSourceHeaders ? track.SSRC : 0u;
 
             // One frame, offered to every connection watching. Nothing about it differs between
             // them, which is why it is not copied for any of them.
@@ -4608,7 +4608,7 @@ namespace SharpRTSPServer
             {
             for (int i = 0; i < listening; i++)
             {
-                RtspConnection connection = connections[i];
+                RTSPConnection connection = connections[i];
 
                 // No lock here, deliberately. The lock that orders writes to a connection is held
                 // by its writer for as long as a write takes, and a write to a client that has
@@ -4629,7 +4629,7 @@ namespace SharpRTSPServer
                 if (!connection.Play && connection.HasEverPlayed)
                     continue;
 
-                RtpStream stream = connection.StreamOrNull(streamType);
+                RTPStream stream = connection.StreamOrNull(streamType);
 
                 OutboundQueue outbound = connection.Outbound;
 
@@ -4648,7 +4648,7 @@ namespace SharpRTSPServer
                 // Cleared before it goes back: a pooled array holding connections would keep them
                 // alive for as long as the pool did.
                 Array.Clear(connections, 0, listening);
-                ArrayPool<RtspConnection>.Shared.Return(connections);
+                ArrayPool<RTSPConnection>.Shared.Return(connections);
             }
 
             // Nothing is dropped here any more. A frame is handed to a connection rather than written
@@ -4660,7 +4660,7 @@ namespace SharpRTSPServer
 
         #region Tracks
 
-        public void AddStreamSource(RtspStreamSource streamSource)
+        public void AddStreamSource(RTSPStreamSource streamSource)
         {
             if (streamSource == null)
                 throw new ArgumentNullException(nameof(streamSource));
@@ -4703,25 +4703,25 @@ namespace SharpRTSPServer
         /// <summary>
         /// The SSRCs of whichever tracks a stream source has.
         /// </summary>
-        private static List<uint> TrackSSRCs(RtspStreamSource streamSource)
+        private static List<uint> TrackSSRCs(RTSPStreamSource streamSource)
         {
             var ssrcs = new List<uint>(2);
 
             foreach (ITrack track in streamSource.Tracks)
             {
-                ssrcs.Add(track.Ssrc);
+                ssrcs.Add(track.SSRC);
             }
 
             return ssrcs;
         }
 
-        public void RemoveStreamSource(RtspStreamSource streamSource)
+        public void RemoveStreamSource(RTSPStreamSource streamSource)
         {
             if (streamSource == null)
                 throw new ArgumentNullException(nameof(streamSource));
 
-            RtspConnection finishedGroup;
-            RtspConnection[] watching;
+            RTSPConnection finishedGroup;
+            RTSPConnection[] watching;
 
             lock (_connectionList)
             {
@@ -4737,9 +4737,9 @@ namespace SharpRTSPServer
 
                 // Taken under the lock, said goodbye to and shut down outside it - both of those
                 // wait on the connection's writer, and this lock is what the whole server is behind.
-                var clients = new List<RtspConnection>(streamSource.ConnectionList.Count);
+                var clients = new List<RTSPConnection>(streamSource.ConnectionList.Count);
 
-                foreach (RtspConnection connection in streamSource.ConnectionList)
+                foreach (RTSPConnection connection in streamSource.ConnectionList)
                 {
                     // Not the group's own sender: it has no session to remove, so it is taken apart
                     // below rather than left holding its sockets.
@@ -4762,25 +4762,25 @@ namespace SharpRTSPServer
                 this.StreamSources.Remove(streamSource);
             }
 
-            foreach (RtspConnection connection in watching)
+            foreach (RTSPConnection connection in watching)
             {
                 foreach (var stream in connection.Streams)
                 {
-                    SendRtcpBye(connection, stream);
+                    SendRTCPBye(connection, stream);
                 }
 
                 RemoveSession(connection);
             }
 
-            ShutDownMulticastSenders(new List<RtspConnection> { finishedGroup });
+            ShutDownMulticastSenders(new List<RTSPConnection> { finishedGroup });
         }
 
-        public ReadOnlyCollection<RtspStreamSource> GetStreamSources()
+        public ReadOnlyCollection<RTSPStreamSource> GetStreamSources()
         {
             lock (_connectionList)
             {
                 // a snapshot, so the caller cannot observe the list changing underneath them
-                return new ReadOnlyCollection<RtspStreamSource>(StreamSources.ToList());
+                return new ReadOnlyCollection<RTSPStreamSource>(StreamSources.ToList());
             }
         }
 

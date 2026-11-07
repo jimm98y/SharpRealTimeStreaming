@@ -140,11 +140,11 @@ namespace SharpRTCP
         /// The sender works out the round trip from these: it knows when it sent the report, this
         /// says which report is being answered and how long the answer sat here before being sent.
         /// </remarks>
-        public void RecordSenderReportArrival(uint middle32OfNtp)
+        public void RecordSenderReportArrival(uint middle32OfNTP)
         {
             lock (_gate)
             {
-                _lastSenderReportMiddle32 = middle32OfNtp;
+                _lastSenderReportMiddle32 = middle32OfNTP;
                 _lastSenderReportArrivedTicks = DateTime.UtcNow.Ticks;
             }
         }

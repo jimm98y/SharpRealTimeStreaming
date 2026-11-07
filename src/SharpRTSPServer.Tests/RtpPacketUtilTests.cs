@@ -31,7 +31,7 @@ namespace SharpRTSPServer.Tests
         {
             Span<byte> packet = new byte[12];
 
-            RtpPacketUtil.WriteHeader(packet, RtpPacketUtil.RTP_VERSION,
+            RTPPacketUtil.WriteHeader(packet, RTPPacketUtil.RTP_VERSION,
                 rtpPadding: true, rtpExtension: true, rtpCsrcCount: 3, rtpMarker: true, rtpPayloadType: 96);
 
             Assert.AreEqual(2, packet[0] >> 6);            // version
@@ -47,7 +47,7 @@ namespace SharpRTSPServer.Tests
         {
             Span<byte> packet = new byte[12];
 
-            RtpPacketUtil.WriteHeader(packet, RtpPacketUtil.RTP_VERSION,
+            RTPPacketUtil.WriteHeader(packet, RTPPacketUtil.RTP_VERSION,
                 rtpPadding: false, rtpExtension: false, rtpCsrcCount: 0, rtpMarker: false, rtpPayloadType: 26);
 
             Assert.AreEqual(0x80, packet[0]);
@@ -63,7 +63,7 @@ namespace SharpRTSPServer.Tests
         {
             Span<byte> packet = new byte[12];
 
-            RtpPacketUtil.WriteSequenceNumber(packet, sequenceNumber);
+            RTPPacketUtil.WriteSequenceNumber(packet, sequenceNumber);
 
             Assert.AreEqual((byte)(sequenceNumber >> 8), packet[2]);
             Assert.AreEqual((byte)(sequenceNumber & 0xFF), packet[3]);
@@ -78,9 +78,9 @@ namespace SharpRTSPServer.Tests
         {
             byte[] packet = new byte[12];
 
-            RtpPacketUtil.WriteTimestamp(packet, timestamp);
+            RTPPacketUtil.WriteTS(packet, timestamp);
 
-            Assert.AreEqual(timestamp, RtpPacketUtil.ReadTimestamp(packet));
+            Assert.AreEqual(timestamp, RTPPacketUtil.ReadTS(packet));
         }
 
         [TestMethod]
@@ -91,7 +91,7 @@ namespace SharpRTSPServer.Tests
         {
             Span<byte> packet = new byte[12];
 
-            RtpPacketUtil.WriteSsrc(packet, ssrc);
+            RTPPacketUtil.WriteSSRC(packet, ssrc);
 
             Assert.AreEqual((byte)(ssrc >> 24), packet[8]);
             Assert.AreEqual((byte)(ssrc >> 16), packet[9]);
@@ -104,11 +104,11 @@ namespace SharpRTSPServer.Tests
         {
             byte[] packet = new byte[12];
 
-            RtpPacketUtil.WriteTimestamp(packet, 0x11223344);
-            RtpPacketUtil.WriteSsrc(packet, 0xAABBCCDD);
-            RtpPacketUtil.WriteSequenceNumber(packet, 4321);
+            RTPPacketUtil.WriteTS(packet, 0x11223344);
+            RTPPacketUtil.WriteSSRC(packet, 0xAABBCCDD);
+            RTPPacketUtil.WriteSequenceNumber(packet, 4321);
 
-            Assert.AreEqual(0x11223344u, RtpPacketUtil.ReadTimestamp(packet));
+            Assert.AreEqual(0x11223344u, RTPPacketUtil.ReadTS(packet));
         }
     }
 }

@@ -31,11 +31,11 @@ namespace SharpRTCP
     public sealed class ReceiverReport
     {
         /// <summary>The SSRC of who sends the report: the receiver.</summary>
-        public uint Ssrc { get; set; }
+        public uint SSRC { get; set; }
 
-        /// <summary>A block about each source received, each of its <see cref="ReportBlock.Ssrc"/>; at most 31 are written.</summary>
+        /// <summary>A block about each source received, each of its <see cref="ReportBlock.SSRC"/>; at most 31 are written.</summary>
         public List<ReportBlock> Reports { get; } = new List<ReportBlock>();
 
-        public override string ToString() => $"RR {Ssrc:X8} of {Reports.Count} blocks";
+        public override string ToString() => $"RR {SSRC:X8} of {Reports.Count} blocks";
     }
 }

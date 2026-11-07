@@ -48,7 +48,7 @@ namespace SharpRTSPServer
         public override TrackType Kind => TrackType.Video;
 
         /// <inheritdoc/>
-        public override StringBuilder BuildSdp(StringBuilder sdp)
+        public override StringBuilder BuildSDP(StringBuilder sdp)
         {
             // AppendLine would use Environment.NewLine, which is a bare LF off Windows - so the same
             // build produced a different SDP depending on where it ran
@@ -145,9 +145,9 @@ namespace SharpRTSPServer
 
                     rtpPacketSpan.Slice(3, 9).Clear();
 
-                    RtpPacketUtil.WriteHeader(
+                    RTPPacketUtil.WriteHeader(
                         rtpPacket: rtpPacketSpan,
-                        rtpVersion: RtpPacketUtil.RTP_VERSION,
+                        rtpVersion: RTPPacketUtil.RTP_VERSION,
                         rtpPadding: false,
                         rtpExtension: false,
                         rtpCsrcCount: 0,
@@ -157,7 +157,7 @@ namespace SharpRTSPServer
                         rtpPayloadType: PayloadType);
 
                     // sequence number and SSRC are set just before send
-                    RtpPacketUtil.WriteTimestamp(rtpPacketSpan, rtpTimestamp);
+                    RTPPacketUtil.WriteTS(rtpPacketSpan, rtpTimestamp);
 
                     rtpPacketSpan = rtpPacketSpan.Slice(12);
 

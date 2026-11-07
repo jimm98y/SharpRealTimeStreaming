@@ -26,7 +26,7 @@ using System.Text;
 
 namespace SharpRTSPServer
 {
-    public class RtspStreamSource : IDisposable
+    public class RTSPStreamSource : IDisposable
     {
         /// <summary>
         /// Stream ID.
@@ -110,7 +110,7 @@ namespace SharpRTSPServer
         /// </summary>
         public string Sdp { get; private set; } = null;
 
-        public HashSet<RtspConnection> ConnectionList { get; } = new HashSet<RtspConnection>(); // list of RTSP Listeners
+        public HashSet<RTSPConnection> ConnectionList { get; } = new HashSet<RTSPConnection>(); // list of RTSP Listeners
 
         /// <summary>
         /// Whether this stream has ever produced a picture a decoder could start on.
@@ -130,9 +130,9 @@ namespace SharpRTSPServer
         /// <para>
         /// Off by default, and a fallback rather than a first choice. A client joining a stream
         /// mid-group has nothing it can decode until the next keyframe; asking the encoder for one
-        /// - see <see cref="RtspServer.KeyFrameNeeded"/> - ends that wait properly and at no cost.
+        /// - see <see cref="RTSPServer.KeyFrameNeeded"/> - ends that wait properly and at no cost.
         /// This is for when there is nothing to ask, or nothing answers: after
-        /// <see cref="RtspServer.KeyFrameWait"/> has passed with no live keyframe, the client is
+        /// <see cref="RTSPServer.KeyFrameWait"/> has passed with no live keyframe, the client is
         /// sent the last one this stream produced.
         /// </para>
         /// <para>
@@ -253,18 +253,18 @@ namespace SharpRTSPServer
         /// <summary>
         /// The keys the group uses, one per track, derived once and handed to everyone.
         /// </summary>
-        private readonly Dictionary<int, RtpStream> _groupKeys = new Dictionary<int, RtpStream>();
+        private readonly Dictionary<int, RTPStream> _groupKeys = new Dictionary<int, RTPStream>();
 
         /// <summary>
         /// The key a track's group uses, derived once and handed to everyone listening.
         /// </summary>
-        internal RtpStream GroupKey(int trackId)
+        internal RTPStream GroupKey(int trackId)
         {
             lock (_groupKeyLock)
             {
-                if (!_groupKeys.TryGetValue(trackId, out RtpStream key))
+                if (!_groupKeys.TryGetValue(trackId, out RTPStream key))
                 {
-                    key = new RtpStream();
+                    key = new RTPStream();
                     _groupKeys[trackId] = key;
                 }
 
@@ -381,7 +381,7 @@ namespace SharpRTSPServer
             {
                 lock (_groupKeyLock)
                 {
-                    foreach (RtpStream key in _groupKeys.Values)
+                    foreach (RTPStream key in _groupKeys.Values)
                     {
                         key.ResetSrtpContext();
                     }
@@ -411,12 +411,12 @@ namespace SharpRTSPServer
 
         /// <param name="streamID">What a client names this stream by in a request URI.</param>
         /// <param name="tracks">The tracks this stream carries, in the order they belong in the SDP.</param>
-        public RtspStreamSource(string streamID, params ITrack[] tracks)
+        public RTSPStreamSource(string streamID, params ITrack[] tracks)
             : this(streamID, (IEnumerable<ITrack>)tracks)
         {
         }
 
-        public RtspStreamSource(string streamID, IEnumerable<ITrack> tracks)
+        public RTSPStreamSource(string streamID, IEnumerable<ITrack> tracks)
         {
             if (string.IsNullOrWhiteSpace(streamID))
                 throw new ArgumentNullException(nameof(streamID));
@@ -437,12 +437,12 @@ namespace SharpRTSPServer
             }
         }
 
-        public void OverrideSdp(string sdp, bool mungleSdp = true)
+        public void OverrideSDP(string sdp, bool mungleSDP = true)
         {
             if (sdp == null)
                 throw new ArgumentNullException(nameof(sdp));
 
-            if (mungleSdp)
+            if (mungleSDP)
             {
                 sdp = AddMissingTrackControlAttributes(sdp);
             }

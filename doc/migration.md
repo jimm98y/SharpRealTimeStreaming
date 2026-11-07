@@ -12,6 +12,7 @@ Everything that changed shape, and what to write instead.
 - [Logging belongs to the client or server, not the process](#logging-belongs-to-the-client-or-server-not-the-process)
 - [Multicast is off by default](#multicast-is-off-by-default)
 - [A stream's configuration does not mean it has parameter sets](#a-streams-configuration-does-not-mean-it-has-parameter-sets)
+- [RTCP is SharpRTCP's](#rtcp-is-sharprtcps)
 
 ---
 
@@ -346,3 +347,43 @@ Where the fmtp is there but cannot be read, such as a `profile-level-id` that is
 digits, the configuration is an `UnparsedStreamConfigurationData` holding only `Fmtp`, rather than
 the codec's own class claiming defaults the SDP contradicts. It used to be null. The track itself is
 set up all the same.
+
+---
+
+## RTCP is SharpRTCP's
+
+Reading and writing RTCP moved into the SharpRTCP package, which the client and the server both
+reference. `SharpRTSPServer.RTCPUtils` is still there and still writes what it wrote, but it is
+obsolete: every member hands the work to `SharpRTCP.RTCPUtilities`, and the compiler says what to
+use instead.
+
+| Obsolete | Use instead |
+| --- | --- |
+| `RTCPUtils.RTCP_VERSION` | `RTCPUtilities.Version` |
+| `RTCPUtils.RTCP_PACKET_TYPE_SENDER_REPORT`, `RTCP_PACKET_TYPE_BYE` | `PacketType.SenderReport`, `PacketType.Goodbye` |
+| `RTCPUtils.WriteRTCPHeader(rtcp, version, hasPadding, count, packetType, length, ssrc)` | `RTCPUtilities.WriteHeader(packet, count, packetType, length, ssrc, hasPadding)` |
+| `RTCPUtils.WriteSenderReport(rtcp, now, rtpTimestamp, packetCount, octetCount)` | `RTCPUtilities.WriteSenderReport(packet, report)` |
+
+The new `WriteSenderReport` writes the whole packet, header and report blocks included, where the
+old one wrote only the sender information and left the header to the caller:
+
+```cs
+// before
+RTCPUtils.WriteRTCPHeader(rtcp, RTCPUtils.RTCP_VERSION, false, 0,
+    RTCPUtils.RTCP_PACKET_TYPE_SENDER_REPORT, (28 / 4) - 1, ssrc);
+RTCPUtils.WriteSenderReport(rtcp, DateTime.UtcNow, rtpTimestamp, packetCount, octetCount);
+
+// after
+RTCPUtilities.WriteSenderReport(rtcp, new SenderReport
+{
+    SSRC = ssrc,
+    NTPTimestamp = SenderReport.ToNTPTimestamp(DateTime.UtcNow),
+    RTPTimestamp = rtpTimestamp,
+    PacketCount = packetCount,
+    OctetCount = octetCount
+});
+```
+
+`SenderReport.ToNTPTimestamp` reads a time that is not UTC as local time and converts it, where the
+old method took every time as UTC whatever its kind. Pass `DateTime.UtcNow`, as above, and the two
+agree.

@@ -26,9 +26,9 @@ using System;
 namespace SharpRTSPServer
 {
     /// <summary>
-    /// An RtpStream can be a Video Stream, Audio Stream or a Metadata Stream.
+    /// An RTPStream can be a Video Stream, Audio Stream or a Metadata Stream.
     /// </summary>
-    public class RtpStream
+    public class RTPStream
     {
         public SrtpSessionContext Context { get; set; } = null;
 
@@ -154,7 +154,7 @@ namespace SharpRTSPServer
         /// streams and each announces its own SSRC in its SETUP reply, so sending both under a single
         /// SSRC would contradict what the client was told.
         /// </remarks>
-        public uint Ssrc { get; set; }
+        public uint SSRC { get; set; }
 
         /// <summary>
         /// Sequence number.
