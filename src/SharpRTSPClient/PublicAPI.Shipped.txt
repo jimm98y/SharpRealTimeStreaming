@@ -1,0 +1,354 @@
+const SharpRTSPClient.RtspClient.DEFAULT_MAX_TRACKS = 16 -> int
+const SharpRTSPClient.RtspClient.DEFAULT_RTP_PORT_RANGE_END = 52000 -> int
+const SharpRTSPClient.RtspClient.DEFAULT_RTP_PORT_RANGE_START = 51000 -> int
+override SharpRTSPClient.AV1StreamConfigurationData.ToString() -> string
+override SharpRTSPClient.H264StreamConfigurationData.ToString() -> string
+override SharpRTSPClient.H265StreamConfigurationData.ToString() -> string
+override SharpRTSPClient.H266StreamConfigurationData.ToString() -> string
+override SharpRTSPClient.OpusStreamConfigurationData.ToString() -> string
+override SharpRTSPClient.RawRtcpDataEventArgs.ToString() -> string
+override SharpRTSPClient.RawRtpDataEventArgs.ToString() -> string
+override SharpRTSPClient.SimpleDataEventArgs.ToString() -> string
+override SharpRTSPClient.TrackOffer.ToString() -> string
+override SharpRTSPClient.UnparsedStreamConfigurationData.ToString() -> string
+override SharpRTSPClient.VP9StreamConfigurationData.ToString() -> string
+Rtsp.Rtp.MarkerFramedPayload
+Rtsp.Rtp.MarkerFramedPayload.MarkerFramedPayload() -> void
+Rtsp.Rtp.MarkerFramedPayload.ProcessPacket(Rtsp.Rtp.RtpPacket packet) -> Rtsp.Rtp.RawMediaFrame
+Rtsp.Rtp.OpusPayload
+Rtsp.Rtp.OpusPayload.OpusPayload(System.Buffers.MemoryPool<byte> memoryPool = null) -> void
+Rtsp.Rtp.VP9Payload
+Rtsp.Rtp.VP9Payload.ProcessPacket(Rtsp.Rtp.RtpPacket packet) -> Rtsp.Rtp.RawMediaFrame
+Rtsp.Rtp.VP9Payload.VP9Payload(Microsoft.Extensions.Logging.ILogger<Rtsp.Rtp.VP9Payload> logger = null, System.Buffers.MemoryPool<byte> memoryPool = null) -> void
+SharpRTSPClient.AACStreamConfigurationData
+SharpRTSPClient.AACStreamConfigurationData.AACStreamConfigurationData() -> void
+SharpRTSPClient.AACStreamConfigurationData.AACStreamConfigurationData(int objectType, int frequencyIndex, int samplingFrequency, int channelConfiguration) -> void
+SharpRTSPClient.AACStreamConfigurationData.ChannelConfiguration.get -> int
+SharpRTSPClient.AACStreamConfigurationData.ChannelConfiguration.set -> void
+SharpRTSPClient.AACStreamConfigurationData.Fmtp.get -> string
+SharpRTSPClient.AACStreamConfigurationData.Fmtp.set -> void
+SharpRTSPClient.AACStreamConfigurationData.FrequencyIndex.get -> int
+SharpRTSPClient.AACStreamConfigurationData.FrequencyIndex.set -> void
+SharpRTSPClient.AACStreamConfigurationData.ObjectType.get -> int
+SharpRTSPClient.AACStreamConfigurationData.ObjectType.set -> void
+SharpRTSPClient.AACStreamConfigurationData.SamplingFrequency.get -> int
+SharpRTSPClient.AACStreamConfigurationData.SamplingFrequency.set -> void
+SharpRTSPClient.AV1StreamConfigurationData
+SharpRTSPClient.AV1StreamConfigurationData.AV1StreamConfigurationData() -> void
+SharpRTSPClient.AV1StreamConfigurationData.AV1StreamConfigurationData(int profile, int levelIdx, int tier) -> void
+SharpRTSPClient.AV1StreamConfigurationData.Fmtp.get -> string
+SharpRTSPClient.AV1StreamConfigurationData.Fmtp.set -> void
+SharpRTSPClient.AV1StreamConfigurationData.LevelIdx.get -> int
+SharpRTSPClient.AV1StreamConfigurationData.LevelIdx.set -> void
+SharpRTSPClient.AV1StreamConfigurationData.Profile.get -> int
+SharpRTSPClient.AV1StreamConfigurationData.Profile.set -> void
+SharpRTSPClient.AV1StreamConfigurationData.Tier.get -> int
+SharpRTSPClient.AV1StreamConfigurationData.Tier.set -> void
+SharpRTSPClient.CustomLogger
+SharpRTSPClient.CustomLogger.BeginScope<TState>(TState state) -> System.IDisposable
+SharpRTSPClient.CustomLogger.CustomLogger(System.Func<SharpRTSPClient.ILog> logger) -> void
+SharpRTSPClient.CustomLogger.IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) -> bool
+SharpRTSPClient.CustomLogger.Log<TState>(Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId, TState state, System.Exception exception, System.Func<TState, System.Exception, string> formatter) -> void
+SharpRTSPClient.CustomLoggerFactory
+SharpRTSPClient.CustomLoggerFactory.AddProvider(Microsoft.Extensions.Logging.ILoggerProvider provider) -> void
+SharpRTSPClient.CustomLoggerFactory.CreateLogger(string categoryName) -> Microsoft.Extensions.Logging.ILogger
+SharpRTSPClient.CustomLoggerFactory.CustomLoggerFactory() -> void
+SharpRTSPClient.CustomLoggerFactory.CustomLoggerFactory(SharpRTSPClient.ILog logger) -> void
+SharpRTSPClient.CustomLoggerFactory.CustomLoggerFactory(System.Func<SharpRTSPClient.ILog> logger) -> void
+SharpRTSPClient.CustomLoggerFactory.Dispose() -> void
+SharpRTSPClient.DefaultLog
+SharpRTSPClient.DefaultLog.DefaultLog() -> void
+SharpRTSPClient.DefaultLog.IsDebugEnabled.get -> bool
+SharpRTSPClient.DefaultLog.IsDebugEnabled.set -> void
+SharpRTSPClient.DefaultLog.IsErrorEnabled.get -> bool
+SharpRTSPClient.DefaultLog.IsErrorEnabled.set -> void
+SharpRTSPClient.DefaultLog.IsInfoEnabled.get -> bool
+SharpRTSPClient.DefaultLog.IsInfoEnabled.set -> void
+SharpRTSPClient.DefaultLog.IsLoggingEnabled.get -> bool
+SharpRTSPClient.DefaultLog.IsLoggingEnabled.set -> void
+SharpRTSPClient.DefaultLog.IsTraceEnabled.get -> bool
+SharpRTSPClient.DefaultLog.IsTraceEnabled.set -> void
+SharpRTSPClient.DefaultLog.IsWarningEnabled.get -> bool
+SharpRTSPClient.DefaultLog.IsWarningEnabled.set -> void
+SharpRTSPClient.DefaultLog.LogDebug(string debug) -> void
+SharpRTSPClient.DefaultLog.LogError(string error) -> void
+SharpRTSPClient.DefaultLog.LogInfo(string info) -> void
+SharpRTSPClient.DefaultLog.LogTrace(string trace) -> void
+SharpRTSPClient.DefaultLog.LogWarning(string warning) -> void
+SharpRTSPClient.DefaultLog.Sink.get -> System.Action<string>
+SharpRTSPClient.DefaultLog.Sink.set -> void
+SharpRTSPClient.H264StreamConfigurationData
+SharpRTSPClient.H264StreamConfigurationData.Fmtp.get -> string
+SharpRTSPClient.H264StreamConfigurationData.Fmtp.set -> void
+SharpRTSPClient.H264StreamConfigurationData.H264StreamConfigurationData() -> void
+SharpRTSPClient.H264StreamConfigurationData.H264StreamConfigurationData(byte[] sps, byte[] pps) -> void
+SharpRTSPClient.H264StreamConfigurationData.PacketizationMode.get -> int
+SharpRTSPClient.H264StreamConfigurationData.PacketizationMode.set -> void
+SharpRTSPClient.H264StreamConfigurationData.PPS.get -> byte[]
+SharpRTSPClient.H264StreamConfigurationData.PPS.set -> void
+SharpRTSPClient.H264StreamConfigurationData.ProfileLevelId.get -> string
+SharpRTSPClient.H264StreamConfigurationData.ProfileLevelId.set -> void
+SharpRTSPClient.H264StreamConfigurationData.SPS.get -> byte[]
+SharpRTSPClient.H264StreamConfigurationData.SPS.set -> void
+SharpRTSPClient.H265StreamConfigurationData
+SharpRTSPClient.H265StreamConfigurationData.Fmtp.get -> string
+SharpRTSPClient.H265StreamConfigurationData.Fmtp.set -> void
+SharpRTSPClient.H265StreamConfigurationData.H265StreamConfigurationData() -> void
+SharpRTSPClient.H265StreamConfigurationData.H265StreamConfigurationData(byte[] vps, byte[] sps, byte[] pps) -> void
+SharpRTSPClient.H265StreamConfigurationData.LevelId.get -> int
+SharpRTSPClient.H265StreamConfigurationData.LevelId.set -> void
+SharpRTSPClient.H265StreamConfigurationData.MaxDonDiff.get -> int
+SharpRTSPClient.H265StreamConfigurationData.MaxDonDiff.set -> void
+SharpRTSPClient.H265StreamConfigurationData.PPS.get -> byte[]
+SharpRTSPClient.H265StreamConfigurationData.PPS.set -> void
+SharpRTSPClient.H265StreamConfigurationData.ProfileId.get -> int
+SharpRTSPClient.H265StreamConfigurationData.ProfileId.set -> void
+SharpRTSPClient.H265StreamConfigurationData.ProfileSpace.get -> int
+SharpRTSPClient.H265StreamConfigurationData.ProfileSpace.set -> void
+SharpRTSPClient.H265StreamConfigurationData.SPS.get -> byte[]
+SharpRTSPClient.H265StreamConfigurationData.SPS.set -> void
+SharpRTSPClient.H265StreamConfigurationData.TierFlag.get -> int
+SharpRTSPClient.H265StreamConfigurationData.TierFlag.set -> void
+SharpRTSPClient.H265StreamConfigurationData.VPS.get -> byte[]
+SharpRTSPClient.H265StreamConfigurationData.VPS.set -> void
+SharpRTSPClient.H266StreamConfigurationData
+SharpRTSPClient.H266StreamConfigurationData.DCI.get -> byte[]
+SharpRTSPClient.H266StreamConfigurationData.DCI.set -> void
+SharpRTSPClient.H266StreamConfigurationData.Fmtp.get -> string
+SharpRTSPClient.H266StreamConfigurationData.Fmtp.set -> void
+SharpRTSPClient.H266StreamConfigurationData.H266StreamConfigurationData() -> void
+SharpRTSPClient.H266StreamConfigurationData.H266StreamConfigurationData(byte[] dci, byte[] vps, byte[] sps, byte[] pps, byte[] sei) -> void
+SharpRTSPClient.H266StreamConfigurationData.LevelId.get -> int
+SharpRTSPClient.H266StreamConfigurationData.LevelId.set -> void
+SharpRTSPClient.H266StreamConfigurationData.MaxDonDiff.get -> int
+SharpRTSPClient.H266StreamConfigurationData.MaxDonDiff.set -> void
+SharpRTSPClient.H266StreamConfigurationData.PPS.get -> byte[]
+SharpRTSPClient.H266StreamConfigurationData.PPS.set -> void
+SharpRTSPClient.H266StreamConfigurationData.ProfileId.get -> int
+SharpRTSPClient.H266StreamConfigurationData.ProfileId.set -> void
+SharpRTSPClient.H266StreamConfigurationData.SEI.get -> byte[]
+SharpRTSPClient.H266StreamConfigurationData.SEI.set -> void
+SharpRTSPClient.H266StreamConfigurationData.SPS.get -> byte[]
+SharpRTSPClient.H266StreamConfigurationData.SPS.set -> void
+SharpRTSPClient.H266StreamConfigurationData.TierFlag.get -> int
+SharpRTSPClient.H266StreamConfigurationData.TierFlag.set -> void
+SharpRTSPClient.H266StreamConfigurationData.VPS.get -> byte[]
+SharpRTSPClient.H266StreamConfigurationData.VPS.set -> void
+SharpRTSPClient.ILog
+SharpRTSPClient.ILog.IsDebugEnabled.get -> bool
+SharpRTSPClient.ILog.IsDebugEnabled.set -> void
+SharpRTSPClient.ILog.IsErrorEnabled.get -> bool
+SharpRTSPClient.ILog.IsErrorEnabled.set -> void
+SharpRTSPClient.ILog.IsInfoEnabled.get -> bool
+SharpRTSPClient.ILog.IsInfoEnabled.set -> void
+SharpRTSPClient.ILog.IsTraceEnabled.get -> bool
+SharpRTSPClient.ILog.IsTraceEnabled.set -> void
+SharpRTSPClient.ILog.IsWarningEnabled.get -> bool
+SharpRTSPClient.ILog.IsWarningEnabled.set -> void
+SharpRTSPClient.ILog.LogDebug(string debug) -> void
+SharpRTSPClient.ILog.LogError(string error) -> void
+SharpRTSPClient.ILog.LogInfo(string info) -> void
+SharpRTSPClient.ILog.LogTrace(string trace) -> void
+SharpRTSPClient.ILog.LogWarning(string warning) -> void
+SharpRTSPClient.IStreamConfigurationData
+SharpRTSPClient.IStreamConfigurationData.Fmtp.get -> string
+SharpRTSPClient.LogExtensions
+SharpRTSPClient.NewTrackEventArgs
+SharpRTSPClient.NewTrackEventArgs.ClockRate.get -> int
+SharpRTSPClient.NewTrackEventArgs.Codec.get -> string
+SharpRTSPClient.NewTrackEventArgs.Kind.get -> SharpRTSPClient.TrackKind
+SharpRTSPClient.NewTrackEventArgs.NewTrackEventArgs(int trackIndex, SharpRTSPClient.TrackKind kind, int payloadType, string codec, SharpRTSPClient.IStreamConfigurationData configuration) -> void
+SharpRTSPClient.NewTrackEventArgs.NewTrackEventArgs(int trackIndex, SharpRTSPClient.TrackKind kind, int payloadType, string codec, SharpRTSPClient.IStreamConfigurationData configuration, int clockRate) -> void
+SharpRTSPClient.NewTrackEventArgs.PayloadType.get -> int
+SharpRTSPClient.NewTrackEventArgs.StreamConfigurationData.get -> SharpRTSPClient.IStreamConfigurationData
+SharpRTSPClient.NewTrackEventArgs.TrackIndex.get -> int
+SharpRTSPClient.NullLog
+SharpRTSPClient.NullLog.IsDebugEnabled.get -> bool
+SharpRTSPClient.NullLog.IsDebugEnabled.set -> void
+SharpRTSPClient.NullLog.IsErrorEnabled.get -> bool
+SharpRTSPClient.NullLog.IsErrorEnabled.set -> void
+SharpRTSPClient.NullLog.IsInfoEnabled.get -> bool
+SharpRTSPClient.NullLog.IsInfoEnabled.set -> void
+SharpRTSPClient.NullLog.IsTraceEnabled.get -> bool
+SharpRTSPClient.NullLog.IsTraceEnabled.set -> void
+SharpRTSPClient.NullLog.IsWarningEnabled.get -> bool
+SharpRTSPClient.NullLog.IsWarningEnabled.set -> void
+SharpRTSPClient.NullLog.LogDebug(string debug) -> void
+SharpRTSPClient.NullLog.LogError(string error) -> void
+SharpRTSPClient.NullLog.LogInfo(string info) -> void
+SharpRTSPClient.NullLog.LogTrace(string trace) -> void
+SharpRTSPClient.NullLog.LogWarning(string warning) -> void
+SharpRTSPClient.OpusStreamConfigurationData
+SharpRTSPClient.OpusStreamConfigurationData.Fmtp.get -> string
+SharpRTSPClient.OpusStreamConfigurationData.Fmtp.set -> void
+SharpRTSPClient.OpusStreamConfigurationData.OpusStreamConfigurationData() -> void
+SharpRTSPClient.OpusStreamConfigurationData.SpropMaxCaptureRate.get -> int
+SharpRTSPClient.OpusStreamConfigurationData.SpropMaxCaptureRate.set -> void
+SharpRTSPClient.OpusStreamConfigurationData.SpropStereo.get -> bool
+SharpRTSPClient.OpusStreamConfigurationData.SpropStereo.set -> void
+SharpRTSPClient.OpusStreamConfigurationData.Stereo.get -> bool
+SharpRTSPClient.OpusStreamConfigurationData.Stereo.set -> void
+SharpRTSPClient.OpusStreamConfigurationData.UseDtx.get -> bool
+SharpRTSPClient.OpusStreamConfigurationData.UseDtx.set -> void
+SharpRTSPClient.OpusStreamConfigurationData.UseInbandFec.get -> bool
+SharpRTSPClient.OpusStreamConfigurationData.UseInbandFec.set -> void
+SharpRTSPClient.RawRtcpDataEventArgs
+SharpRTSPClient.RawRtcpDataEventArgs.Data.get -> System.ReadOnlyMemory<byte>
+SharpRTSPClient.RawRtcpDataEventArgs.RawRtcpDataEventArgs(System.ReadOnlyMemory<byte> data) -> void
+SharpRTSPClient.RawRtpDataEventArgs
+SharpRTSPClient.RawRtpDataEventArgs.CsrcCount.get -> int
+SharpRTSPClient.RawRtpDataEventArgs.Data.get -> System.ReadOnlyMemory<byte>
+SharpRTSPClient.RawRtpDataEventArgs.ExtensionHeaderId.get -> int?
+SharpRTSPClient.RawRtpDataEventArgs.HasPadding.get -> bool
+SharpRTSPClient.RawRtpDataEventArgs.IsMarker.get -> bool
+SharpRTSPClient.RawRtpDataEventArgs.IsWellFormed.get -> bool
+SharpRTSPClient.RawRtpDataEventArgs.PayloadSize.get -> int
+SharpRTSPClient.RawRtpDataEventArgs.PayloadStart.get -> int
+SharpRTSPClient.RawRtpDataEventArgs.PayloadType.get -> int
+SharpRTSPClient.RawRtpDataEventArgs.RawRtpDataEventArgs(System.ReadOnlyMemory<byte> data, int csrcCount, int? extensionHeaderId, bool hasPadding, bool isMarker, bool isWellFormed, int payloadSize, int payloadType, int sequenceNumber, uint ssrc, uint timestamp, int version, int payloadStart) -> void
+SharpRTSPClient.RawRtpDataEventArgs.SequenceNumber.get -> int
+SharpRTSPClient.RawRtpDataEventArgs.Ssrc.get -> uint
+SharpRTSPClient.RawRtpDataEventArgs.Timestamp.get -> uint
+SharpRTSPClient.RawRtpDataEventArgs.Version.get -> int
+SharpRTSPClient.RtpTransport
+SharpRTSPClient.RtpTransport.MULTICAST = 2 -> SharpRTSPClient.RtpTransport
+SharpRTSPClient.RtpTransport.TCP = 1 -> SharpRTSPClient.RtpTransport
+SharpRTSPClient.RtpTransport.UDP = 0 -> SharpRTSPClient.RtpTransport
+SharpRTSPClient.RtspClient
+SharpRTSPClient.RtspClient.AcceptTrack.get -> System.Func<SharpRTSPClient.TrackOffer, bool>
+SharpRTSPClient.RtspClient.AcceptTrack.set -> void
+SharpRTSPClient.RtspClient.AutoPlay.get -> bool
+SharpRTSPClient.RtspClient.AutoPlay.set -> void
+SharpRTSPClient.RtspClient.BuildRtcpReceiverReport(uint ssrc) -> byte[]
+SharpRTSPClient.RtspClient.Connect(string url, SharpRTSPClient.RtpTransport rtpTransport, string username = null, string password = null, bool playbackSession = false, System.Net.Security.RemoteCertificateValidationCallback userCertificateSelectionCallback = null, bool autoReconnect = false) -> void
+SharpRTSPClient.RtspClient.Connect(System.Uri uri, SharpRTSPClient.RtpTransport rtpTransport, string username = null, string password = null, bool playbackSession = false, System.Net.Security.RemoteCertificateValidationCallback userCertificateSelectionCallback = null, bool autoReconnect = false) -> void
+SharpRTSPClient.RtspClient.Connect(System.Uri uri, SharpRTSPClient.RtpTransport rtpTransport, System.Net.NetworkCredential credentials = null, bool playbackSession = false, System.Net.Security.RemoteCertificateValidationCallback userCertificateSelectionCallback = null, bool autoReconnect = false) -> void
+SharpRTSPClient.RtspClient.ConnectTimeout.get -> System.TimeSpan
+SharpRTSPClient.RtspClient.ConnectTimeout.set -> void
+SharpRTSPClient.RtspClient.Dispose() -> void
+SharpRTSPClient.RtspClient.GetRtspStatus() -> SharpRTSPClient.RtspClient.RtspStatus
+SharpRTSPClient.RtspClient.GetSsrc(int trackIndex) -> uint
+SharpRTSPClient.RtspClient.Logger.get -> SharpRTSPClient.ILog
+SharpRTSPClient.RtspClient.Logger.set -> void
+SharpRTSPClient.RtspClient.MaxTracks.get -> int
+SharpRTSPClient.RtspClient.MaxTracks.set -> void
+SharpRTSPClient.RtspClient.NewTrack -> System.EventHandler<SharpRTSPClient.NewTrackEventArgs>
+SharpRTSPClient.RtspClient.Pause() -> void
+SharpRTSPClient.RtspClient.Play() -> void
+SharpRTSPClient.RtspClient.Play(System.DateTime seekTime, double speed = 1) -> void
+SharpRTSPClient.RtspClient.Play(System.DateTime seekTimeFrom, System.DateTime seekTimeTo, double speed = 1) -> void
+SharpRTSPClient.RtspClient.ProcessRtcp.get -> bool
+SharpRTSPClient.RtspClient.ProcessRtcp.set -> void
+SharpRTSPClient.RtspClient.ProcessRtp.get -> bool
+SharpRTSPClient.RtspClient.ProcessRtp.set -> void
+SharpRTSPClient.RtspClient.ReceivedData -> System.EventHandler<SharpRTSPClient.TrackDataEventArgs>
+SharpRTSPClient.RtspClient.ReceivedRawRtcp -> System.EventHandler<SharpRTSPClient.TrackRawRtcpEventArgs>
+SharpRTSPClient.RtspClient.ReceivedRawRtp -> System.EventHandler<SharpRTSPClient.TrackRawRtpEventArgs>
+SharpRTSPClient.RtspClient.ReceiverReportInterval.get -> System.TimeSpan
+SharpRTSPClient.RtspClient.ReceiverReportInterval.set -> void
+SharpRTSPClient.RtspClient.ReceiveTimeout.get -> System.TimeSpan
+SharpRTSPClient.RtspClient.ReceiveTimeout.set -> void
+SharpRTSPClient.RtspClient.ResponseTimeout.get -> System.TimeSpan
+SharpRTSPClient.RtspClient.ResponseTimeout.set -> void
+SharpRTSPClient.RtspClient.RtpPortRangeEnd.get -> int
+SharpRTSPClient.RtspClient.RtpPortRangeStart.get -> int
+SharpRTSPClient.RtspClient.RtspClient() -> void
+SharpRTSPClient.RtspClient.RtspClient(Microsoft.Extensions.Logging.ILoggerFactory loggerFactory) -> void
+SharpRTSPClient.RtspClient.RtspStatus
+SharpRTSPClient.RtspClient.RtspStatus.Connected = 3 -> SharpRTSPClient.RtspClient.RtspStatus
+SharpRTSPClient.RtspClient.RtspStatus.ConnectFailed = 2 -> SharpRTSPClient.RtspClient.RtspStatus
+SharpRTSPClient.RtspClient.RtspStatus.Connecting = 1 -> SharpRTSPClient.RtspClient.RtspStatus
+SharpRTSPClient.RtspClient.RtspStatus.WaitingToConnect = 0 -> SharpRTSPClient.RtspClient.RtspStatus
+SharpRTSPClient.RtspClient.SendRtcp(int trackIndex, byte[] rtcp) -> void
+SharpRTSPClient.RtspClient.SetRtpPortRange(int firstPort, int lastPort) -> void
+SharpRTSPClient.RtspClient.SetSsrc(int trackIndex, uint ssrc) -> void
+SharpRTSPClient.RtspClient.SetupMessageCompleted -> System.EventHandler
+SharpRTSPClient.RtspClient.Stop() -> void
+SharpRTSPClient.RtspClient.Stopped -> System.EventHandler<SharpRTSPClient.StoppedEventArgs>
+SharpRTSPClient.RtspClient.StreamingFinished() -> bool
+SharpRTSPClient.RtspClient.TrackCount.get -> int
+SharpRTSPClient.RtspClient.TryReconnect() -> void
+SharpRTSPClient.RtspMessageAuthExtensions
+SharpRTSPClient.SimpleDataEventArgs
+SharpRTSPClient.SimpleDataEventArgs.Data.get -> System.Collections.Generic.IEnumerable<System.ReadOnlyMemory<byte>>
+SharpRTSPClient.SimpleDataEventArgs.HasSenderSync.get -> bool
+SharpRTSPClient.SimpleDataEventArgs.RtpTimestamp.get -> uint
+SharpRTSPClient.SimpleDataEventArgs.SimpleDataEventArgs(System.Collections.Generic.IEnumerable<System.ReadOnlyMemory<byte>> data, System.DateTime timestamp, uint rtpTimestamp) -> void
+SharpRTSPClient.SimpleDataEventArgs.SimpleDataEventArgs(System.Collections.Generic.IEnumerable<System.ReadOnlyMemory<byte>> data, System.DateTime timestamp, uint rtpTimestamp, bool hasSenderSync) -> void
+SharpRTSPClient.SimpleDataEventArgs.Timestamp.get -> System.DateTime
+SharpRTSPClient.StoppedEventArgs
+SharpRTSPClient.StoppedEventArgs.Reason.get -> SharpRTSPClient.StoppedReason
+SharpRTSPClient.StoppedEventArgs.StoppedEventArgs(SharpRTSPClient.StoppedReason reason) -> void
+SharpRTSPClient.StoppedReason
+SharpRTSPClient.StoppedReason.ConnectionFailed = 1 -> SharpRTSPClient.StoppedReason
+SharpRTSPClient.StoppedReason.ConnectionLost = 12 -> SharpRTSPClient.StoppedReason
+SharpRTSPClient.StoppedReason.ConnectTimeout = 9 -> SharpRTSPClient.StoppedReason
+SharpRTSPClient.StoppedReason.EncryptionUnavailable = 8 -> SharpRTSPClient.StoppedReason
+SharpRTSPClient.StoppedReason.NotFound = 4 -> SharpRTSPClient.StoppedReason
+SharpRTSPClient.StoppedReason.ProtocolError = 7 -> SharpRTSPClient.StoppedReason
+SharpRTSPClient.StoppedReason.ReceiveTimeout = 11 -> SharpRTSPClient.StoppedReason
+SharpRTSPClient.StoppedReason.ResponseTimeout = 10 -> SharpRTSPClient.StoppedReason
+SharpRTSPClient.StoppedReason.RtcpBye = 3 -> SharpRTSPClient.StoppedReason
+SharpRTSPClient.StoppedReason.ServerError = 5 -> SharpRTSPClient.StoppedReason
+SharpRTSPClient.StoppedReason.Unauthorized = 2 -> SharpRTSPClient.StoppedReason
+SharpRTSPClient.StoppedReason.Unknown = 0 -> SharpRTSPClient.StoppedReason
+SharpRTSPClient.StoppedReason.UnsupportedMedia = 6 -> SharpRTSPClient.StoppedReason
+SharpRTSPClient.TrackDataEventArgs
+SharpRTSPClient.TrackDataEventArgs.Codec.get -> string
+SharpRTSPClient.TrackDataEventArgs.Data.get -> SharpRTSPClient.SimpleDataEventArgs
+SharpRTSPClient.TrackDataEventArgs.Kind.get -> SharpRTSPClient.TrackKind
+SharpRTSPClient.TrackDataEventArgs.TrackDataEventArgs(int trackIndex, SharpRTSPClient.TrackKind kind, string codec, SharpRTSPClient.SimpleDataEventArgs data) -> void
+SharpRTSPClient.TrackDataEventArgs.TrackIndex.get -> int
+SharpRTSPClient.TrackKind
+SharpRTSPClient.TrackKind.Application = 2 -> SharpRTSPClient.TrackKind
+SharpRTSPClient.TrackKind.Audio = 1 -> SharpRTSPClient.TrackKind
+SharpRTSPClient.TrackKind.Video = 0 -> SharpRTSPClient.TrackKind
+SharpRTSPClient.TrackOffer
+SharpRTSPClient.TrackOffer.AcceptedOfThisKind.get -> int
+SharpRTSPClient.TrackOffer.AcceptedSoFar.get -> int
+SharpRTSPClient.TrackOffer.Codec.get -> string
+SharpRTSPClient.TrackOffer.DescriptionIndex.get -> int
+SharpRTSPClient.TrackOffer.Kind.get -> SharpRTSPClient.TrackKind
+SharpRTSPClient.TrackOffer.PayloadType.get -> int
+SharpRTSPClient.TrackRawRtcpEventArgs
+SharpRTSPClient.TrackRawRtcpEventArgs.Codec.get -> string
+SharpRTSPClient.TrackRawRtcpEventArgs.Data.get -> SharpRTSPClient.RawRtcpDataEventArgs
+SharpRTSPClient.TrackRawRtcpEventArgs.Kind.get -> SharpRTSPClient.TrackKind
+SharpRTSPClient.TrackRawRtcpEventArgs.TrackIndex.get -> int
+SharpRTSPClient.TrackRawRtcpEventArgs.TrackRawRtcpEventArgs(int trackIndex, SharpRTSPClient.TrackKind kind, string codec, SharpRTSPClient.RawRtcpDataEventArgs data) -> void
+SharpRTSPClient.TrackRawRtpEventArgs
+SharpRTSPClient.TrackRawRtpEventArgs.Codec.get -> string
+SharpRTSPClient.TrackRawRtpEventArgs.Data.get -> SharpRTSPClient.RawRtpDataEventArgs
+SharpRTSPClient.TrackRawRtpEventArgs.Kind.get -> SharpRTSPClient.TrackKind
+SharpRTSPClient.TrackRawRtpEventArgs.TrackIndex.get -> int
+SharpRTSPClient.TrackRawRtpEventArgs.TrackRawRtpEventArgs(int trackIndex, SharpRTSPClient.TrackKind kind, string codec, SharpRTSPClient.RawRtpDataEventArgs data) -> void
+SharpRTSPClient.UnparsedStreamConfigurationData
+SharpRTSPClient.UnparsedStreamConfigurationData.Fmtp.get -> string
+SharpRTSPClient.UnparsedStreamConfigurationData.Fmtp.set -> void
+SharpRTSPClient.UnparsedStreamConfigurationData.UnparsedStreamConfigurationData() -> void
+SharpRTSPClient.UnparsedStreamConfigurationData.UnparsedStreamConfigurationData(string fmtp) -> void
+SharpRTSPClient.VP9StreamConfigurationData
+SharpRTSPClient.VP9StreamConfigurationData.Fmtp.get -> string
+SharpRTSPClient.VP9StreamConfigurationData.Fmtp.set -> void
+SharpRTSPClient.VP9StreamConfigurationData.ProfileId.get -> int
+SharpRTSPClient.VP9StreamConfigurationData.ProfileId.set -> void
+SharpRTSPClient.VP9StreamConfigurationData.VP9StreamConfigurationData() -> void
+SharpRTSPClient.VP9StreamConfigurationData.VP9StreamConfigurationData(int profileId) -> void
+static readonly SharpRTSPClient.NullLog.Instance -> SharpRTSPClient.NullLog
+static readonly SharpRTSPClient.RtspClient.DEFAULT_RECEIVER_REPORT_INTERVAL -> System.TimeSpan
+static readonly SharpRTSPClient.RtspClient.FirstOfEachKind -> System.Func<SharpRTSPClient.TrackOffer, bool>
+static SharpRTSPClient.AACStreamConfigurationData.GetSamplingFrequency(int frequencyIndex) -> int
+static SharpRTSPClient.AV1StreamConfigurationData.Parse(string formatParameter) -> SharpRTSPClient.AV1StreamConfigurationData
+static SharpRTSPClient.H264StreamConfigurationData.Parse(string formatParameter) -> SharpRTSPClient.H264StreamConfigurationData
+static SharpRTSPClient.H265StreamConfigurationData.Parse(string formatParameter) -> SharpRTSPClient.H265StreamConfigurationData
+static SharpRTSPClient.H266StreamConfigurationData.Parse(string formatParameter) -> SharpRTSPClient.H266StreamConfigurationData
+static SharpRTSPClient.LogExtensions.Debug(this SharpRTSPClient.ILog logger, string message, System.Exception error = null) -> void
+static SharpRTSPClient.LogExtensions.Error(this SharpRTSPClient.ILog logger, string message, System.Exception error = null) -> void
+static SharpRTSPClient.LogExtensions.Info(this SharpRTSPClient.ILog logger, string message, System.Exception error = null) -> void
+static SharpRTSPClient.LogExtensions.Trace(this SharpRTSPClient.ILog logger, string message, System.Exception error = null) -> void
+static SharpRTSPClient.LogExtensions.Warning(this SharpRTSPClient.ILog logger, string message, System.Exception error = null) -> void
+static SharpRTSPClient.OpusStreamConfigurationData.Parse(string formatParameter) -> SharpRTSPClient.OpusStreamConfigurationData
+static SharpRTSPClient.RtspMessageAuthExtensions.AddAuthorization(this Rtsp.Messages.RtspRequest request, Rtsp.Authentication authentication, System.Uri uri, uint commandCounter) -> void
+static SharpRTSPClient.VP9StreamConfigurationData.Parse(string formatParameter) -> SharpRTSPClient.VP9StreamConfigurationData
+virtual SharpRTSPClient.RtspClient.Dispose(bool disposing) -> void
+virtual SharpRTSPClient.RtspClient.PrepareSrtpContext(Rtsp.Sdp.Media media) -> SharpSRTP.SRTP.SrtpSessionContext

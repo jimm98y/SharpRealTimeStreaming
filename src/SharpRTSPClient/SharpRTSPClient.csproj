@@ -32,4 +32,17 @@
 		<NoWarn>$(NoWarn);CS1591</NoWarn>
 	</PropertyGroup>
 
+	<!-- the public API: listed in PublicAPI.*.txt, and checked against the last release (doc/public-api.md) -->
+	<ItemGroup>
+		<PackageReference Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" Version="5.6.0" PrivateAssets="all" />
+	</ItemGroup>
+
+	<PropertyGroup>
+		<WarningsAsErrors>$(WarningsAsErrors);RS0016;RS0017</WarningsAsErrors>
+		<!-- overloads with optional parameters are a style choice here, not a break -->
+		<NoWarn>$(NoWarn);RS0026;RS0027</NoWarn>
+		<EnablePackageValidation>true</EnablePackageValidation>
+		<PackageValidationBaselineVersion>0.8.0</PackageValidationBaselineVersion>
+	</PropertyGroup>
+
 </Project>
