@@ -40,6 +40,7 @@ namespace SharpRTSPClient.Tests
         private readonly string _sdp;
         private readonly CancellationTokenSource _stopping = new CancellationTokenSource();
         private readonly List<string> _requests = new List<string>();
+        private readonly List<string> _rawRequests = new List<string>();
         private readonly object _requestsLock = new object();
 
         public int Port { get; }
@@ -48,6 +49,12 @@ namespace SharpRTSPClient.Tests
         public IReadOnlyList<string> Requests
         {
             get { lock (_requestsLock) { return _requests.ToArray(); } }
+        }
+
+        /// <summary>The requests the client sent, headers and all, in order.</summary>
+        public IReadOnlyList<string> RawRequests
+        {
+            get { lock (_requestsLock) { return _rawRequests.ToArray(); } }
         }
 
         /// <param name="address">The address listened on: IPv4 loopback unless given, IPv6 loopback for a server only IPv6 reaches.</param>
@@ -185,6 +192,7 @@ namespace SharpRTSPClient.Tests
             lock (_requestsLock)
             {
                 _requests.Add(method);
+                _rawRequests.Add(request);
             }
 
             if (IgnoreMethod != null && IgnoreMethod == method)
