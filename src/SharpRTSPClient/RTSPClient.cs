@@ -963,6 +963,43 @@ namespace SharpRTSPClient
         /// <exception cref="InvalidOperationException"></exception>
         public void Play()
         {
+            // Need for old sony camera SNC-CS20
+            SendPlay(playMessage => playMessage.Headers.Add("range", "npt=0.000-"));
+        }
+
+        /// <summary>
+        /// Generate a Play request from required time
+        /// </summary>
+        /// <param name="seekTime">The playback time to start from</param>
+        /// <param name="speed">Speed information (1.0 means normal speed, -1.0 backward speed), other values &gt;1.0 and &lt;-1.0 allow a different speed</param>
+        /// <exception cref="InvalidOperationException"></exception>
+        public void Play(DateTime seekTime, double speed = 1.0)
+        {
+            SendPlay(playMessage => playMessage.AddPlayback(seekTime, speed));
+        }
+
+        /// <summary>
+        /// Generate a Play request with a time range
+        /// </summary>
+        /// <param name="seekTimeFrom">Starting time for playback</param>
+        /// <param name="seekTimeTo">Ending time for playback</param>
+        /// <param name="speed">Speed information (1.0 means normal speed, -1.0 backward speed), other values &gt;1.0 and &lt;-1.0 allow a different speed</param>
+        /// <exception cref="InvalidOperationException"></exception>
+        /// <exception cref="ArgumentOutOfRangeException"></exception>
+        public void Play(DateTime seekTimeFrom, DateTime seekTimeTo, double speed = 1.0)
+        {
+            if (seekTimeFrom > seekTimeTo) { throw new ArgumentOutOfRangeException(nameof(seekTimeFrom), "Starting seek cannot be major than ending seek."); }
+            SendPlay(playMessage => playMessage.AddPlayback(seekTimeFrom, seekTimeTo, speed));
+        }
+
+        /// <summary>
+        /// Sends a PLAY for the session, authorized and, in a playback session, with the ONVIF
+        /// headers - everything every overload needs, so none of them can leave a part out.
+        /// </summary>
+        /// <param name="addRange">Adds the overload's own range to the request.</param>
+        /// <exception cref="InvalidOperationException"></exception>
+        private void SendPlay(Action<RtspRequestPlay> addRange)
+        {
             if (_rtspSocket == null || _uri == null)
             {
                 throw new InvalidOperationException("Not connected");
@@ -973,57 +1010,7 @@ namespace SharpRTSPClient
                 Session = _session
             };
             playMessage.AddAuthorization(_authentication, _uri, _rtspSocket.NextCommandIndex());
-            // Need for old sony camera SNC-CS20
-            playMessage.Headers.Add("range", "npt=0.000-");
-            if (_playbackSession)
-            {
-                playMessage.AddRequireOnvifRequest();
-                playMessage.AddRateControlOnvifRequest(false);
-            }
-            SendRequest(_rtspClient, playMessage);
-        }
-
-        /// <summary>
-        /// Generate a Play request from required time
-        /// </summary>
-        /// <param name="seekTime">The playback time to start from</param>
-        /// <param name="speed">Speed information (1.0 means normal speed, -1.0 backward speed), other values &gt;1.0 and &lt;-1.0 allow a different speed</param>
-        public void Play(DateTime seekTime, double speed = 1.0)
-        {
-            if (_rtspSocket == null || _uri == null) { throw new InvalidOperationException("Not connected"); }
-            var playMessage = new RtspRequestPlay
-            {
-                RtspUri = _uri,
-                Session = _session,
-            };
-            playMessage.AddAuthorization(_authentication, _uri, _rtspSocket.NextCommandIndex());
-            playMessage.AddPlayback(seekTime, speed);
-            if (_playbackSession)
-            {
-                playMessage.AddRequireOnvifRequest();
-                playMessage.AddRateControlOnvifRequest(false);
-            }
-            SendRequest(_rtspClient, playMessage);
-        }
-
-        /// <summary>
-        /// Generate a Play request with a time range
-        /// </summary>
-        /// <param name="seekTimeFrom">Starting time for playback</param>
-        /// <param name="seekTimeTo">Ending time for playback</param>
-        /// <param name="speed">Speed information (1.0 means normal speed, -1.0 backward speed), other values &gt;1.0 and &lt;-1.0 allow a different speed</param>
-        /// <exception cref="InvalidOperationException"></exception>
-        public void Play(DateTime seekTimeFrom, DateTime seekTimeTo, double speed = 1.0)
-        {
-            if (_rtspSocket == null || _uri == null) { throw new InvalidOperationException("Not connected"); }
-            if (seekTimeFrom > seekTimeTo) { throw new ArgumentOutOfRangeException(nameof(seekTimeFrom), "Starting seek cannot be major than ending seek."); }
-            var playMessage = new RtspRequestPlay
-            {
-                RtspUri = _uri,
-                Session = _session,
-            };
-            playMessage.AddAuthorization(_authentication, _uri, _rtspSocket.NextCommandIndex());
-            playMessage.AddPlayback(seekTimeFrom, seekTimeTo, speed);
+            addRange(playMessage);
             if (_playbackSession)
             {
                 playMessage.AddRequireOnvifRequest();
