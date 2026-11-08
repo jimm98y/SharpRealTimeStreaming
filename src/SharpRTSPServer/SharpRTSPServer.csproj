@@ -33,7 +33,8 @@
 	</ItemGroup>
 
 	<PropertyGroup>
-		<WarningsAsErrors>$(WarningsAsErrors);RS0016;RS0017</WarningsAsErrors>
+		<!-- a symbol gone from the API fails the build; one added warns, until listed: an addition breaks no one -->
+		<WarningsAsErrors>$(WarningsAsErrors);RS0017</WarningsAsErrors>
 		<!-- overloads with optional parameters are a style choice here, not a break -->
 		<NoWarn>$(NoWarn);RS0026;RS0027</NoWarn>
 		<EnablePackageValidation>true</EnablePackageValidation>

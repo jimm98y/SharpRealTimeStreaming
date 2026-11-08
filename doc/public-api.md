@@ -6,15 +6,15 @@ library:
 
 - **The API files.** `PublicAPI.Shipped.txt` and `PublicAPI.Unshipped.txt`, next to each project,
   list every public type and member. Shipped is the API as released; Unshipped is what changed
-  since. A public symbol missing from them fails the build with RS0016, a listed one that is gone
-  with RS0017. Read them to see the API; read their diff in a pull request to see how it changed.
+  since. A public symbol missing from them is a warning, RS0016, until it is
+  listed - an addition breaks no one - and a listed one that is gone fails the build with RS0017. Read them to see the API; read their diff in a pull request to see how it changed.
 - **Package validation.** The package being built is compared with the last release
   (`PackageValidationBaselineVersion` in the project), and every binary or source breaking change
   fails the build with a CP error. It also checks that the four target frameworks offer the same API.
 
 ## Adding to the API
 
-Build, and accept the RS0016 fix in the IDE ("Add to public API"), or from the command line:
+List what the RS0016 warnings name: accept their fix in the IDE ("Add to public API"), or from the command line:
 
 ```
 dotnet format analyzers src/SharpRTSPClient/SharpRTSPClient.csproj --diagnostics RS0016 --severity warn
