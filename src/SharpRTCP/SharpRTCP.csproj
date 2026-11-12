@@ -3,7 +3,7 @@
   <PropertyGroup>
     <TargetFrameworks>netstandard2.0;net472;net8.0;net10.0</TargetFrameworks>
     <LangVersion>latest</LangVersion>
-    <Description>RTCP of RTP (RFC 3550): sender and receiver reports, reception statistics, source descriptions and Picture Loss Indications.</Description>
+    <Description>RTCP sender and receiver reports, reception statistics, source descriptions and Picture Loss Indications.</Description>
     <PackageTags>rtcp;rtp;rtsp;webrtc;netstandard20;net10</PackageTags>
   </PropertyGroup>
 
