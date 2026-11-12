@@ -3546,7 +3546,12 @@ namespace SharpRTSPServer
             {
             try
             {
-                Debug.Assert(stream.RtpChannel != null, "If stream.rtpChannel is null here the program did not handle well connection problem");
+                // A multicast listener has no channel of its own - the group's sender carries its
+                // media and its reports - so there is nothing to send to it here.
+                if (stream.RtpChannel == null)
+                {
+                    return true;
+                }
 
                 if (stream.Context != null)
                 {

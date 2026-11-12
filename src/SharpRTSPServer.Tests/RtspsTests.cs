@@ -75,7 +75,11 @@ namespace SharpRTSPServer.Tests
             using var ephemeral = request.CreateSelfSigned(
                 DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(30));
 
+#if NET9_0_OR_GREATER
             return X509CertificateLoader.LoadPkcs12(ephemeral.Export(X509ContentType.Pfx), null);
+#else
+            return new X509Certificate2(ephemeral.Export(X509ContentType.Pfx));
+#endif
         }
 
         private static RTSPServer StartTlsServer(X509Certificate2 certificate, int port)

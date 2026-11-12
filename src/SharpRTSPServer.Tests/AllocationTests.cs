@@ -19,6 +19,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#if NETCOREAPP // .NET Framework has no precise count of what the process allocates
 using System;
 using System.Collections.Generic;
 using System.Threading;
@@ -183,3 +184,4 @@ namespace SharpRTSPServer.Tests
         }
     }
 }
+#endif

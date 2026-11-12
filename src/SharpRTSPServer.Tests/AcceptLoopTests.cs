@@ -46,8 +46,13 @@ namespace SharpRTSPServer.Tests
             var certificate = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(1));
 
             // SChannel cannot build server credentials from an ephemeral key, see RtspsTests
+#if NET9_0_OR_GREATER
             return X509CertificateLoader.LoadPkcs12(certificate.Export(X509ContentType.Pfx, "x"), "x",
                 X509KeyStorageFlags.Exportable);
+#else
+            return new X509Certificate2(certificate.Export(X509ContentType.Pfx, "x"), "x",
+                X509KeyStorageFlags.Exportable);
+#endif
         }
 
         private static void SaySomethingThatIsNotTls(int port)
