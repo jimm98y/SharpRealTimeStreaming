@@ -21,6 +21,7 @@
 
 using System;
 using System.Buffers.Binary;
+using System.Collections.Generic;
 using System.Linq;
 
 namespace SharpRTCP.Tests
@@ -189,6 +190,29 @@ namespace SharpRTCP.Tests
 
             Assert.AreEqual((Them, Us, 42u), (reporter, block.SSRC, block.ExtendedHighestSequence));
             Assert.AreEqual(block, senderReport.Reports.Single(), "of the sender report's own blocks too");
+        }
+
+        [TestMethod]
+        public void ReportsAreReadIntoListsOfTheCallersOwn()
+        {
+            byte[] receiver = RTCPUtilities.CreateReceiverReport(new ReceiverReport { SSRC = Us, Reports = { new ReportBlock { SSRC = Them, Jitter = 7 } } });
+            byte[] compound = RTCPUtilities.CreateCompoundPacket(SenderReport(Them, 1, 2, 3, 4), receiver);
+            var reports = new List<SenderReport> { new SenderReport(), new SenderReport() };
+            var kept = reports[0];
+            var blocks = new List<(uint, ReportBlock)> { (0, default) };
+
+            RTCPUtilities.ReadSenderReports(compound, reports);
+            RTCPUtilities.ReadReportBlocks(compound, blocks);
+
+            Assert.AreSame(kept, reports.Single(), "the report already in the list, overwritten; the one left over removed");
+            Assert.AreEqual((Them, 3u), (kept.SSRC, kept.PacketCount));
+            CollectionAssert.AreEqual(RTCPUtilities.ReadReportBlocks(compound), blocks);
+#if NET
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            RTCPUtilities.ReadSenderReports(compound, reports);
+            RTCPUtilities.ReadReportBlocks(compound, blocks);
+            Assert.AreEqual(0, GC.GetAllocatedBytesForCurrentThread() - before, "of no allocation, read again");
+#endif
         }
 
         [TestMethod]
