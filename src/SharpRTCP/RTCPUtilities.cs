@@ -87,24 +87,26 @@ namespace SharpRTCP
         public static List<(int Offset, int Length)> SplitCompoundPacket(ReadOnlySpan<byte> compound)
         {
             var packets = new List<(int, int)>();
-            int at = 0;
-            while (at + 4 <= compound.Length)
+            for (int at = 0, length; (length = GetPacketLength(compound, at)) > 0; at += length)
             {
-                if ((compound[at] >> 6) != Version)
-                {
-                    break;
-                }
-
-                int length = (BinaryPrimitives.ReadUInt16BigEndian(compound.Slice(at + 2)) + 1) * 4;
-                if (at + length > compound.Length)
-                {
-                    break;
-                }
-
                 packets.Add((at, length));
-                at += length;
             }
             return packets;
+        }
+
+        /// <summary>
+        /// The length of the packet of a compound packet at an offset, as <see cref="SplitCompoundPacket"/> reads them, of no
+        /// list: 0 at its end, or of one not well formed.
+        /// </summary>
+        public static int GetPacketLength(ReadOnlySpan<byte> compound, int offset)
+        {
+            if (offset < 0 || offset + 4 > compound.Length || (compound[offset] >> 6) != Version)
+            {
+                return 0;
+            }
+
+            int length = (BinaryPrimitives.ReadUInt16BigEndian(compound.Slice(offset + 2)) + 1) * 4;
+            return offset + length > compound.Length ? 0 : length;
         }
 
         /// <summary>Packets end to end, as a compound packet is.</summary>
@@ -203,25 +205,35 @@ namespace SharpRTCP
         public static List<(uint Reporter, ReportBlock Block)> ReadReportBlocks(ReadOnlySpan<byte> compound)
         {
             var blocks = new List<(uint, ReportBlock)>();
-            foreach (var (offset, length) in SplitCompoundPacket(compound))
+            ReadReportBlocks(compound, blocks);
+            return blocks;
+        }
+
+        /// <summary>
+        /// <see cref="ReadReportBlocks(ReadOnlySpan{byte})"/> into a list, what was in it cleared: of no allocation, of a list of
+        /// room enough.
+        /// </summary>
+        public static void ReadReportBlocks(ReadOnlySpan<byte> compound, List<(uint Reporter, ReportBlock Block)> blocks)
+        {
+            blocks.Clear();
+            for (int at = 0, length; (length = GetPacketLength(compound, at)) > 0; at += length)
             {
-                var packet = compound.Slice(offset, length);
-                if (TryReadReceiverReport(packet, out ReceiverReport receiverReport))
+                var packet = compound.Slice(at, length);
+                int first = packet[1] == PacketType.ReceiverReport && packet.Length >= HeaderLength ? HeaderLength
+                    : packet[1] == PacketType.SenderReport && packet.Length >= SenderInformationEnd ? SenderInformationEnd
+                    : 0;
+                if (first == 0)
                 {
-                    foreach (var block in receiverReport.Reports)
-                    {
-                        blocks.Add((receiverReport.SSRC, block));
-                    }
+                    continue;
                 }
-                else if (TryReadSenderReport(packet, out SenderReport senderReport))
+
+                uint reporter = BinaryPrimitives.ReadUInt32BigEndian(packet.Slice(4));
+                int count = packet[0] & 0x1F;
+                for (int i = 0, block = first; i < count && block + ReportBlockLength <= packet.Length; i++, block += ReportBlockLength)
                 {
-                    foreach (var block in senderReport.Reports)
-                    {
-                        blocks.Add((senderReport.SSRC, block));
-                    }
+                    blocks.Add((reporter, ReadReportBlock(packet.Slice(block, ReportBlockLength))));
                 }
             }
-            return blocks;
         }
 
         #endregion // Report blocks
@@ -262,30 +274,53 @@ namespace SharpRTCP
                 return false;
             }
 
-            report = new SenderReport
-            {
-                SSRC = BinaryPrimitives.ReadUInt32BigEndian(packet.Slice(4)),
-                NTPTimestamp = BinaryPrimitives.ReadUInt64BigEndian(packet.Slice(8)),
-                RTPTimestamp = BinaryPrimitives.ReadUInt32BigEndian(packet.Slice(16)),
-                PacketCount = BinaryPrimitives.ReadUInt32BigEndian(packet.Slice(20)),
-                OctetCount = BinaryPrimitives.ReadUInt32BigEndian(packet.Slice(24)),
-            };
-            ReadReportBlocks(packet, SenderInformationEnd, report.Reports);
+            report = new SenderReport();
+            ReadSenderReport(packet, report);
             return true;
+        }
+
+        // a sender report of a packet of its type, long enough, into one read before: what it had overwritten
+        private static void ReadSenderReport(ReadOnlySpan<byte> packet, SenderReport report)
+        {
+            report.SSRC = BinaryPrimitives.ReadUInt32BigEndian(packet.Slice(4));
+            report.NTPTimestamp = BinaryPrimitives.ReadUInt64BigEndian(packet.Slice(8));
+            report.RTPTimestamp = BinaryPrimitives.ReadUInt32BigEndian(packet.Slice(16));
+            report.PacketCount = BinaryPrimitives.ReadUInt32BigEndian(packet.Slice(20));
+            report.OctetCount = BinaryPrimitives.ReadUInt32BigEndian(packet.Slice(24));
+            report.Reports.Clear();
+            ReadReportBlocks(packet, SenderInformationEnd, report.Reports);
         }
 
         /// <summary>The sender reports of a compound packet.</summary>
         public static List<SenderReport> ReadSenderReports(ReadOnlySpan<byte> compound)
         {
             var reports = new List<SenderReport>();
-            foreach (var (offset, length) in SplitCompoundPacket(compound))
-            {
-                if (TryReadSenderReport(compound.Slice(offset, length), out SenderReport report))
-                {
-                    reports.Add(report);
-                }
-            }
+            ReadSenderReports(compound, reports);
             return reports;
+        }
+
+        /// <summary>
+        /// <see cref="ReadSenderReports(ReadOnlySpan{byte})"/> into a list, the reports already in it overwritten and those
+        /// left over removed: of no allocation, of as many reports as it had.
+        /// </summary>
+        public static void ReadSenderReports(ReadOnlySpan<byte> compound, List<SenderReport> reports)
+        {
+            int count = 0;
+            for (int at = 0, length; (length = GetPacketLength(compound, at)) > 0; at += length)
+            {
+                var packet = compound.Slice(at, length);
+                if (packet.Length < SenderInformationEnd || packet[1] != PacketType.SenderReport)
+                {
+                    continue;
+                }
+
+                if (count == reports.Count)
+                {
+                    reports.Add(new SenderReport());
+                }
+                ReadSenderReport(packet, reports[count++]);
+            }
+            reports.RemoveRange(count, reports.Count - count);
         }
 
         #endregion // Sender reports

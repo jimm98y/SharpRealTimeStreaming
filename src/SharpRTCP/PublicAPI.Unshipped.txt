@@ -1,0 +1,3 @@
+static SharpRTCP.RTCPUtilities.GetPacketLength(System.ReadOnlySpan<byte> compound, int offset) -> int
+static SharpRTCP.RTCPUtilities.ReadReportBlocks(System.ReadOnlySpan<byte> compound, System.Collections.Generic.List<(uint Reporter, SharpRTCP.ReportBlock Block)> blocks) -> void
+static SharpRTCP.RTCPUtilities.ReadSenderReports(System.ReadOnlySpan<byte> compound, System.Collections.Generic.List<SharpRTCP.SenderReport> reports) -> void
