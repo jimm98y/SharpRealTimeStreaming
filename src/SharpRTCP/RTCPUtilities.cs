@@ -417,13 +417,23 @@ namespace SharpRTCP
         /// <returns>Its length: <see cref="GetSourceDescriptionLength"/>.</returns>
         public static int WriteSourceDescription(Span<byte> packet, uint ssrc, string cname)
         {
-            byte[] name = Encoding.UTF8.GetBytes(cname ?? "");
-            int nameLength = Math.Min(name.Length, 255);
             int length = GetSourceDescriptionLength(cname);
 
             packet.Slice(0, length).Clear();
             WriteHeader(packet, 1, PacketType.SourceDescription, length / 4 - 1, ssrc);
             packet[8] = SDESItemCNAME;
+#if NET8_0_OR_GREATER
+            // the name encoded in place, of no array: of one that fits whole, as a CNAME does
+            int byteCount = Encoding.UTF8.GetByteCount(cname ?? "");
+            if (byteCount <= 255)
+            {
+                packet[9] = (byte)byteCount;
+                Encoding.UTF8.GetBytes((cname ?? "").AsSpan(), packet.Slice(10, byteCount));
+                return length;
+            }
+#endif
+            byte[] name = Encoding.UTF8.GetBytes(cname ?? "");
+            int nameLength = Math.Min(name.Length, 255);
             packet[9] = (byte)nameLength;
             name.AsSpan(0, nameLength).CopyTo(packet.Slice(10));
             return length;
