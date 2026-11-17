@@ -279,6 +279,25 @@ namespace SharpRTCP
             return true;
         }
 
+        /// <summary>
+        /// A sender report, and its report blocks, of one RTCP packet into <paramref name="report"/>, one the caller keeps:
+        /// of no allocation, once its list of blocks has grown. False of another type, or of one too short, the report as it was.
+        /// </summary>
+        public static bool TryReadSenderReport(ReadOnlySpan<byte> packet, SenderReport report)
+        {
+            if (report == null)
+            {
+                throw new ArgumentNullException(nameof(report));
+            }
+            if (packet.Length < SenderInformationEnd || packet[1] != PacketType.SenderReport)
+            {
+                return false;
+            }
+
+            ReadSenderReport(packet, report);
+            return true;
+        }
+
         // a sender report of a packet of its type, long enough, into one read before: what it had overwritten
         private static void ReadSenderReport(ReadOnlySpan<byte> packet, SenderReport report)
         {
