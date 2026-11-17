@@ -60,7 +60,7 @@ namespace SharpRTSPClient.Tests
 
         private static byte[] SenderReportPacket(uint ssrc) => Packet(SenderReport, ssrc, bodyBytes: 20);
 
-        private static List<byte[]> Parse(RTSPClient client, byte[] data, ChannelState channel)
+        private static IReadOnlyList<ReadOnlyMemory<byte>> Parse(RTSPClient client, byte[] data, ChannelState channel)
         {
             return client.ParseRTCPAndGenerateResponse(new Memory<byte>(data), OurSsrc, channel);
         }
@@ -82,12 +82,32 @@ namespace SharpRTSPClient.Tests
             using var client = new RTSPClient();
             var reports = Parse(client, SenderReportPacket(ServerSsrc), FreshChannel());
 
-            byte[] report = Assert.ContainsSingle(reports);
+            byte[] report = Assert.ContainsSingle(reports).ToArray();
             Assert.HasCount(8, report);
             Assert.AreEqual(2, report[0] >> 6);            // version
             Assert.AreEqual(ReceiverReport, report[1]);    // packet type
             Assert.AreEqual(OurSsrc, (uint)((report[4] << 24) | (report[5] << 16) | (report[6] << 8) | report[7]));
         }
+
+#if NET
+        [TestMethod]
+        public void SenderReport_AnsweredAllocatingNothing()
+        {
+            // every report answered, so that the reply is written each time; of debug logging off, as a host's
+            using var client = new RTSPClient { ReceiverReportInterval = TimeSpan.Zero, Logger = NullLog.Instance };
+            var channel = FreshChannel();
+            var packet = new Memory<byte>(SenderReportPacket(ServerSsrc));
+            // the warm-up as the loop measured, its assertion too: of a first call, what that allocates once
+            for (int i = 0; i < 100; i++)
+                Assert.AreEqual(1, client.ParseRTCPAndGenerateResponse(packet, OurSsrc, channel).Count);
+
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            for (int i = 0; i < 1000; i++)
+                Assert.AreEqual(1, client.ParseRTCPAndGenerateResponse(packet, OurSsrc, channel).Count);
+            long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+            Assert.AreEqual(0L, allocated, $"{allocated} bytes over 1000 sender reports");
+        }
+#endif
 
         [TestMethod]
         public void CompoundPacket_EveryElementIsWalked()

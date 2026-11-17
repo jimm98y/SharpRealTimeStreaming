@@ -35,31 +35,42 @@ namespace SharpRTSPClient
     {
         public TrackDataEventArgs(int trackIndex, TrackKind kind, string codec, SimpleDataEventArgs data)
         {
+            Set(trackIndex, kind, codec, data);
+        }
+
+        // the receiving thread's own, filled for each frame
+        internal TrackDataEventArgs()
+        {
+        }
+
+        internal TrackDataEventArgs Set(int trackIndex, TrackKind kind, string codec, SimpleDataEventArgs data)
+        {
             TrackIndex = trackIndex;
             Kind = kind;
             Codec = codec;
             Data = data;
+            return this;
         }
 
         /// <summary>
         /// Where this track came in the description, which is what tells two of a kind apart.
         /// </summary>
-        public int TrackIndex { get; }
+        public int TrackIndex { get; private set; }
 
         /// <summary>
         /// What sort of media the track carries.
         /// </summary>
-        public TrackKind Kind { get; }
+        public TrackKind Kind { get; private set; }
 
         /// <summary>
         /// The codec as the description named it.
         /// </summary>
-        public string Codec { get; }
+        public string Codec { get; private set; }
 
         /// <summary>
         /// The frame itself, and when it was sent.
         /// </summary>
-        public SimpleDataEventArgs Data { get; }
+        public SimpleDataEventArgs Data { get; private set; }
     }
 
     /// <summary>
@@ -73,31 +84,42 @@ namespace SharpRTSPClient
     {
         public TrackRawRtpEventArgs(int trackIndex, TrackKind kind, string codec, RawRtpDataEventArgs data)
         {
+            Set(trackIndex, kind, codec, data);
+        }
+
+        // the receiving thread's own, filled for each packet
+        internal TrackRawRtpEventArgs()
+        {
+        }
+
+        internal TrackRawRtpEventArgs Set(int trackIndex, TrackKind kind, string codec, RawRtpDataEventArgs data)
+        {
             TrackIndex = trackIndex;
             Kind = kind;
             Codec = codec;
             Data = data;
+            return this;
         }
 
         /// <summary>
         /// Where this track came in the description, which is what tells two of a kind apart.
         /// </summary>
-        public int TrackIndex { get; }
+        public int TrackIndex { get; private set; }
 
         /// <summary>
         /// What sort of media the track carries.
         /// </summary>
-        public TrackKind Kind { get; }
+        public TrackKind Kind { get; private set; }
 
         /// <summary>
         /// The codec as the description named it.
         /// </summary>
-        public string Codec { get; }
+        public string Codec { get; private set; }
 
         /// <summary>
         /// The packet, decrypted where the stream is protected.
         /// </summary>
-        public RawRtpDataEventArgs Data { get; }
+        public RawRtpDataEventArgs Data { get; private set; }
     }
 
     /// <summary>
@@ -107,31 +129,42 @@ namespace SharpRTSPClient
     {
         public TrackRawRtcpEventArgs(int trackIndex, TrackKind kind, string codec, RawRtcpDataEventArgs data)
         {
+            Set(trackIndex, kind, codec, data);
+        }
+
+        // the receiving thread's own, filled for each packet
+        internal TrackRawRtcpEventArgs()
+        {
+        }
+
+        internal TrackRawRtcpEventArgs Set(int trackIndex, TrackKind kind, string codec, RawRtcpDataEventArgs data)
+        {
             TrackIndex = trackIndex;
             Kind = kind;
             Codec = codec;
             Data = data;
+            return this;
         }
 
         /// <summary>
         /// Where this track came in the description, which is what tells two of a kind apart.
         /// </summary>
-        public int TrackIndex { get; }
+        public int TrackIndex { get; private set; }
 
         /// <summary>
         /// What sort of media the track carries.
         /// </summary>
-        public TrackKind Kind { get; }
+        public TrackKind Kind { get; private set; }
 
         /// <summary>
         /// The codec as the description named it.
         /// </summary>
-        public string Codec { get; }
+        public string Codec { get; private set; }
 
         /// <summary>
         /// The report, decrypted where the stream is protected.
         /// </summary>
-        public RawRtcpDataEventArgs Data { get; }
+        public RawRtcpDataEventArgs Data { get; private set; }
     }
 
     /// <summary>

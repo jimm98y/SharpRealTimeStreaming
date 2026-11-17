@@ -191,12 +191,13 @@ namespace SharpRTSPClient.Tests
         [TestMethod]
         public void TheRawRtpEventIsRaisedForEveryTrackAndSaysWhich()
         {
-            var seen = new List<TrackRawRtpEventArgs>();
+            // the arguments are the receiving thread's own, filled again for the next packet: what is checked is copied
+            var seen = new List<(int TrackIndex, TrackKind Kind, string Codec, bool HasData)>();
 
             using var client = Describe(ThreeTracks, out var server);
             using (server)
             {
-                client.ReceivedRawRTP += (s, e) => { lock (seen) { seen.Add(e); } };
+                client.ReceivedRawRTP += (s, e) => { lock (seen) { seen.Add((e.TrackIndex, e.Kind, e.Codec, e.Data != null)); } };
 
                 // Drive the receive path directly: the fake server describes but does not stream.
                 FeedRtp(client, trackIndex: 1, payloadType: 97);
@@ -207,7 +208,7 @@ namespace SharpRTSPClient.Tests
                     Assert.AreEqual(1, seen[0].TrackIndex);
                     Assert.AreEqual(TrackKind.Video, seen[0].Kind);
                     Assert.AreEqual("H264", seen[0].Codec);
-                    Assert.IsNotNull(seen[0].Data);
+                    Assert.IsTrue(seen[0].HasData);
                 }
 
                 client.Stop();

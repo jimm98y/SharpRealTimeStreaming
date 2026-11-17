@@ -59,10 +59,10 @@ namespace SharpRTSPClient.Tests
         /// </summary>
         /// <remarks>
         /// <para>
-        /// Measured repeatably at 665 to 671 bytes, nearly all of it inside SharpRTSP: a frame
-        /// object and two array copies for every frame the payload parser finishes, and a boxed
-        /// enumerator to ask whether it finished one. Our own share is about eighty, the two event
-        /// arguments handed to whoever is listening.
+        /// Measured repeatably at 635 to 643 bytes, all of it inside SharpRTSP: a frame object and
+        /// two array copies for every frame the payload parser finishes, and a boxed enumerator to
+        /// ask whether it finished one. Our own share is none: the event arguments handed to whoever
+        /// is listening are the receiving thread's own (about eighty bytes a packet before).
         /// </para>
         /// <para>
         /// The bar is well above that because this is a whole-process measurement on whatever
@@ -143,6 +143,7 @@ namespace SharpRTSPClient.Tests
 
             // The loop above takes about as long as the idle stretch and a quarter.
             double aPacket = (busy - idleASecond * 2.5) / arrived;
+            Console.WriteLine($"{aPacket:F0} bytes a packet");
 
             Assert.IsLessThan(MOST_BYTES_A_PACKET, aPacket,
                 $"receiving allocated {aPacket:F0} bytes a packet over {arrived} packets");
