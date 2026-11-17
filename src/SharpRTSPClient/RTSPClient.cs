@@ -1249,13 +1249,12 @@ namespace SharpRTSPClient
         internal byte[] BuildRtcpReceiverReport(uint ssrc, uint aboutSsrc, ChannelState channel)
         {
             Span<byte> report = stackalloc byte[RTCPUtilities.GetReceiverReportLength(1)];
-            return report.Slice(0, WriteRtcpReceiverReport(report, ssrc, aboutSsrc, channel)).ToArray();
+            return report.Slice(0, WriteRtcpReceiverReport(report, ssrc, aboutSsrc, channel, new ReceiverReport())).ToArray();
         }
 
         /// <summary>The receiver report of <see cref="BuildRtcpReceiverReport(uint, uint, ChannelState)"/>, written into <paramref name="packet"/>: its length.</summary>
-        internal int WriteRtcpReceiverReport(Span<byte> packet, uint ssrc, uint aboutSsrc, ChannelState channel)
+        internal int WriteRtcpReceiverReport(Span<byte> packet, uint ssrc, uint aboutSsrc, ChannelState channel, ReceiverReport receiverReport)
         {
-            var receiverReport = t_receiverReport ??= new ReceiverReport();
             receiverReport.SSRC = ssrc;
             receiverReport.Reports.Clear();
             ReportBlock block = channel?.Reception.TakeReport() ?? new ReportBlock();
@@ -1271,17 +1270,8 @@ namespace SharpRTSPClient
             return RTCPUtilities.WriteReceiverReport(packet, receiverReport);
         }
 
-        // the receiving thread's own, filled again for each packet, frame and report rather than made anew
-        [ThreadStatic] private static RawRtpDataEventArgs t_raw;
-        [ThreadStatic] private static TrackRawRtpEventArgs t_trackRaw;
-        [ThreadStatic] private static SimpleDataEventArgs t_simple;
-        [ThreadStatic] private static TrackDataEventArgs t_trackData;
-        [ThreadStatic] private static RawRtcpDataEventArgs t_rawRtcp;
-        [ThreadStatic] private static TrackRawRtcpEventArgs t_trackRawRtcp;
-        [ThreadStatic] private static SenderReport t_senderReport;
-        [ThreadStatic] private static ReceiverReport t_receiverReport;
-        [ThreadStatic] private static List<ReadOnlyMemory<byte>> t_replies;
-        [ThreadStatic] private static byte[] t_replyBuffer;
+        // of reports parsed of no track: the tests'
+        private readonly RtcpReuse _rtcpReuse = new RtcpReuse();
 
         /// <summary>
         /// Media arriving on one track.
@@ -1343,7 +1333,7 @@ namespace SharpRTSPClient
                 // stream whether or not anyone had subscribed.
                 if (anyTrackListener != null)
                 {
-                    var raw = (t_raw ??= new RawRtpDataEventArgs()).Set(
+                    var raw = (track.RtpReuse.Raw ??= new RawRtpDataEventArgs()).Set(
                         rtpData,
                         rtpPacket.CsrcCount,
                         rtpPacket.ExtensionHeaderId,
@@ -1359,7 +1349,7 @@ namespace SharpRTSPClient
                         CalculatePayloadStart(rtpPacket));
 
                     anyTrackListener(this,
-                        (t_trackRaw ??= new TrackRawRtpEventArgs()).Set(track.Index, track.Kind, track.Codec, raw));
+                        (track.RtpReuse.TrackRaw ??= new TrackRawRtpEventArgs()).Set(track.Index, track.Kind, track.Codec, raw));
                 }
 
                 if (!ProcessRTP)
@@ -1379,13 +1369,13 @@ namespace SharpRTSPClient
                     {
                         bool synced = track.Rtcp.TryMapToSenderClock(frames.RtpTimestamp, out DateTime senderTime);
 
-                        var simple = (t_simple ??= new SimpleDataEventArgs()).Set(
+                        var simple = (track.RtpReuse.Simple ??= new SimpleDataEventArgs()).Set(
                             frames.Data,
                             synced ? senderTime : frames.ClockTimestamp,
                             frames.RtpTimestamp,
                             synced);
 
-                        ReceivedData?.Invoke(this, (t_trackData ??= new TrackDataEventArgs()).Set(track.Index, track.Kind, track.Codec, simple));
+                        ReceivedData?.Invoke(this, (track.RtpReuse.TrackData ??= new TrackDataEventArgs()).Set(track.Index, track.Kind, track.Codec, simple));
                     }
                 }
             }
@@ -1430,15 +1420,15 @@ namespace SharpRTSPClient
                 EventHandler<TrackRawRtcpEventArgs> rtcpListener = ReceivedRawRTCP;
                 if (rtcpListener != null)
                 {
-                    var raw = (t_rawRtcp ??= new RawRtcpDataEventArgs()).Set(rtcpData);
-                    rtcpListener(this, (t_trackRawRtcp ??= new TrackRawRtcpEventArgs()).Set(track.Index, track.Kind, track.Codec, raw));
+                    var raw = (track.RtcpReuse.Raw ??= new RawRtcpDataEventArgs()).Set(rtcpData);
+                    rtcpListener(this, (track.RtcpReuse.TrackRaw ??= new TrackRawRtcpEventArgs()).Set(track.Index, track.Kind, track.Codec, raw));
                 }
 
                 if (!ProcessRTCP)
                     return;
 
                 // the replies protected already, of the thread's buffer: sent before the next report is parsed
-                var reports = ParseRTCPAndGenerateResponse(rtcpData, SsrcOf(track), track.Rtcp, track.Context);
+                var reports = ParseRTCPAndGenerateResponse(rtcpData, SsrcOf(track), track.Rtcp, track.Context, track.RtcpReuse);
                 for (int i = 0; i < reports.Count; i++)
                 {
                     ((IRtpTransport)sender).WriteToControlPort(reports[i].Span);
@@ -1465,13 +1455,14 @@ namespace SharpRTSPClient
 
         /// <summary>
         /// The reports of an RTCP packet read, and the receiver reports due in answer: written into the receiving thread's
-        /// own buffer, as SRTCP where <paramref name="context"/> is given, and valid until its next call.
+        /// own buffer, as SRTCP where <paramref name="context"/> is given, and valid until its next call of the same reuse.
         /// </summary>
-        internal IReadOnlyList<ReadOnlyMemory<byte>> ParseRTCPAndGenerateResponse(Memory<byte> data, uint ssrc, ChannelState channel, SrtpSessionContext context = null)
+        internal IReadOnlyList<ReadOnlyMemory<byte>> ParseRTCPAndGenerateResponse(Memory<byte> data, uint ssrc, ChannelState channel, SrtpSessionContext context = null, RtcpReuse reuse = null)
         {
-            var reports = t_replies ??= new List<ReadOnlyMemory<byte>>();
+            reuse ??= _rtcpReuse;
+            var reports = reuse.Replies;
             reports.Clear();
-            byte[] replyBuffer = t_replyBuffer ??= new byte[2048];
+            byte[] replyBuffer = reuse.Buffer;
             int replyOffset = 0;
 
             // RTCP Packet
@@ -1525,7 +1516,7 @@ namespace SharpRTSPClient
                     // Use it to convert the RTP timestamp into the UTC time
 
                     // all of its 28 bytes, its packet count among them (RFC 3550 6.4.1)
-                    SenderReport senderReport = t_senderReport ??= new SenderReport();
+                    SenderReport senderReport = reuse.SenderReport;
                     if (!RTCPUtilities.TryReadSenderReport(span.Slice(packetIndex, rtcpPacketLength), senderReport))
                     {
                         _logger.LogWarning("Discarding truncated RTCP Sender Report of length {rtcpPacketLength}", rtcpPacketLength);
@@ -1563,7 +1554,7 @@ namespace SharpRTSPClient
                         else if (channel.ClaimReceiverReportSlot(ReceiverReportInterval))
                         {
                             Span<byte> reply = replyBuffer.AsSpan(replyOffset);
-                            int length = WriteRtcpReceiverReport(reply, ssrc, rtcpSsrc, channel);
+                            int length = WriteRtcpReceiverReport(reply, ssrc, rtcpSsrc, channel, reuse.ReceiverReport);
                             bool protectedOk = true;
                             if (context != null)
                             {

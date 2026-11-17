@@ -64,6 +64,15 @@ namespace SharpRTSPClient
     internal sealed class ClientTrack
     {
         /// <summary>
+        /// The track's own, filled again for each packet: of its RTP, of one receiving loop, and of its RTCP, of another; each
+        /// not at once with itself. Not of each thread: the loops go from one thread of the pool to another, and each new one
+        /// would make them again.
+        /// </summary>
+        public RtpReuse RtpReuse { get; } = new RtpReuse();
+
+        public RtcpReuse RtcpReuse { get; } = new RtcpReuse();
+
+        /// <summary>
         /// Where this track came in the description, which is the order it is set up in.
         /// </summary>
         public int Index { get; set; }
@@ -131,5 +140,25 @@ namespace SharpRTSPClient
         public EventHandler<RtspDataEventArgs> OnData { get; set; }
 
         public EventHandler<RtspDataEventArgs> OnControl { get; set; }
+    }
+
+    /// <summary>The arguments of a track's RTP, filled again for each packet and frame.</summary>
+    internal sealed class RtpReuse
+    {
+        public RawRtpDataEventArgs Raw;
+        public TrackRawRtpEventArgs TrackRaw;
+        public SimpleDataEventArgs Simple;
+        public TrackDataEventArgs TrackData;
+    }
+
+    /// <summary>The arguments, reports and replies of a track's RTCP, filled again for each packet.</summary>
+    internal sealed class RtcpReuse
+    {
+        public RawRtcpDataEventArgs Raw;
+        public TrackRawRtcpEventArgs TrackRaw;
+        public readonly SharpRTCP.SenderReport SenderReport = new SharpRTCP.SenderReport();
+        public readonly SharpRTCP.ReceiverReport ReceiverReport = new SharpRTCP.ReceiverReport();
+        public readonly System.Collections.Generic.List<ReadOnlyMemory<byte>> Replies = new System.Collections.Generic.List<ReadOnlyMemory<byte>>();
+        public readonly byte[] Buffer = new byte[2048];
     }
 }
