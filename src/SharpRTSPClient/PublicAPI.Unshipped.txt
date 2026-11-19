@@ -1,0 +1,4 @@
+SharpRTSPClient.RTSPClient.ProcessAudioRTP.get -> bool
+SharpRTSPClient.RTSPClient.ProcessAudioRTP.set -> void
+SharpRTSPClient.RTSPClient.ProcessVideoRTP.get -> bool
+SharpRTSPClient.RTSPClient.ProcessVideoRTP.set -> void

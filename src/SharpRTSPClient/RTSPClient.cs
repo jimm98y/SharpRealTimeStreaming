@@ -334,7 +334,28 @@ namespace SharpRTSPClient
         public TimeSpan ReceiverReportInterval { get; set; } = DEFAULT_RECEIVER_REPORT_INTERVAL;
         // ReceivedRawVideoRTCP and ReceivedRawAudioRTCP were here; ReceivedRawRTCP replaces them.
 
-        public bool ProcessRTP { get; set; } = true;
+        /// <summary>
+        /// Whether the RTP of a track is put together into frames, raised as <see cref="ReceivedData"/>.
+        /// Setting it sets <see cref="ProcessVideoRTP"/> and <see cref="ProcessAudioRTP"/> too; it alone is of the other tracks.
+        /// </summary>
+        public bool ProcessRTP
+        {
+            get => _processRTP;
+            set { _processRTP = value; ProcessVideoRTP = value; ProcessAudioRTP = value; }
+        }
+        private bool _processRTP = true;
+
+        /// <summary>
+        /// Whether the RTP of the video tracks is put together into frames. A client that forwards the video's RTP as it is,
+        /// <see cref="ReceivedRawRTP"/>, and decodes the audio's frames processes the audio alone: of the video, each frame
+        /// put together would be work for nothing.
+        /// </summary>
+        public bool ProcessVideoRTP { get; set; } = true;
+
+        /// <summary>
+        /// Whether the RTP of the audio tracks is put together into frames.
+        /// </summary>
+        public bool ProcessAudioRTP { get; set; } = true;
         // ReceivedRawVideoRTP and ReceivedRawAudioRTP were here; ReceivedRawRTP replaces them.
 
         public bool AutoPlay { get; set; } = true;
@@ -1352,7 +1373,7 @@ namespace SharpRTSPClient
                         (track.RtpReuse.TrackRaw ??= new TrackRawRtpEventArgs()).Set(track.Index, track.Kind, track.Codec, raw));
                 }
 
-                if (!ProcessRTP)
+                if (!(track.Kind == TrackKind.Video ? ProcessVideoRTP : track.Kind == TrackKind.Audio ? ProcessAudioRTP : _processRTP))
                 {
                     return;
                 }
