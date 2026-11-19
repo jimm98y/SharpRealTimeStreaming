@@ -209,7 +209,7 @@ stream source's `SharedSrtpKey`, so every member is handed the one key the group
 
 ### Limits and access control
 
-`MaxConnections` caps how many clients the server will hold at once (100 by default, `0` disables the limit). Connections that go quiet for longer than the 60 second RTSP timeout are dropped and their sockets released.
+`MaxConnections` caps how many clients the server will hold at once (100 by default, `0` disables the limit). Connections that go quiet for longer than the 60 second RTSP timeout are dropped and their sockets released. RTSPServerApp takes it from `RTSPServerApp:MaxConnections` of its `appsettings.json`.
 
 The server challenges clients with **Digest** access authentication by default. Basic is available for clients and hardware decoders that cannot do Digest, but it is off unless you ask for it:
 

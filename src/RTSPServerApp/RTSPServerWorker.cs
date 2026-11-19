@@ -251,6 +251,9 @@ internal class RTSPServerWorker : BackgroundService
 
         _server = new RTSPServer(port, ReadUsers(_configuration, "RTSPServerApp:Users"), _loggerFactory);
         _server.AuthenticationScheme = ReadAuthenticationScheme(_configuration["RTSPServerApp:AllowBasicAuthentication"]);
+        // of none set, the library's default (RTSPServer.DEFAULT_MAX_CONNECTIONS, 100); of 0, no limit
+        if (int.TryParse(_configuration["RTSPServerApp:MaxConnections"], out int maxConnections))
+            _server.MaxConnections = maxConnections;
         List<MediaFileReader> mediaFileReaders = new List<MediaFileReader>();
 
 
