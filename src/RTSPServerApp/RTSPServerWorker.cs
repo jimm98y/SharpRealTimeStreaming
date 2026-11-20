@@ -175,8 +175,6 @@ internal class RTSPServerWorker : BackgroundService
 
     private List<MediaFileReader> _mediaFileStreamReaders = new List<MediaFileReader>();
 
-    private readonly object _syncRoot = new object();
-
     private System.Threading.Timer _ticker;
 
     /// <summary>
@@ -362,7 +360,7 @@ internal class RTSPServerWorker : BackgroundService
                         //  the last one has returned, and a send held up by a slow client lets the
                         //  next wake-up read later frames and send them first. One wake-up of the
                         //  track at a time keeps the frames in the order they were read, without
-                        //  holding up the other tracks the way sending under _syncRoot would - and
+                        //  holding up the other track the way sending under the reader's lock would - and
                         //  one still sending, the next skipped, not waiting on a thread of the pool.
                         object videoFeedGate = new object();
 
@@ -374,7 +372,7 @@ internal class RTSPServerWorker : BackgroundService
                             {
                                 var pending = new List<(uint Pts, List<ReadOnlyMemory<byte>> Units)>();
 
-                                lock (_syncRoot)
+                                lock (mediaFileReader)
                                 {
                                     // Send what the clock says is due, not one sample per wake-up. See
                                     // MediaFileReader.Clock for why the wake-up cannot be trusted to be
@@ -442,10 +440,10 @@ internal class RTSPServerWorker : BackgroundService
                                         // Held back until the lock is off. This hands the sample to the
                                         //  server, which writes it to the client, and a client slow to
                                         //  read blocks the write - so doing it under the lock stops
-                                        //  every other track dead. One lock covers both tracks of every
-                                        //  stream this worker serves, so that is a wide blast radius
-                                        //  for a write that has nothing to do with the reader the lock
-                                        //  is there to guard.
+                                        //  the stream's other track dead, for a write that has nothing to
+                                        //  do with the reader the lock is there to guard. The lock is of
+                                        //  each stream: its two tracks share a reader, other streams none -
+                                        //  of one lock of all, 1000 streams' ticks queued at once queued on it.
                                         // Copied, because what the reader hands back is a view of a buffer
                                         //  it reads the next sample into.
                                         pending.Add(((uint)unchecked(mediaFileReader.VideoRtpBaseTime + videoPts),
@@ -503,7 +501,7 @@ internal class RTSPServerWorker : BackgroundService
                             {
                                 var pending = new List<(uint Pts, List<ReadOnlyMemory<byte>> Units)>();
 
-                                lock (_syncRoot)
+                                lock (mediaFileReader)
                                 {
                                     // The same clock as the picture, which is the whole point - see
                                     // MediaFileReader.Clock.
