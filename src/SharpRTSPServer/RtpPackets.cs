@@ -68,14 +68,12 @@ namespace SharpRTSPServer
         private const int MOST_BUFFERS_OF_A_SIZE = 1024;
 
         /// <remarks>
-        /// A plain stack under a lock, not a concurrent bag. A bag keeps a list per thread and is at
-        /// its best when the same thread puts things in and takes them out; here one thread always
-        /// puts and another always takes, so every take was a steal from another thread's list -
-        /// which locks anyway, and allocates on the way.
+        /// Slots taken and filled by Interlocked, not a concurrent bag nor a stack under a lock. A bag keeps a list per
+        /// thread and is at its best when the same thread puts things in and takes them out; here one thread always puts
+        /// and another always takes, so every take was a steal from another thread's list - which locks anyway, and
+        /// allocates on the way. And of the stack's lock, every frame of 1000 streams waited on the others'.
         /// </remarks>
-        private static readonly Stack<RtpPackets> Spare = new Stack<RtpPackets>();
-
-        private static readonly object SpareLock = new object();
+        private static readonly RtpPackets[] Spare = new RtpPackets[MOST_SPARE];
 
         /// <summary>
         /// How many are kept for reuse. A burst must not leave a pool the size of the burst behind
@@ -186,11 +184,13 @@ namespace SharpRTSPServer
         /// </summary>
         public static RtpPackets Take()
         {
-            lock (SpareLock)
+            // from a slot of this thread's on, so threads taking at once take of different slots
+            for (int i = 0, at = Environment.CurrentManagedThreadId; i < Spare.Length; i++, at++)
             {
-                if (Spare.Count > 0)
+                ref RtpPackets slot = ref Spare[at % Spare.Length];
+                RtpPackets spare;
+                if (Volatile.Read(ref slot) != null && (spare = Interlocked.Exchange(ref slot, null)) != null)
                 {
-                    RtpPackets spare = Spare.Pop();
                     spare._released = 0;
                     spare.IsKeyFrame = true;
                     return spare;
@@ -223,12 +223,11 @@ namespace SharpRTSPServer
             _rented.Clear();
             Items.Clear();
 
-            lock (SpareLock)
+            for (int i = 0, at = Environment.CurrentManagedThreadId; i < Spare.Length; i++, at++)
             {
-                if (Spare.Count < MOST_SPARE)
-                {
-                    Spare.Push(this);
-                }
+                ref RtpPackets slot = ref Spare[at % Spare.Length];
+                if (Volatile.Read(ref slot) == null && Interlocked.CompareExchange(ref slot, this, null) == null)
+                    return;
             }
         }
     }
