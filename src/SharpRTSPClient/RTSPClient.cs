@@ -860,7 +860,9 @@ namespace SharpRTSPClient
                 // with auto reconnect, makes it again - see Resume and ConnectAgain
                 _rtspClient = new RtspListener(_rtspSocket, _loggerFactory.CreateLogger<RtspListener>())
                 {
-                    AutoReconnect = false
+                    AutoReconnect = false,
+                    // the packets handled of the receiving thread, each of a using: none kept after its event
+                    ReuseDataMessages = true,
                 };
             }
             catch (IOException ex) when (IsSocketTimeout(ex))
