@@ -54,6 +54,10 @@ internal class RTSPServerWorker : BackgroundService
         public Timer VideoTimer { get; set; }
         public int AudioRtpBaseTime { get; set; }
         public Timer AudioTimer { get; set; }
+
+        // what each wake-up of the worker's one timer runs of the tracks, null once stopped
+        public Action VideoTick { get; set; }
+        public Action AudioTick { get; set; }
         public IsoStream IsoStream { get; set; }
 
         /// <summary>
@@ -172,6 +176,8 @@ internal class RTSPServerWorker : BackgroundService
     private List<MediaFileReader> _mediaFileStreamReaders = new List<MediaFileReader>();
 
     private readonly object _syncRoot = new object();
+
+    private System.Threading.Timer _ticker;
 
     /// <summary>
     /// Basic sends the password in a reversible form, so it stays off unless the config asks for it.
@@ -352,17 +358,19 @@ internal class RTSPServerWorker : BackgroundService
 
                         double videoSampleSeconds = inputTrack.DefaultSampleDuration / (double)inputTrack.Timescale;
 
-                        // The timer raises Elapsed on the thread pool every interval, whether or not
+                        // The tick is queued to the thread pool every interval, whether or not
                         //  the last one has returned, and a send held up by a slow client lets the
                         //  next wake-up read later frames and send them first. One wake-up of the
                         //  track at a time keeps the frames in the order they were read, without
-                        //  holding up the other tracks the way sending under _syncRoot would.
+                        //  holding up the other tracks the way sending under _syncRoot would - and
+                        //  one still sending, the next skipped, not waiting on a thread of the pool.
                         object videoFeedGate = new object();
 
-                        mediaFileReader.VideoTimer = new Timer(PACING_WAKE_MS);
-                        mediaFileReader.VideoTimer.Elapsed += (s, e) =>
+                        mediaFileReader.VideoTick = () =>
                         {
-                            lock (videoFeedGate)
+                            if (!Monitor.TryEnter(videoFeedGate))
+                                return;
+                            try
                             {
                                 var pending = new List<(uint Pts, List<ReadOnlyMemory<byte>> Units)>();
 
@@ -391,7 +399,7 @@ internal class RTSPServerWorker : BackgroundService
                                             }
 
                                             // end streaming
-                                            mediaFileReader.VideoTimer.Stop();
+                                            mediaFileReader.VideoTick = null;
                                             _server.RemoveStreamSource(streamSource);
                                             break;
                                         }
@@ -450,6 +458,10 @@ internal class RTSPServerWorker : BackgroundService
                                     rtspVideoTrack.FeedInRawSamples(pts, units);
                                 }
                             }
+                            finally
+                            {
+                                Monitor.Exit(videoFeedGate);
+                            }
                         };
 
                         break;
@@ -483,10 +495,11 @@ internal class RTSPServerWorker : BackgroundService
                         // As the picture: one wake-up at a time, so frames go out in the order read.
                         object audioFeedGate = new object();
 
-                        mediaFileReader.AudioTimer = new Timer(PACING_WAKE_MS);
-                        mediaFileReader.AudioTimer.Elapsed += (s, e) =>
+                        mediaFileReader.AudioTick = () =>
                         {
-                            lock (audioFeedGate)
+                            if (!Monitor.TryEnter(audioFeedGate))
+                                return;
+                            try
                             {
                                 var pending = new List<(uint Pts, List<ReadOnlyMemory<byte>> Units)>();
 
@@ -511,7 +524,7 @@ internal class RTSPServerWorker : BackgroundService
                                             }
 
                                             // end streaming
-                                            mediaFileReader.AudioTimer.Stop();
+                                            mediaFileReader.AudioTick = null;
                                             _server.RemoveStreamSource(streamSource);
                                             break;
                                         }
@@ -556,6 +569,10 @@ internal class RTSPServerWorker : BackgroundService
                                 {
                                     rtspAudioTrack.FeedInRawSamples(pts, units);
                                 }
+                            }
+                            finally
+                            {
+                                Monitor.Exit(audioFeedGate);
                             }
                         };
 
@@ -612,6 +629,19 @@ internal class RTSPServerWorker : BackgroundService
 
             _logger.LogInformation($"RTSP URL is rtsp://{hostName}:{port}/{mediaFileReader.StreamID} - authenticate as one of the configured users");
         }
+
+        // One timer of all the streams, each track's tick queued to the pool of it: of a timer of each track, the 2000 of
+        //  1000 streams fought over the timer queue's lock, a fifth of the server's CPU
+        _ticker = new System.Threading.Timer(_ =>
+        {
+            foreach (var reader in mediaFileReaders)
+            {
+                if (reader.VideoTick is Action video)
+                    ThreadPool.UnsafeQueueUserWorkItem(static tick => tick(), video, false);
+                if (reader.AudioTick is Action audio)
+                    ThreadPool.UnsafeQueueUserWorkItem(static tick => tick(), audio, false);
+            }
+        }, null, 0, (int)PACING_WAKE_MS);
 
         return Task.CompletedTask;
     }
@@ -743,6 +773,7 @@ internal class RTSPServerWorker : BackgroundService
     public override void Dispose()
     {
         base.Dispose();
+        _ticker?.Dispose();
 
         for (int i = 0; i < _mediaFileStreamReaders.Count; i++)
         {
