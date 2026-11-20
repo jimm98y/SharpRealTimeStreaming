@@ -3226,19 +3226,21 @@ namespace SharpRTSPClient
             // a timer thread: anything escaping here would take the process down
             try
             {
-                // Checked and torn down under the lock a teardown takes, and only while the session
-                // it watches is the current one: one torn down meanwhile - by Stop(), or by the
-                // listener on an error, on threads of their own - is neither torn down again nor
-                // reported, and a check still running from before is not either.
-                StoppedReason? reason;
+                // Torn down under the lock a teardown takes, and only while the session it watches is
+                // the current one: one torn down meanwhile - by Stop(), or by the listener on an error,
+                // on threads of their own - is not torn down again, and a check still running from
+                // before is not either. Checked without it: of nothing timed out, as of nearly every
+                // check, the lock is not taken at all.
+                if (Volatile.Read(ref _watchdogSession) != session)
+                    return;
+                StoppedReason? reason = CheckTimeouts();
+                if (reason == null)
+                    return;
+
                 bool reconnect, resume;
                 lock (_teardownLock)
                 {
                     if (_watchdogSession != session)
-                        return;
-
-                    reason = CheckTimeouts();
-                    if (reason == null)
                         return;
 
                     // Only a session that got as far as playing: a server that drops the connection
