@@ -1599,6 +1599,11 @@ namespace SharpRTSPServer
             {
                 HandleRtspRequest(listener, sender, e);
             }
+            catch (IOException ex)
+            {
+                // the client is gone: nobody to answer, and of many leaving at once not an error each
+                _logger.LogDebug(ex, "The client {remoteEndPoint} left before its RTSP request was answered", listener.RemoteEndPoint);
+            }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error handling an RTSP request from {remoteEndPoint}", listener.RemoteEndPoint);
