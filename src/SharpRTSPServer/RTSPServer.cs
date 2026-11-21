@@ -3399,6 +3399,9 @@ namespace SharpRTSPServer
             // The connection's, not this call's, and empty on the way in because the last frame gave
             // everything back before letting the lock go.
             List<byte[]> rented = connection.RentedForSend;
+            // of TCP, the frame's packets written in one after they are made
+            var tcp = stream.RtpChannel as RtpTcpTransport;
+            List<Memory<byte>> ready = connection.ReadyForSend;
 
             try
             {
@@ -3470,7 +3473,10 @@ namespace SharpRTSPServer
                     var channel = stream.RtpChannel;
                     if (channel != null)
                     {
-                        channel.WriteToDataPort(rtpPacket.Span);
+                        if (tcp != null)
+                            ready.Add(rtpPacket);
+                        else
+                            channel.WriteToDataPort(rtpPacket.Span);
                         writtenBytes += (uint)rtpPacket.Span.Length;
                         writtenPackets++;
                     }
@@ -3487,6 +3493,19 @@ namespace SharpRTSPServer
                 }
             }
 
+            if (!writeError && ready.Count > 0)
+            {
+                try
+                {
+                    tcp.WriteToDataPort(ready);
+                }
+                catch (Exception e)
+                {
+                    writeError = true;
+                    writeException = e;
+                }
+            }
+
             if (writeError)
             {
                 ReportWriteFailure(connection, writeException, "RTP");
@@ -3500,6 +3519,7 @@ namespace SharpRTSPServer
             }
             finally
             {
+                ready.Clear();
                 for (int i = 0; i < rented.Count; i++)
                 {
                     ArrayPool<byte>.Shared.Return(rented[i]);

@@ -88,6 +88,10 @@ namespace SharpRTSPServer
         /// </remarks>
         internal List<byte[]> RentedForSend { get; } = new List<byte[]>();
 
+        // a frame's packets of TCP, ready to be written in one, of the send lock: of a write of each, half of what a server
+        //  of 1000 clients did
+        internal List<Memory<byte>> ReadyForSend { get; } = new List<Memory<byte>>();
+
         /// <summary>
         /// The transport the listener sits on. Kept so the server can notice that a client has gone
         /// away without tearing its session down, and release its RTP ports straight away.
