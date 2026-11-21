@@ -444,8 +444,7 @@ internal class RTSPServerWorker : BackgroundService
                                         //  1000 streams' ticks queued at once queued on it. Of the copy of each
                                         //  sample, 70% of what the server allocated.
                                         videoFeed.Clear();
-                                        foreach (ArraySegment<byte> unit in units)
-                                            videoFeed.Add(unit);
+                                        AddUnits(videoFeed, units);
                                         rtspVideoTrack.FeedInRawSamples((uint)unchecked(mediaFileReader.VideoRtpBaseTime + videoPts), videoFeed);
                                     }
                                 }
@@ -551,8 +550,7 @@ internal class RTSPServerWorker : BackgroundService
                                         long audioPts = (long)((mediaFileReader.LoopOffsetSeconds + audioSeconds) * audioRtpClock);
                                         // See the picture track: fed under the lock, of the reader's buffer.
                                         audioFeed.Clear();
-                                        foreach (ArraySegment<byte> unit in units)
-                                            audioFeed.Add(unit);
+                                        AddUnits(audioFeed, units);
                                         rtspAudioTrack.FeedInRawSamples((uint)unchecked(mediaFileReader.AudioRtpBaseTime + audioPts), audioFeed);
                                     }
                                 }
@@ -618,19 +616,41 @@ internal class RTSPServerWorker : BackgroundService
         }
 
         // One timer of all the streams, each track's tick queued to the pool of it: of a timer of each track, the 2000 of
-        //  1000 streams fought over the timer queue's lock, a fifth of the server's CPU
+        //  1000 streams fought over the timer queue's lock, a fifth of the server's CPU. Of a work item of each track's,
+        //  kept: of the pool's of a delegate and its state, an object of each tick queued, 2000 of each wake-up.
+        var ticks = mediaFileReaders.Select(reader => (Reader: reader, Video: new TickWork(reader, video: true), Audio: new TickWork(reader, video: false))).ToArray();
         _ticker = new System.Threading.Timer(_ =>
         {
-            foreach (var reader in mediaFileReaders)
+            foreach (var (reader, video, audio) in ticks)
             {
-                if (reader.VideoTick is Action video)
-                    ThreadPool.UnsafeQueueUserWorkItem(static tick => tick(), video, false);
-                if (reader.AudioTick is Action audio)
-                    ThreadPool.UnsafeQueueUserWorkItem(static tick => tick(), audio, false);
+                if (reader.VideoTick != null)
+                    ThreadPool.UnsafeQueueUserWorkItem(video, preferLocal: false);
+                if (reader.AudioTick != null)
+                    ThreadPool.UnsafeQueueUserWorkItem(audio, preferLocal: false);
             }
         }, null, 0, (int)PACING_WAKE_MS);
 
         return Task.CompletedTask;
+    }
+
+    // the units of a sample to its feed: of a list, by index - foreach of an IEnumerable boxed the list's enumerator, of
+    //  each sample of each track
+    private static void AddUnits(List<ReadOnlyMemory<byte>> feed, IEnumerable<ArraySegment<byte>> units)
+    {
+        if (units is IReadOnlyList<ArraySegment<byte>> list)
+        {
+            for (int i = 0; i < list.Count; i++)
+                feed.Add(list[i]);
+            return;
+        }
+        foreach (ArraySegment<byte> unit in units)
+            feed.Add(unit);
+    }
+
+    // a track's tick, of the pool: its tick as it is now, of none once its stream has ended
+    private sealed class TickWork(MediaFileReader reader, bool video) : IThreadPoolWorkItem
+    {
+        public void Execute() => (video ? reader.VideoTick : reader.AudioTick)?.Invoke();
     }
 
     // Returns the media (mdhd) timescale for the given track. This is the clock the sample PTS/DTS values are
