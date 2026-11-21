@@ -1370,6 +1370,26 @@ namespace SharpRTSPServer
 
             candidate.Outbound.NeedsKeyFrame = () => OnKeyFrameNeeded(candidate);
             candidate.Outbound.IsReady = () => candidate.Play;
+#if NET
+            // of TCP, its socket asked before each frame written; of TLS and HTTP, as before - of the exact type, as the
+            //  GetStream of TLS's makes a stream of each and negotiates it
+            Socket socket = rtspSocket.GetType() == typeof(RtspTcpTransport) ? (rtspSocket.GetStream() as NetworkStream)?.Socket : null;
+            if (socket != null)
+            {
+                candidate.Outbound.CanWrite = () =>
+                {
+                    try
+                    {
+                        return socket.Poll(0, SelectMode.SelectWrite);
+                    }
+                    catch (Exception)
+                    {
+                        // closed: the write finds it so, as it did
+                        return true;
+                    }
+                };
+            }
+#endif
 
             // Add the RtspListener to the RTSPConnections List
             bool accepted;

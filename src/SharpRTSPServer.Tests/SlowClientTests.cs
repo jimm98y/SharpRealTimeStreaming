@@ -118,10 +118,16 @@ namespace SharpRTSPServer.Tests
         }
 
         [TestMethod]
-        public void AClientThatStopsReadingDoesNotBlockAnotherStreamsMedia()
+        [DataRow(RtpWriterPool.DEFAULT_MAX_THREADS)]
+#if NET
+        // of one writer, of a send blocked on the client that stopped reading, nobody else was written to (of .NET, of
+        //  its socket's NetworkStream.Socket)
+        [DataRow(1)]
+#endif
+        public void AClientThatStopsReadingDoesNotBlockAnotherStreamsMedia(int writers)
         {
             int port = TestPorts.FindFree();
-            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
+            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password")) { MaxWriterThreads = writers };
 
             var stalledTrack = new H264Track(Sps, Pps);
             var livelyTrack = new H264Track(Sps, Pps);

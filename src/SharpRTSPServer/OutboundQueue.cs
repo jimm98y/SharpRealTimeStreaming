@@ -245,6 +245,16 @@ namespace SharpRTSPServer
         internal Func<bool> IsReady { get; set; }
 
         /// <summary>
+        /// Whether the client's socket takes more now; of false, its turn given back and asked again in
+        /// <see cref="RETRY_MS"/> - a writer is not held in a send until the client reads, as of 64 writers
+        /// blocked so of clients not reading, no client was written to and every stream dropped its frames.
+        /// </summary>
+        internal Func<bool> CanWrite { get; set; }
+
+        private const int RETRY_MS = 5;
+        private Timer _retry;
+
+        /// <summary>
         /// The last picture this stream produced that a decoder could start on, if one is being kept.
         /// </summary>
         /// <remarks>
@@ -857,6 +867,14 @@ namespace SharpRTSPServer
             {
                 QueuedFrame frame;
 
+                // of each frame, as a frame of a socket with room is taken whole: still its turn, so no other writer - the
+                //  timer of its own, made once
+                if (CanWrite != null && !_stopping && !CanWrite())
+                {
+                    (_retry ??= new Timer(s => ((OutboundQueue)s)._pool.Schedule((OutboundQueue)s), this, Timeout.Infinite, Timeout.Infinite)).Change(RETRY_MS, Timeout.Infinite);
+                    return;
+                }
+
                 lock (_gate)
                 {
                     if (_stopping || _frames.Count == 0)
@@ -916,6 +934,8 @@ namespace SharpRTSPServer
 
                 _queuedBytes = 0;
             }
+
+            _retry?.Dispose();
 
             // A pool thread may be inside a write to a client that has stopped reading, and that
             // only ends when the socket is closed - which the caller is on its way to doing. It is
