@@ -364,6 +364,9 @@ internal class RTSPServerWorker : BackgroundService
                         //  one still sending, the next skipped, not waiting on a thread of the pool.
                         object videoFeedGate = new object();
                         var videoFeed = new List<ReadOnlyMemory<byte>>();
+                        // the track's samples read into one, its data valid until the next is read - fed before then:
+                        //  of a sample read of each, a MediaSample of each, half of what the server allocated
+                        var videoSample = new MediaSample();
 
                         mediaFileReader.VideoTick = () =>
                         {
@@ -382,7 +385,7 @@ internal class RTSPServerWorker : BackgroundService
                                         if (mediaFileReader.VideoSentThroughSeconds > due)
                                             break;
 
-                                        var sample = inputReader.ReadSample(inputTrack.TrackID);
+                                        var sample = inputReader.ReadSample(inputTrack.TrackID, videoSample) ? videoSample : null;
 
                                         if (sample == null)
                                         {
@@ -486,6 +489,7 @@ internal class RTSPServerWorker : BackgroundService
                         // As the picture: one wake-up at a time, so frames go out in the order read.
                         object audioFeedGate = new object();
                         var audioFeed = new List<ReadOnlyMemory<byte>>();
+                        var audioSample = new MediaSample();
 
                         mediaFileReader.AudioTick = () =>
                         {
@@ -503,7 +507,7 @@ internal class RTSPServerWorker : BackgroundService
                                         if (mediaFileReader.AudioSentThroughSeconds > due)
                                             break;
 
-                                        var sample = inputReader.ReadSample(inputTrack.TrackID);
+                                        var sample = inputReader.ReadSample(inputTrack.TrackID, audioSample) ? audioSample : null;
 
                                         if (sample == null)
                                         {
