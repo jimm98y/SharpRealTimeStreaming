@@ -189,5 +189,29 @@ namespace SharpRTSPServer.Tests
                 feeder.Wait(TimeSpan.FromSeconds(10));
             }
         }
+
+        [TestMethod]
+        public void ConnectionsChangedIsRaisedAsAClientComesAndGoes()
+        {
+            int port = TestPorts.FindFree();
+            using var server = new RTSPServer(port, new InMemoryUserRepository("admin", "password"));
+            var source = new RTSPStreamSource("stream1", new H264Track(Sps, Pps), null);
+            int changes = 0;
+            source.ConnectionsChanged += (s, e) => Interlocked.Increment(ref changes);
+            server.AddStreamSource(source);
+            server.StartListen();
+
+            string uri = "rtsp://127.0.0.1:" + port + "/stream1";
+            using var client = new RtspTestClient(port, "admin", "password");
+            client.Send("DESCRIBE", uri, "Accept: application/sdp");
+            var setup = client.Send("SETUP", uri + "/trackID=0", "Transport: RTP/AVP/TCP;unicast;interleaved=0-1");
+            int joined = Volatile.Read(ref changes);
+            Assert.IsTrue(joined >= 1, "not raised as the client set up");
+            Assert.AreEqual(1, source.ConnectionList.Count);
+
+            client.Send("TEARDOWN", uri, "Session: " + setup.Session);
+            Assert.IsTrue(SpinWait.SpinUntil(() => Volatile.Read(ref changes) > joined, 5000), "not raised as the client left");
+            Assert.AreEqual(0, source.ConnectionList.Count);
+        }
     }
 }

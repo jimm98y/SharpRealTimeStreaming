@@ -716,19 +716,45 @@ internal class RTSPServerWorker : BackgroundService
         //  1000 streams fought over the timer queue's lock, a fifth of the server's CPU. Of a work item of each track's,
         //  kept: of the pool's of a delegate and its state, an object of each tick queued, 2000 of each wake-up.
         var ticks = mediaFileReaders.Select(reader => (Reader: reader, Video: new TickWork(reader, video: true), Audio: new TickWork(reader, video: false))).ToArray();
+
+        // Of the streams, those a client came to, ticked until nobody watches and their tracks are idle again; of the rest,
+        //  nothing - of each wake the ticker looked at all 1000. Each idle to begin with, so its first client finds it where
+        //  the clock plays now.
+        var active = new List<(MediaFileReader Reader, TickWork Video, TickWork Audio)>();
+        foreach (var tick in ticks)
+        {
+            tick.Reader.VideoIdle = tick.Reader.AudioIdle = true;
+            if (tick.Reader.Source != null)
+            {
+                tick.Reader.Source.ConnectionsChanged += (s, e) =>
+                {
+                    lock (active)
+                    {
+                        if (!active.Contains(tick))
+                            active.Add(tick);
+                    }
+                };
+            }
+        }
+
         _ticker = new System.Threading.Timer(_ =>
         {
-            foreach (var (reader, video, audio) in ticks)
+            lock (active)
             {
-                // of nobody watching and its tracks idle already, nothing queued: of 1000 streams and no client, of the
-                //  ticks of each that found nobody, 200,000 work items a second of the pool, a third of a core
-                if (reader.Source?.ConnectionList.Count == 0
-                    && (reader.VideoTick == null || reader.VideoIdle) && (reader.AudioTick == null || reader.AudioIdle))
-                    continue;
-                if (reader.VideoTick != null)
-                    ThreadPool.UnsafeQueueUserWorkItem(video, preferLocal: false);
-                if (reader.AudioTick != null)
-                    ThreadPool.UnsafeQueueUserWorkItem(audio, preferLocal: false);
+                for (int i = active.Count - 1; i >= 0; i--)
+                {
+                    var (reader, video, audio) = active[i];
+                    if (reader.Source.ConnectionList.Count == 0
+                        && (reader.VideoTick == null || reader.VideoIdle) && (reader.AudioTick == null || reader.AudioIdle))
+                    {
+                        active.RemoveAt(i);
+                        continue;
+                    }
+                    if (reader.VideoTick != null)
+                        ThreadPool.UnsafeQueueUserWorkItem(video, preferLocal: false);
+                    if (reader.AudioTick != null)
+                        ThreadPool.UnsafeQueueUserWorkItem(audio, preferLocal: false);
+                }
             }
         }, null, 0, (int)PACING_WAKE_MS);
 

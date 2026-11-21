@@ -114,7 +114,22 @@ namespace SharpRTSPServer
 
         // ConnectionList as of its last change, of the frames to read without the server's lock: a new array of each change,
         //  under that lock, rather than the list copied under it of every frame
-        internal volatile RTSPConnection[] Connections = Array.Empty<RTSPConnection>();
+        private volatile RTSPConnection[] _connections = Array.Empty<RTSPConnection>();
+        internal RTSPConnection[] Connections
+        {
+            get => _connections;
+            set
+            {
+                _connections = value;
+                ConnectionsChanged?.Invoke(this, EventArgs.Empty);
+            }
+        }
+
+        /// <summary>
+        /// Raised when a client is added to <see cref="ConnectionList"/> or leaves it - of a producer that feeds the stream
+        /// only while somebody watches. Raised under the server's lock: a handler only notes it, and waits for nothing.
+        /// </summary>
+        public event EventHandler ConnectionsChanged;
 
         /// <summary>
         /// Whether this stream has ever produced a picture a decoder could start on.
