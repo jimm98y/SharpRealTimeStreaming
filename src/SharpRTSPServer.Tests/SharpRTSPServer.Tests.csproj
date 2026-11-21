@@ -1,7 +1,9 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFrameworks>net472;net10.0</TargetFrameworks>
+    <TargetFrameworks>net472;net10.0;net11.0</TargetFrameworks>
+    <!-- one framework at a time: the tests of the server listen on its ports and time its clients -->
+    <TestTfmsInParallel>false</TestTfmsInParallel>
     <ImplicitUsings>disable</ImplicitUsings>
 	<LangVersion>latest</LangVersion>
     <Nullable>disable</Nullable>

@@ -18,13 +18,6 @@
   <Suppression>
     <DiagnosticId>CP0006</DiagnosticId>
     <Target>P:SharpRTSPClient.IStreamConfigurationData.Fmtp</Target>
-    <Left>lib/net8.0/SharpRTSPClient.dll</Left>
-    <Right>lib/net8.0/SharpRTSPClient.dll</Right>
-    <IsBaselineSuppression>true</IsBaselineSuppression>
-  </Suppression>
-  <Suppression>
-    <DiagnosticId>CP0006</DiagnosticId>
-    <Target>P:SharpRTSPClient.IStreamConfigurationData.Fmtp</Target>
     <Left>lib/netstandard2.0/SharpRTSPClient.dll</Left>
     <Right>lib/netstandard2.0/SharpRTSPClient.dll</Right>
     <IsBaselineSuppression>true</IsBaselineSuppression>

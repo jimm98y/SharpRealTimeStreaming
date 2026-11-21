@@ -1,7 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-	  <TargetFrameworks>netstandard2.0;net472;net8.0;net10.0</TargetFrameworks>
+	  <TargetFrameworks>netstandard2.0;net472;net10.0;net11.0</TargetFrameworks>
 	  <LangVersion>latest</LangVersion>
   </PropertyGroup>
 
@@ -41,5 +41,10 @@
 		<EnablePackageValidation>true</EnablePackageValidation>
 		<PackageValidationBaselineVersion>0.8.0</PackageValidationBaselineVersion>
 	</PropertyGroup>
+
+  <ItemGroup>
+    <!-- net8.0 is no longer a target: of the last release's, its apps have netstandard2.0's -->
+    <PackageValidationBaselineFrameworkToIgnore Include="net8.0" />
+  </ItemGroup>
 
 </Project>
