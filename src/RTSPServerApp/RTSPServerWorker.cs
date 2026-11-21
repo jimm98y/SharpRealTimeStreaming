@@ -101,6 +101,22 @@ internal class RTSPServerWorker : BackgroundService
         /// </remarks>
         public bool VideoRewinding { get; set; }
 
+        /// <summary>
+        /// Of nobody watching, the track neither read nor fed while its clock runs on: of a client again, it is moved
+        /// to where the clock says it plays now (<see cref="RTSPServerWorker"/>'s ResumeAtClock).
+        /// </summary>
+        public bool VideoIdle { get; set; }
+        public bool AudioIdle { get; set; }
+
+        /// <summary>How long once round the file is, in seconds, of its tracks' sample timings; 0 until a track resumes.</summary>
+        public double DurationSeconds { get; set; }
+
+        /// <summary>
+        /// Of the picture resumed at the keyframe before the clock, the index of the one after: once that keyframe is fed,
+        /// as the picture a client joining has at once, the track is read on at this one, at its time - -1 of none.
+        /// </summary>
+        public int VideoNextKeyFrame { get; set; } = -1;
+
         public bool AudioRewinding { get; set; }
 
         /// <summary>
@@ -369,6 +385,8 @@ internal class RTSPServerWorker : BackgroundService
                         var videoSample = new MediaSample();
                         // the sample's units parsed into the track's list: of an enumerable of each, an iterator of each sample
                         var videoSampleUnits = new List<ArraySegment<byte>>();
+                        // of the track's samples, their times: of the first resume, and kept
+                        SampleTiming[] videoTimings = null;
 
                         mediaFileReader.VideoTick = () =>
                         {
@@ -382,6 +400,21 @@ internal class RTSPServerWorker : BackgroundService
                                     return;
                                 try
                                 {
+                                    // of nobody watching, nothing read: of 1000 streams configured and no client, the
+                                    //  server read and fed them all, a core and a half
+                                    if (streamSource.ConnectionList.Count == 0)
+                                    {
+                                        mediaFileReader.VideoIdle = true;
+                                        return;
+                                    }
+                                    if (mediaFileReader.VideoIdle)
+                                    {
+                                        mediaFileReader.VideoIdle = false;
+                                        mediaFileReader.VideoRewinding = false;
+                                        videoTimings ??= inputReader.GetSampleTimings(inputTrack.TrackID);
+                                        mediaFileReader.VideoSentThroughSeconds = ResumeAtClock(mediaFileReader, inputReader, inputTrack.TrackID, videoTimings, sourceVideoTimescale, keyFrame: true);
+                                    }
+
                                     // Send what the clock says is due, not one sample per wake-up. See
                                     // MediaFileReader.Clock for why the wake-up cannot be trusted to be
                                     // the sample duration.
@@ -457,6 +490,25 @@ internal class RTSPServerWorker : BackgroundService
                                         videoFeed.Clear();
                                         AddUnits(videoFeed, units);
                                         rtspVideoTrack.FeedInRawSamples((uint)unchecked(mediaFileReader.VideoRtpBaseTime + videoPts), videoFeed);
+
+                                        // the keyframe before the clock sent, as the picture a client joining has at once:
+                                        //  the pictures after it skipped, the next read the next keyframe, at its time
+                                        if (mediaFileReader.VideoNextKeyFrame >= 0)
+                                        {
+                                            int next = mediaFileReader.VideoNextKeyFrame;
+                                            mediaFileReader.VideoNextKeyFrame = -1;
+                                            inputReader.SeekSample(inputTrack.TrackID, (uint)next);
+                                            if (next < videoTimings.Length)
+                                            {
+                                                mediaFileReader.VideoSentThroughSeconds = mediaFileReader.LoopOffsetSeconds + videoTimings[next].DTS / (double)sourceVideoTimescale;
+                                            }
+                                            else
+                                            {
+                                                // of none after it, the first of the next time round: the end waited for
+                                                mediaFileReader.VideoSentThroughSeconds = mediaFileReader.LoopOffsetSeconds + mediaFileReader.DurationSeconds;
+                                                mediaFileReader.FurthestSeconds = Math.Max(mediaFileReader.FurthestSeconds, mediaFileReader.DurationSeconds);
+                                            }
+                                        }
                                     }
                                 }
                                 finally
@@ -503,6 +555,7 @@ internal class RTSPServerWorker : BackgroundService
                         var audioFeed = new List<ReadOnlyMemory<byte>>();
                         var audioSample = new MediaSample();
                         var audioSampleUnits = new List<ArraySegment<byte>>();
+                        SampleTiming[] audioTimings = null;
 
                         mediaFileReader.AudioTick = () =>
                         {
@@ -516,6 +569,20 @@ internal class RTSPServerWorker : BackgroundService
                                     return;
                                 try
                                 {
+                                    // as the picture: of nobody watching, nothing read
+                                    if (streamSource.ConnectionList.Count == 0)
+                                    {
+                                        mediaFileReader.AudioIdle = true;
+                                        return;
+                                    }
+                                    if (mediaFileReader.AudioIdle)
+                                    {
+                                        mediaFileReader.AudioIdle = false;
+                                        mediaFileReader.AudioRewinding = false;
+                                        audioTimings ??= inputReader.GetSampleTimings(inputTrack.TrackID);
+                                        mediaFileReader.AudioSentThroughSeconds = ResumeAtClock(mediaFileReader, inputReader, inputTrack.TrackID, audioTimings, sourceAudioTimescale, keyFrame: false);
+                                    }
+
                                     // The same clock as the picture, which is the whole point - see
                                     // MediaFileReader.Clock.
                                     for (int sent = 0; sent < PACING_MAX_PER_WAKE; sent++)
@@ -768,6 +835,51 @@ internal class RTSPServerWorker : BackgroundService
     /// </para>
     /// </remarks>
     private const int PACING_MAX_PER_WAKE = 4;
+
+    // A track of no client since moved to where the clock says it plays now, of its timings rather than of reading it: the
+    //  times round the file since counted off, then its last sample at or before - of the picture, its last keyframe, so a
+    //  client joining has a picture at once, and the one after kept to read on at (MediaFileReader.VideoNextKeyFrame).
+    //  Its playout time, as the track's sent through, back.
+    private static double ResumeAtClock(MediaFileReader reader, VideoReader input, uint trackID, SampleTiming[] timings, uint timescale, bool keyFrame)
+    {
+        foreach (var timing in timings)
+            reader.DurationSeconds = Math.Max(reader.DurationSeconds, (timing.PTS + timing.Duration) / (double)timescale);
+
+        double at = reader.Clock.Elapsed.TotalSeconds - reader.LoopOffsetSeconds;
+        if (reader.DurationSeconds > 0 && at >= reader.DurationSeconds)
+        {
+            double loops = Math.Floor(at / reader.DurationSeconds);
+            reader.LoopOffsetSeconds += loops * reader.DurationSeconds;
+            reader.FurthestSeconds = 0;
+            at -= loops * reader.DurationSeconds;
+        }
+
+        int index = 0;
+        for (int i = 0; i < timings.Length && timings[i].DTS <= at * timescale; i++)
+        {
+            if (!keyFrame || timings[i].IsSyncSample)
+                index = i;
+        }
+
+        if (keyFrame)
+        {
+            // of none after it, the first of the next time round
+            reader.VideoNextKeyFrame = timings.Length;
+            for (int i = index + 1; i < timings.Length; i++)
+            {
+                if (timings[i].IsSyncSample)
+                {
+                    reader.VideoNextKeyFrame = i;
+                    break;
+                }
+            }
+        }
+
+        input.SeekSample(trackID, (uint)index);
+        double seconds = timings.Length > 0 ? timings[index].DTS / (double)timescale : 0;
+        reader.FurthestSeconds = Math.Max(reader.FurthestSeconds, seconds);
+        return reader.LoopOffsetSeconds + seconds;
+    }
 
     private static void StartFileAgain(MediaFileReader reader, IEnumerable<KeyValuePair<uint, TrackContext>> tracks)
     {
