@@ -367,6 +367,8 @@ internal class RTSPServerWorker : BackgroundService
                         // the track's samples read into one, its data valid until the next is read - fed before then:
                         //  of a sample read of each, a MediaSample of each, half of what the server allocated
                         var videoSample = new MediaSample();
+                        // the sample's units parsed into the track's list: of an enumerable of each, an iterator of each sample
+                        var videoSampleUnits = new List<ArraySegment<byte>>();
 
                         mediaFileReader.VideoTick = () =>
                         {
@@ -404,7 +406,9 @@ internal class RTSPServerWorker : BackgroundService
                                             break;
                                         }
 
-                                        IEnumerable<ArraySegment<byte>> units = inputReader.ParseSample(inputTrack.TrackID, sample.Data);
+                                        var units = videoSampleUnits;
+                                        units.Clear();
+                                        inputReader.ParseSample(inputTrack.TrackID, sample.Data, units);
 
                                         // Where this sample sits in the file, and where that is in the
                                         // playout - which stops being the same thing once the file has been
@@ -490,6 +494,7 @@ internal class RTSPServerWorker : BackgroundService
                         object audioFeedGate = new object();
                         var audioFeed = new List<ReadOnlyMemory<byte>>();
                         var audioSample = new MediaSample();
+                        var audioSampleUnits = new List<ArraySegment<byte>>();
 
                         mediaFileReader.AudioTick = () =>
                         {
@@ -523,7 +528,9 @@ internal class RTSPServerWorker : BackgroundService
                                             break;
                                         }
 
-                                        IEnumerable<ArraySegment<byte>> units = inputReader.ParseSample(inputTrack.TrackID, sample.Data);
+                                        var units = audioSampleUnits;
+                                        units.Clear();
+                                        inputReader.ParseSample(inputTrack.TrackID, sample.Data, units);
                                         // As the video above: the file's units are not the clock the SDP
                                         // declares. For audio the two usually agree, which is why this went
                                         // unnoticed, but a file that counts otherwise should still play.
