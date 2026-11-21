@@ -50,6 +50,8 @@ internal class RTSPServerWorker : BackgroundService
     {
         private bool _disposedValue;
         public string StreamID { get; }
+        /// <summary>The stream the file is fed to, of whose clients the ticker asks.</summary>
+        public RTSPStreamSource Source { get; set; }
         public int VideoRtpBaseTime { get; set; }
         public Timer VideoTimer { get; set; }
         public int AudioRtpBaseTime { get; set; }
@@ -683,6 +685,7 @@ internal class RTSPServerWorker : BackgroundService
             }
 
             streamSource = new RTSPStreamSource(mediaFile.StreamID, rtspVideoTrack, rtspAudioTrack);
+            mediaFileReader.Source = streamSource;
 
             // A client that arrives mid-group has nothing it can decode until the next keyframe.
             // Keeping the last one means it is given a picture straight away, and held on that
@@ -717,6 +720,11 @@ internal class RTSPServerWorker : BackgroundService
         {
             foreach (var (reader, video, audio) in ticks)
             {
+                // of nobody watching and its tracks idle already, nothing queued: of 1000 streams and no client, of the
+                //  ticks of each that found nobody, 200,000 work items a second of the pool, a third of a core
+                if (reader.Source?.ConnectionList.Count == 0
+                    && (reader.VideoTick == null || reader.VideoIdle) && (reader.AudioTick == null || reader.AudioIdle))
+                    continue;
                 if (reader.VideoTick != null)
                     ThreadPool.UnsafeQueueUserWorkItem(video, preferLocal: false);
                 if (reader.AudioTick != null)
