@@ -3493,22 +3493,24 @@ namespace SharpRTSPServer
             }
         }
 
+        [ThreadStatic]
+        private static SenderReport t_senderReport;
+
         private bool SendRTCPSenderReport(uint rtpTimestamp, RTSPConnection connection, RTPStream stream)
         {
             // an empty report: of no report blocks, as this server receives nothing
             int length = RTCPUtilities.GetSenderReportLength(0);
-            using (var rtcpOwner = MemoryPool<byte>.Shared.Rent(length))
+            // of the stack: a few dozen bytes, sent before this returns - of MemoryPool<byte>.Shared, an owner of each report
             {
-                var rtcpSenderReport = rtcpOwner.Memory.Slice(0, length).Span;
+                Span<byte> rtcpSenderReport = stackalloc byte[length];
                 DateTime sentAt = DateTime.UtcNow;
-                var report = new SenderReport
-                {
-                    SSRC = stream.SSRC,
-                    NTPTimestamp = SenderReport.ToNTPTimestamp(sentAt),
-                    RTPTimestamp = rtpTimestamp,
-                    PacketCount = stream.RtpPacketCount,
-                    OctetCount = stream.OctetCount,
-                };
+                // the thread's own, filled again: written out before this returns
+                var report = t_senderReport ??= new SenderReport();
+                report.SSRC = stream.SSRC;
+                report.NTPTimestamp = SenderReport.ToNTPTimestamp(sentAt);
+                report.RTPTimestamp = rtpTimestamp;
+                report.PacketCount = stream.RtpPacketCount;
+                report.OctetCount = stream.OctetCount;
                 RTCPUtilities.WriteSenderReport(rtcpSenderReport, report);
 
                 // Noted before it goes, so that a report answering it can be matched to it: the
@@ -3526,9 +3528,8 @@ namespace SharpRTSPServer
 
         private bool SendRTCPBye(RTSPConnection connection, RTPStream stream)
         {
-            using (var rtcpOwner = MemoryPool<byte>.Shared.Rent(RTCPUtilities.GoodbyeLength))
             {
-                var rtcpBye = rtcpOwner.Memory.Slice(0, RTCPUtilities.GoodbyeLength).Span;
+                Span<byte> rtcpBye = stackalloc byte[RTCPUtilities.GoodbyeLength];
                 RTCPUtilities.WriteGoodbye(rtcpBye, stream.SSRC);
 
                 return SendRawRTCP(connection, stream, rtcpBye);
@@ -3552,6 +3553,8 @@ namespace SharpRTSPServer
                 return false;
             }
 
+            // of SRTP, the protected packet's, of the pool: of an array of each, an allocation of each report
+            byte[] rented = null;
             try
             {
             try
@@ -3565,7 +3568,7 @@ namespace SharpRTSPServer
 
                 if (stream.Context != null)
                 {
-                    byte[] rtcp = new byte[stream.Context.EncodeRtcpContext.CalculateRequiredSrtcpPayloadLength(rtcpSenderReport.Length)];
+                    byte[] rtcp = rented = ArrayPool<byte>.Shared.Rent(stream.Context.EncodeRtcpContext.CalculateRequiredSrtcpPayloadLength(rtcpSenderReport.Length));
                     rtcpSenderReport.CopyTo(rtcp);
                     int ret = stream.Context.EncodeRtcpContext.ProtectRtcp(rtcp, rtcpSenderReport.Length, out var len);
 
@@ -3596,6 +3599,8 @@ namespace SharpRTSPServer
             finally
             {
                 Monitor.Exit(connection.SendLock);
+                if (rented != null)
+                    ArrayPool<byte>.Shared.Return(rented);
             }
         }
 
