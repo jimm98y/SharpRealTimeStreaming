@@ -211,6 +211,9 @@ namespace SharpRTSPServer
         /// added at the back and written from the front, so each track's own order is untouched.
         /// </remarks>
         private readonly LinkedList<QueuedFrame> _frames = new LinkedList<QueuedFrame>();
+        // the nodes of _frames sent or dropped, of the next frames queued: of a node made of each, an object of each frame
+        //  of each client. As many as the queue was deep at most; of _gate
+        private readonly LinkedList<QueuedFrame> _spareNodes = new LinkedList<QueuedFrame>();
         private readonly object _gate = new object();
         private readonly ILogger _logger;
         private readonly int _maxFrames;
@@ -461,7 +464,7 @@ namespace SharpRTSPServer
                 DropOneToMakeRoom();
             }
 
-            _frames.AddLast(frame);
+            Append(frame);
             _queuedBytes += frame.Bytes;
 
             return AskForAWriter();
@@ -642,7 +645,7 @@ namespace SharpRTSPServer
 
             kept.AddRef();
             Volatile.Write(ref _replayedKeyFrame, kept);
-            _frames.AddLast(kept);
+            Append(kept);
             _queuedBytes += kept.Bytes;
 
             _logger.LogDebug("Starting {connection} on the last keyframe kept for its stream", _describedAs);
@@ -778,6 +781,33 @@ namespace SharpRTSPServer
             _queuedBytes -= victim.Value.Bytes;
             victim.Value.Release();
             _dropped++;
+            victim.Value = null;
+            _spareNodes.AddLast(victim);
+        }
+
+        // a frame at the back, of a spare node if there is one; of _gate
+        private void Append(QueuedFrame frame)
+        {
+            LinkedListNode<QueuedFrame> node = _spareNodes.Last;
+            if (node == null)
+            {
+                _frames.AddLast(frame);
+                return;
+            }
+            _spareNodes.RemoveLast();
+            node.Value = frame;
+            _frames.AddLast(node);
+        }
+
+        // the frame at the front, its node kept spare; of _gate
+        private QueuedFrame TakeFirst()
+        {
+            LinkedListNode<QueuedFrame> node = _frames.First;
+            _frames.RemoveFirst();
+            QueuedFrame frame = node.Value;
+            node.Value = null;
+            _spareNodes.AddLast(node);
+            return frame;
         }
 
         private void ReportDrops()
@@ -842,8 +872,7 @@ namespace SharpRTSPServer
                         return;
                     }
 
-                    frame = _frames.First.Value;
-                    _frames.RemoveFirst();
+                    frame = TakeFirst();
                     _queuedBytes -= frame.Bytes;
                 }
 
@@ -880,8 +909,7 @@ namespace SharpRTSPServer
                 // whatever is still waiting will never be sent, so its buffers go back now
                 while (_frames.Count > 0)
                 {
-                    QueuedFrame queued = _frames.First.Value;
-                    _frames.RemoveFirst();
+                    QueuedFrame queued = TakeFirst();
                     queued.Release();
                 }
 
