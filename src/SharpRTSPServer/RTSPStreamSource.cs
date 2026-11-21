@@ -112,6 +112,10 @@ namespace SharpRTSPServer
 
         public HashSet<RTSPConnection> ConnectionList { get; } = new HashSet<RTSPConnection>(); // list of RTSP Listeners
 
+        // ConnectionList as of its last change, of the frames to read without the server's lock: a new array of each change,
+        //  under that lock, rather than the list copied under it of every frame
+        internal volatile RTSPConnection[] Connections = Array.Empty<RTSPConnection>();
+
         /// <summary>
         /// Whether this stream has ever produced a picture a decoder could start on.
         /// </summary>

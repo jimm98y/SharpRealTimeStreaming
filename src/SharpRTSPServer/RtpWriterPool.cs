@@ -21,6 +21,7 @@
 
 using Microsoft.Extensions.Logging;
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Threading;
@@ -66,7 +67,12 @@ namespace SharpRTSPServer
         /// </summary>
         private static readonly TimeSpan STUCK_AFTER = TimeSpan.FromMilliseconds(50);
 
-        private readonly Queue<OutboundQueue> _runnable = new Queue<OutboundQueue>();
+        // The connections to write and the writers waiting for one without the gate: of it, of each frame of every
+        //  connection, the producers and all the writers took one lock and a pulse - of 1000 streams the most of the
+        //  server's time waiting on it. The gate is the threads' alone, of starting one and of the watchdog.
+        private readonly ConcurrentQueue<OutboundQueue> _runnable = new ConcurrentQueue<OutboundQueue>();
+        private readonly SemaphoreSlim _wake = new SemaphoreSlim(0);
+        private int _idle;
         private readonly object _gate = new object();
         private readonly object _watchGate = new object();
         private readonly ILogger _logger;
@@ -77,16 +83,18 @@ namespace SharpRTSPServer
         /// When each thread started the work it is on, or zero if it is waiting for some. Indexed by
         /// the order the threads were made.
         /// </summary>
-        private readonly List<long> _busySince = new List<long>();
+        private readonly long[] _busySince;
+        private int _threads;
 
         private int _busy;
-        private bool _watching;
-        private bool _stopping;
+        private volatile bool _watching;
+        private volatile bool _stopping;
 
         public RtpWriterPool(ILogger logger, int maxThreads)
         {
             _logger = logger;
             _maxThreads = maxThreads < 1 ? 1 : maxThreads;
+            _busySince = new long[_maxThreads];
 
             // Enough to use the machine - protecting RTP for a room full of clients is real work, and
             // it is done on these threads.
@@ -100,22 +108,36 @@ namespace SharpRTSPServer
         /// </summary>
         public void Schedule(OutboundQueue queue)
         {
-            lock (_gate)
+            if (_stopping)
             {
-                if (_stopping)
+                return;
+            }
+
+            _runnable.Enqueue(queue);
+
+            if (!_watching)
+            {
+                lock (_gate)
                 {
-                    return;
+                    StartWatchdog();
                 }
+            }
 
-                _runnable.Enqueue(queue);
-                StartWatchdog();
-
-                if (WantsAnotherThread())
+            // a writer waiting woken; of none, another only while there are fewer than one per processor - past that, of
+            // the watchdog's, which looks for every one being stuck
+            if (Volatile.Read(ref _idle) > 0)
+            {
+                _wake.Release();
+            }
+            else if (Volatile.Read(ref _threads) < _threadsPerProcessor)
+            {
+                lock (_gate)
                 {
-                    StartThread();
+                    if (!_stopping && WantsAnotherThread())
+                    {
+                        StartThread();
+                    }
                 }
-
-                Monitor.Pulse(_gate);
             }
         }
 
@@ -151,10 +173,18 @@ namespace SharpRTSPServer
                     // could be stuck. It stands down rather than waking twenty times a second for
                     // the life of a server that may have no clients at all; the next connection with
                     // something to send starts it again.
-                    if (_runnable.Count == 0 && _busy == 0)
+                    if (_runnable.IsEmpty && Volatile.Read(ref _busy) == 0)
                     {
                         _watching = false;
-                        return;
+
+                        // a connection queued as this was stopping saw it watching, and did not start it
+                        Interlocked.MemoryBarrier();
+                        if (_runnable.IsEmpty)
+                        {
+                            return;
+                        }
+
+                        _watching = true;
                     }
 
                     if (WantsAnotherThread())
@@ -191,13 +221,13 @@ namespace SharpRTSPServer
         /// </summary>
         private bool WantsAnotherThread()
         {
-            if (_busySince.Count >= _maxThreads)
+            if (_threads >= _maxThreads)
             {
                 return false;
             }
 
             // Threads that are waiting for work, which are about to take what is queued.
-            int free = _busySince.Count - _busy;
+            int free = _threads - Volatile.Read(ref _busy);
 
             if (_runnable.Count <= free)
             {
@@ -205,7 +235,7 @@ namespace SharpRTSPServer
             }
 
             // Up to one per processor, at once - this is work, and there are processors idle.
-            if (_busySince.Count < _threadsPerProcessor)
+            if (_threads < _threadsPerProcessor)
             {
                 return true;
             }
@@ -214,8 +244,9 @@ namespace SharpRTSPServer
             // will be free shortly and another thread would be one more than the machine can run.
             long stuckBefore = Stopwatch.GetTimestamp() - (long)(STUCK_AFTER.TotalSeconds * Stopwatch.Frequency);
 
-            foreach (long since in _busySince)
+            for (int i = 0; i < _threads; i++)
             {
+                long since = Volatile.Read(ref _busySince[i]);
                 if (since == 0 || since > stuckBefore)
                 {
                     return false;
@@ -230,8 +261,9 @@ namespace SharpRTSPServer
         /// </summary>
         private void StartThread()
         {
-            int index = _busySince.Count;
-            _busySince.Add(0);
+            int index = _threads;
+            _busySince[index] = 0;
+            Volatile.Write(ref _threads, index + 1);
 
             // Threads of their own rather than pooled ones: they spend their lives blocked in
             // writes, which is what the thread pool must not be used for - it would grow a thread
@@ -252,22 +284,26 @@ namespace SharpRTSPServer
             {
                 OutboundQueue queue;
 
-                lock (_gate)
+                if (_stopping)
                 {
-                    while (_runnable.Count == 0 && !_stopping)
-                    {
-                        Monitor.Wait(_gate);
-                    }
-
-                    if (_stopping)
-                    {
-                        return;
-                    }
-
-                    queue = _runnable.Dequeue();
-                    _busy++;
-                    _busySince[index] = Stopwatch.GetTimestamp();
+                    return;
                 }
+
+                if (!_runnable.TryDequeue(out queue))
+                {
+                    // idle counted before the queue is looked at again, as a connection is queued before the idle are:
+                    // one queued meanwhile is seen here, or its producer sees this waiting and wakes it
+                    Interlocked.Increment(ref _idle);
+                    if (_runnable.IsEmpty && !_stopping)
+                    {
+                        _wake.Wait();
+                    }
+                    Interlocked.Decrement(ref _idle);
+                    continue;
+                }
+
+                Interlocked.Increment(ref _busy);
+                Volatile.Write(ref _busySince[index], Stopwatch.GetTimestamp());
 
                 try
                 {
@@ -279,11 +315,8 @@ namespace SharpRTSPServer
                 }
                 finally
                 {
-                    lock (_gate)
-                    {
-                        _busy--;
-                        _busySince[index] = 0;
-                    }
+                    Volatile.Write(ref _busySince[index], 0);
+                    Interlocked.Decrement(ref _busy);
                 }
             }
         }
@@ -294,7 +327,7 @@ namespace SharpRTSPServer
         /// </summary>
         public int ThreadCount
         {
-            get { lock (_gate) { return _busySince.Count; } }
+            get { return Volatile.Read(ref _threads); }
         }
 
         public void Dispose()
@@ -307,8 +340,10 @@ namespace SharpRTSPServer
                 }
 
                 _stopping = true;
-                _runnable.Clear();
-                Monitor.PulseAll(_gate);
+                while (_runnable.TryDequeue(out _))
+                {
+                }
+                _wake.Release(_maxThreads);
             }
 
             lock (_watchGate)

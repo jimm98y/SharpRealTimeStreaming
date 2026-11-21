@@ -54,6 +54,10 @@ internal class RTSPServerWorker : BackgroundService
         public Timer VideoTimer { get; set; }
         public int AudioRtpBaseTime { get; set; }
         public Timer AudioTimer { get; set; }
+
+        // what each wake-up of the worker's one timer runs of the tracks, null once stopped
+        public Action VideoTick { get; set; }
+        public Action AudioTick { get; set; }
         public IsoStream IsoStream { get; set; }
 
         /// <summary>
@@ -171,7 +175,7 @@ internal class RTSPServerWorker : BackgroundService
 
     private List<MediaFileReader> _mediaFileStreamReaders = new List<MediaFileReader>();
 
-    private readonly object _syncRoot = new object();
+    private System.Threading.Timer _ticker;
 
     /// <summary>
     /// Basic sends the password in a reversible form, so it stays off unless the config asks for it.
@@ -352,21 +356,27 @@ internal class RTSPServerWorker : BackgroundService
 
                         double videoSampleSeconds = inputTrack.DefaultSampleDuration / (double)inputTrack.Timescale;
 
-                        // The timer raises Elapsed on the thread pool every interval, whether or not
+                        // The tick is queued to the thread pool every interval, whether or not
                         //  the last one has returned, and a send held up by a slow client lets the
                         //  next wake-up read later frames and send them first. One wake-up of the
                         //  track at a time keeps the frames in the order they were read, without
-                        //  holding up the other tracks the way sending under _syncRoot would.
+                        //  holding up the other track the way sending under the reader's lock would - and
+                        //  one still sending, the next skipped, not waiting on a thread of the pool.
                         object videoFeedGate = new object();
+                        var videoFeed = new List<ReadOnlyMemory<byte>>();
+                        // the track's samples read into one, its data valid until the next is read - fed before then:
+                        //  of a sample read of each, a MediaSample of each, half of what the server allocated
+                        var videoSample = new MediaSample();
+                        // the sample's units parsed into the track's list: of an enumerable of each, an iterator of each sample
+                        var videoSampleUnits = new List<ArraySegment<byte>>();
 
-                        mediaFileReader.VideoTimer = new Timer(PACING_WAKE_MS);
-                        mediaFileReader.VideoTimer.Elapsed += (s, e) =>
+                        mediaFileReader.VideoTick = () =>
                         {
-                            lock (videoFeedGate)
+                            if (!Monitor.TryEnter(videoFeedGate))
+                                return;
+                            try
                             {
-                                var pending = new List<(uint Pts, List<ReadOnlyMemory<byte>> Units)>();
-
-                                lock (_syncRoot)
+                                lock (mediaFileReader)
                                 {
                                     // Send what the clock says is due, not one sample per wake-up. See
                                     // MediaFileReader.Clock for why the wake-up cannot be trusted to be
@@ -377,7 +387,7 @@ internal class RTSPServerWorker : BackgroundService
                                         if (mediaFileReader.VideoSentThroughSeconds > due)
                                             break;
 
-                                        var sample = inputReader.ReadSample(inputTrack.TrackID);
+                                        var sample = inputReader.ReadSample(inputTrack.TrackID, videoSample) ? videoSample : null;
 
                                         if (sample == null)
                                         {
@@ -391,12 +401,14 @@ internal class RTSPServerWorker : BackgroundService
                                             }
 
                                             // end streaming
-                                            mediaFileReader.VideoTimer.Stop();
+                                            mediaFileReader.VideoTick = null;
                                             _server.RemoveStreamSource(streamSource);
                                             break;
                                         }
 
-                                        IEnumerable<ArraySegment<byte>> units = inputReader.ParseSample(inputTrack.TrackID, sample.Data);
+                                        var units = videoSampleUnits;
+                                        units.Clear();
+                                        inputReader.ParseSample(inputTrack.TrackID, sample.Data, units);
 
                                         // Where this sample sits in the file, and where that is in the
                                         // playout - which stops being the same thing once the file has been
@@ -431,24 +443,22 @@ internal class RTSPServerWorker : BackgroundService
 
                                         long videoPts = (long)((mediaFileReader.LoopOffsetSeconds + videoSeconds) * VIDEO_RTP_CLOCK);
 
-                                        // Held back until the lock is off. This hands the sample to the
-                                        //  server, which writes it to the client, and a client slow to
-                                        //  read blocks the write - so doing it under the lock stops
-                                        //  every other track dead. One lock covers both tracks of every
-                                        //  stream this worker serves, so that is a wide blast radius
-                                        //  for a write that has nothing to do with the reader the lock
-                                        //  is there to guard.
-                                        // Copied, because what the reader hands back is a view of a buffer
-                                        //  it reads the next sample into.
-                                        pending.Add(((uint)unchecked(mediaFileReader.VideoRtpBaseTime + videoPts),
-                                            units.Select(u => (ReadOnlyMemory<byte>)u.ToArray()).ToList()));
+                                        // Fed under the lock, of the reader's buffer as it is, not copied: the
+                                        //  server packetizes it into packets of its own and queues them, a write
+                                        //  to a client no longer of the feeding - so the lock holds up only the
+                                        //  stream's other track, of the packetizing. The lock is of each stream:
+                                        //  its two tracks share a reader, other streams none - of one lock of all,
+                                        //  1000 streams' ticks queued at once queued on it. Of the copy of each
+                                        //  sample, 70% of what the server allocated.
+                                        videoFeed.Clear();
+                                        AddUnits(videoFeed, units);
+                                        rtspVideoTrack.FeedInRawSamples((uint)unchecked(mediaFileReader.VideoRtpBaseTime + videoPts), videoFeed);
                                     }
                                 }
-
-                                foreach (var (pts, units) in pending)
-                                {
-                                    rtspVideoTrack.FeedInRawSamples(pts, units);
-                                }
+                            }
+                            finally
+                            {
+                                Monitor.Exit(videoFeedGate);
                             }
                         };
 
@@ -482,15 +492,17 @@ internal class RTSPServerWorker : BackgroundService
 
                         // As the picture: one wake-up at a time, so frames go out in the order read.
                         object audioFeedGate = new object();
+                        var audioFeed = new List<ReadOnlyMemory<byte>>();
+                        var audioSample = new MediaSample();
+                        var audioSampleUnits = new List<ArraySegment<byte>>();
 
-                        mediaFileReader.AudioTimer = new Timer(PACING_WAKE_MS);
-                        mediaFileReader.AudioTimer.Elapsed += (s, e) =>
+                        mediaFileReader.AudioTick = () =>
                         {
-                            lock (audioFeedGate)
+                            if (!Monitor.TryEnter(audioFeedGate))
+                                return;
+                            try
                             {
-                                var pending = new List<(uint Pts, List<ReadOnlyMemory<byte>> Units)>();
-
-                                lock (_syncRoot)
+                                lock (mediaFileReader)
                                 {
                                     // The same clock as the picture, which is the whole point - see
                                     // MediaFileReader.Clock.
@@ -500,7 +512,7 @@ internal class RTSPServerWorker : BackgroundService
                                         if (mediaFileReader.AudioSentThroughSeconds > due)
                                             break;
 
-                                        var sample = inputReader.ReadSample(inputTrack.TrackID);
+                                        var sample = inputReader.ReadSample(inputTrack.TrackID, audioSample) ? audioSample : null;
 
                                         if (sample == null)
                                         {
@@ -511,12 +523,14 @@ internal class RTSPServerWorker : BackgroundService
                                             }
 
                                             // end streaming
-                                            mediaFileReader.AudioTimer.Stop();
+                                            mediaFileReader.AudioTick = null;
                                             _server.RemoveStreamSource(streamSource);
                                             break;
                                         }
 
-                                        IEnumerable<ArraySegment<byte>> units = inputReader.ParseSample(inputTrack.TrackID, sample.Data);
+                                        var units = audioSampleUnits;
+                                        units.Clear();
+                                        inputReader.ParseSample(inputTrack.TrackID, sample.Data, units);
                                         // As the video above: the file's units are not the clock the SDP
                                         // declares. For audio the two usually agree, which is why this went
                                         // unnoticed, but a file that counts otherwise should still play.
@@ -545,17 +559,16 @@ internal class RTSPServerWorker : BackgroundService
                                             mediaFileReader.LoopOffsetSeconds + audioSeconds + audioSampleSeconds;
 
                                         long audioPts = (long)((mediaFileReader.LoopOffsetSeconds + audioSeconds) * audioRtpClock);
-                                        // See the picture track: the send waits until the lock is off, and
-                                        // the units are copied out of the reader's buffer.
-                                        pending.Add(((uint)unchecked(mediaFileReader.AudioRtpBaseTime + audioPts),
-                                            units.Select(u => (ReadOnlyMemory<byte>)u.ToArray()).ToList()));
+                                        // See the picture track: fed under the lock, of the reader's buffer.
+                                        audioFeed.Clear();
+                                        AddUnits(audioFeed, units);
+                                        rtspAudioTrack.FeedInRawSamples((uint)unchecked(mediaFileReader.AudioRtpBaseTime + audioPts), audioFeed);
                                     }
                                 }
-
-                                foreach (var (pts, units) in pending)
-                                {
-                                    rtspAudioTrack.FeedInRawSamples(pts, units);
-                                }
+                            }
+                            finally
+                            {
+                                Monitor.Exit(audioFeedGate);
                             }
                         };
 
@@ -613,7 +626,42 @@ internal class RTSPServerWorker : BackgroundService
             _logger.LogInformation($"RTSP URL is rtsp://{hostName}:{port}/{mediaFileReader.StreamID} - authenticate as one of the configured users");
         }
 
+        // One timer of all the streams, each track's tick queued to the pool of it: of a timer of each track, the 2000 of
+        //  1000 streams fought over the timer queue's lock, a fifth of the server's CPU. Of a work item of each track's,
+        //  kept: of the pool's of a delegate and its state, an object of each tick queued, 2000 of each wake-up.
+        var ticks = mediaFileReaders.Select(reader => (Reader: reader, Video: new TickWork(reader, video: true), Audio: new TickWork(reader, video: false))).ToArray();
+        _ticker = new System.Threading.Timer(_ =>
+        {
+            foreach (var (reader, video, audio) in ticks)
+            {
+                if (reader.VideoTick != null)
+                    ThreadPool.UnsafeQueueUserWorkItem(video, preferLocal: false);
+                if (reader.AudioTick != null)
+                    ThreadPool.UnsafeQueueUserWorkItem(audio, preferLocal: false);
+            }
+        }, null, 0, (int)PACING_WAKE_MS);
+
         return Task.CompletedTask;
+    }
+
+    // the units of a sample to its feed: of a list, by index - foreach of an IEnumerable boxed the list's enumerator, of
+    //  each sample of each track
+    private static void AddUnits(List<ReadOnlyMemory<byte>> feed, IEnumerable<ArraySegment<byte>> units)
+    {
+        if (units is IReadOnlyList<ArraySegment<byte>> list)
+        {
+            for (int i = 0; i < list.Count; i++)
+                feed.Add(list[i]);
+            return;
+        }
+        foreach (ArraySegment<byte> unit in units)
+            feed.Add(unit);
+    }
+
+    // a track's tick, of the pool: its tick as it is now, of none once its stream has ended
+    private sealed class TickWork(MediaFileReader reader, bool video) : IThreadPoolWorkItem
+    {
+        public void Execute() => (video ? reader.VideoTick : reader.AudioTick)?.Invoke();
     }
 
     // Returns the media (mdhd) timescale for the given track. This is the clock the sample PTS/DTS values are
@@ -743,6 +791,7 @@ internal class RTSPServerWorker : BackgroundService
     public override void Dispose()
     {
         base.Dispose();
+        _ticker?.Dispose();
 
         for (int i = 0; i < _mediaFileStreamReaders.Count; i++)
         {

@@ -58,30 +58,31 @@ namespace SharpRTSPServer
         /// Deeper than the default of fifty buffers a size, because the buffers of every frame still
         /// queued for a client are out on loan at once - a client that is a little behind, times the
         /// packets in a frame, is past fifty without trying. Past the depth the pool simply allocates,
-        /// which is what it was quietly doing.
+        /// which is what it was quietly doing. Of 1024, of 1000 streams each keeping its last keyframe
+        /// and all fed at one wake-up of a timer, it still ran dry and allocated 1.6 MB a second; the
+        /// buffers are made only as they are needed, so a small server keeps no more than it lends.
         /// </remarks>
         private static readonly ArrayPool<byte> Buffers = ArrayPool<byte>.Create(MOST_BYTES, MOST_BUFFERS_OF_A_SIZE);
 
         /// <summary>The largest packet worth pooling. RTP over a sane network is nowhere near this.</summary>
         private const int MOST_BYTES = 1024 * 1024;
 
-        private const int MOST_BUFFERS_OF_A_SIZE = 1024;
+        private const int MOST_BUFFERS_OF_A_SIZE = 16384;
 
         /// <remarks>
-        /// A plain stack under a lock, not a concurrent bag. A bag keeps a list per thread and is at
-        /// its best when the same thread puts things in and takes them out; here one thread always
-        /// puts and another always takes, so every take was a steal from another thread's list -
-        /// which locks anyway, and allocates on the way.
+        /// Slots taken and filled by Interlocked, not a concurrent bag nor a stack under a lock. A bag keeps a list per
+        /// thread and is at its best when the same thread puts things in and takes them out; here one thread always puts
+        /// and another always takes, so every take was a steal from another thread's list - which locks anyway, and
+        /// allocates on the way. And of the stack's lock, every frame of 1000 streams waited on the others'.
         /// </remarks>
-        private static readonly Stack<RtpPackets> Spare = new Stack<RtpPackets>();
-
-        private static readonly object SpareLock = new object();
+        private static readonly RtpPackets[] Spare = new RtpPackets[MOST_SPARE];
 
         /// <summary>
         /// How many are kept for reuse. A burst must not leave a pool the size of the burst behind
         /// it; past this they are simply made and dropped, as they all were before.
         /// </summary>
-        private const int MOST_SPARE = 64;
+        // of 1000 streams fed at one wake-up of a timer, a frame of each out at once: of 64, the rest made and dropped of each
+        private const int MOST_SPARE = 1024;
 
         private readonly List<byte[]> _rented = new List<byte[]>();
 
@@ -186,11 +187,13 @@ namespace SharpRTSPServer
         /// </summary>
         public static RtpPackets Take()
         {
-            lock (SpareLock)
+            // from a slot of this thread's on, so threads taking at once take of different slots
+            for (int i = 0, at = Environment.CurrentManagedThreadId; i < Spare.Length; i++, at++)
             {
-                if (Spare.Count > 0)
+                ref RtpPackets slot = ref Spare[at % Spare.Length];
+                RtpPackets spare;
+                if (Volatile.Read(ref slot) != null && (spare = Interlocked.Exchange(ref slot, null)) != null)
                 {
-                    RtpPackets spare = Spare.Pop();
                     spare._released = 0;
                     spare.IsKeyFrame = true;
                     return spare;
@@ -223,12 +226,11 @@ namespace SharpRTSPServer
             _rented.Clear();
             Items.Clear();
 
-            lock (SpareLock)
+            for (int i = 0, at = Environment.CurrentManagedThreadId; i < Spare.Length; i++, at++)
             {
-                if (Spare.Count < MOST_SPARE)
-                {
-                    Spare.Push(this);
-                }
+                ref RtpPackets slot = ref Spare[at % Spare.Length];
+                if (Volatile.Read(ref slot) == null && Interlocked.CompareExchange(ref slot, this, null) == null)
+                    return;
             }
         }
     }

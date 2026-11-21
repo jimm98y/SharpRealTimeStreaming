@@ -6,12 +6,13 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="SharpRTSP" Version="1.11.1" />
     <PackageReference Include="SharpSRTP" Version="0.6.0" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\SharpRTCP\SharpRTCP.csproj" />
+    <!-- the SharpRTSP checkout next to this one, of its changes not yet published -->
+    <ProjectReference Include="..\..\..\SharpRTSP\RTSP\RTSP.csproj" />
   </ItemGroup>
 	
 	<ItemGroup>

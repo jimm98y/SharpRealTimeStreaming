@@ -638,6 +638,10 @@ namespace SharpRTSPServer
         /// </summary>
         private readonly List<RTSPStreamSource> StreamSources = new List<RTSPStreamSource>();
 
+        // StreamSources by ID as of its last change, of the frames to find their stream without the lock and without a search
+        //  of every stream: of 1000 streams, every frame of each compared up to 1000 IDs under the lock all of them take
+        private volatile Dictionary<string, RTSPStreamSource> _streamsById = new Dictionary<string, RTSPStreamSource>();
+
         /// <summary>
         /// TLS certificate used for RTSPS and HTTPS.
         /// </summary>
@@ -1822,6 +1826,7 @@ namespace SharpRTSPServer
                 if (oneConnection != null && !streamSource.ConnectionList.Contains(oneConnection))
                 {
                     streamSource.ConnectionList.Add(oneConnection);
+                    streamSource.Connections = streamSource.ConnectionList.ToArray();
                 }
             }
 
@@ -3488,22 +3493,24 @@ namespace SharpRTSPServer
             }
         }
 
+        [ThreadStatic]
+        private static SenderReport t_senderReport;
+
         private bool SendRTCPSenderReport(uint rtpTimestamp, RTSPConnection connection, RTPStream stream)
         {
             // an empty report: of no report blocks, as this server receives nothing
             int length = RTCPUtilities.GetSenderReportLength(0);
-            using (var rtcpOwner = MemoryPool<byte>.Shared.Rent(length))
+            // of the stack: a few dozen bytes, sent before this returns - of MemoryPool<byte>.Shared, an owner of each report
             {
-                var rtcpSenderReport = rtcpOwner.Memory.Slice(0, length).Span;
+                Span<byte> rtcpSenderReport = stackalloc byte[length];
                 DateTime sentAt = DateTime.UtcNow;
-                var report = new SenderReport
-                {
-                    SSRC = stream.SSRC,
-                    NTPTimestamp = SenderReport.ToNTPTimestamp(sentAt),
-                    RTPTimestamp = rtpTimestamp,
-                    PacketCount = stream.RtpPacketCount,
-                    OctetCount = stream.OctetCount,
-                };
+                // the thread's own, filled again: written out before this returns
+                var report = t_senderReport ??= new SenderReport();
+                report.SSRC = stream.SSRC;
+                report.NTPTimestamp = SenderReport.ToNTPTimestamp(sentAt);
+                report.RTPTimestamp = rtpTimestamp;
+                report.PacketCount = stream.RtpPacketCount;
+                report.OctetCount = stream.OctetCount;
                 RTCPUtilities.WriteSenderReport(rtcpSenderReport, report);
 
                 // Noted before it goes, so that a report answering it can be matched to it: the
@@ -3521,9 +3528,8 @@ namespace SharpRTSPServer
 
         private bool SendRTCPBye(RTSPConnection connection, RTPStream stream)
         {
-            using (var rtcpOwner = MemoryPool<byte>.Shared.Rent(RTCPUtilities.GoodbyeLength))
             {
-                var rtcpBye = rtcpOwner.Memory.Slice(0, RTCPUtilities.GoodbyeLength).Span;
+                Span<byte> rtcpBye = stackalloc byte[RTCPUtilities.GoodbyeLength];
                 RTCPUtilities.WriteGoodbye(rtcpBye, stream.SSRC);
 
                 return SendRawRTCP(connection, stream, rtcpBye);
@@ -3547,6 +3553,8 @@ namespace SharpRTSPServer
                 return false;
             }
 
+            // of SRTP, the protected packet's, of the pool: of an array of each, an allocation of each report
+            byte[] rented = null;
             try
             {
             try
@@ -3560,7 +3568,7 @@ namespace SharpRTSPServer
 
                 if (stream.Context != null)
                 {
-                    byte[] rtcp = new byte[stream.Context.EncodeRtcpContext.CalculateRequiredSrtcpPayloadLength(rtcpSenderReport.Length)];
+                    byte[] rtcp = rented = ArrayPool<byte>.Shared.Rent(stream.Context.EncodeRtcpContext.CalculateRequiredSrtcpPayloadLength(rtcpSenderReport.Length));
                     rtcpSenderReport.CopyTo(rtcp);
                     int ret = stream.Context.EncodeRtcpContext.ProtectRtcp(rtcp, rtcpSenderReport.Length, out var len);
 
@@ -3591,6 +3599,8 @@ namespace SharpRTSPServer
             finally
             {
                 Monitor.Exit(connection.SendLock);
+                if (rented != null)
+                    ArrayPool<byte>.Shared.Return(rented);
             }
         }
 
@@ -3687,7 +3697,8 @@ namespace SharpRTSPServer
             _connectionList.Remove(connection);
             foreach (var streamSource in StreamSources)
             {
-                streamSource.ConnectionList.Remove(connection);
+                if (streamSource.ConnectionList.Remove(connection))
+                    streamSource.Connections = streamSource.ConnectionList.ToArray();
 
                 // The last one out takes the key with them. Nobody is holding it, so replacing it
                 // breaks nothing - and it is what gives the stream its SSRCs back, since what
@@ -3806,6 +3817,7 @@ namespace SharpRTSPServer
                     // In the list frames are handed to, and only that one. It is not a client: there
                     // is no connection to time out, no session to tear down and nobody to answer.
                     streamSource.ConnectionList.Add(delivery.Sender);
+                    streamSource.Connections = streamSource.ConnectionList.ToArray();
                 }
 
                 if (!delivery.Carries(trackId))
@@ -3980,6 +3992,7 @@ namespace SharpRTSPServer
 
             streamSource.Multicast = null;
             streamSource.ConnectionList.Remove(delivery.Sender);
+            streamSource.Connections = streamSource.ConnectionList.ToArray();
             delivery.Listeners.Clear();
 
             foreach (int groupPort in delivery.RtpPort.Values)
@@ -4320,6 +4333,7 @@ namespace SharpRTSPServer
                 {
                     streamSources = StreamSources.ToList();
                     StreamSources.Clear();
+                    _streamsById = new Dictionary<string, RTSPStreamSource>();
                 }
 
                 foreach (var streamSource in streamSources)
@@ -4447,11 +4461,9 @@ namespace SharpRTSPServer
             // sweeps every connection on the server looking for ones to drop - work with a timer of
             // its own, and done again on every accept. All this needs to know is whether anyone is
             // listening, so that a producer can skip packetizing into the void.
-            lock (_connectionList)
+            // of the snapshots, without the lock every stream's frames took
             {
-                RTSPStreamSource streamSource = GetStreamSource(streamID);
-
-                if (streamSource == null)
+                if (streamID == null || !_streamsById.TryGetValue(streamID, out RTSPStreamSource streamSource))
                 {
                     return false;
                 }
@@ -4460,7 +4472,7 @@ namespace SharpRTSPServer
                 // the first client asks for it hands over the keyframe while that client is still
                 // saying SETUP and PLAY, and turning it away then meant the one frame the client
                 // actually needed was the one frame never made.
-                if (streamSource.ConnectionList.Count > 0)
+                if (streamSource.Connections.Length > 0)
                 {
                     return true;
                 }
@@ -4546,19 +4558,17 @@ namespace SharpRTSPServer
             if (streamType < 0)
                 throw new ArgumentOutOfRangeException(nameof(streamType), streamType, "A track ID is not negative.");
 
-            RTSPConnection[] connections;
+            RTSPConnection[] connections = null;
             int listening;
             ITrack track;
             bool preserveSourceHeaders;
 
-            // The list lock is held just long enough to read the list, not across the writing. A
-            // write blocks for as long as the client at the other end declines to read, and doing
-            // that under this lock stopped every other connection, every RTSP request and every
-            // other stream until it finished.
-            lock (_connectionList)
+            // Not under the list lock: the stream and its connections of their snapshots, made under it of each change. Of
+            // every frame of every stream that lock was taken - of 1000 streams, a third of the server's CPU spent waiting
+            // on it - and before that, held across the writing, it stopped every other connection, every RTSP request and
+            // every other stream until a write to a client not reading finished.
             {
-                var streamSource = GetStreamSource(streamID);
-                if (streamSource == null)
+                if (streamID == null || !_streamsById.TryGetValue(streamID, out RTSPStreamSource streamSource))
                 {
                     _logger.LogWarning("Dropping RTP for unknown stream {streamID}", streamID);
                     return;
@@ -4591,17 +4601,19 @@ namespace SharpRTSPServer
                     // something to fall back on. One frame, replacing the one before it.
                     if (streamSource.KeepLastKeyFrame)
                     {
-                        streamSource.KeepAsLastKeyFrame(frame);
+                        // kept and the connections read under the lock still, as a connection starting there takes the frame
+                        // kept: one joining sees it kept or is sent it, not both - of a key frame alone
+                        lock (_connectionList)
+                        {
+                            streamSource.KeepAsLastKeyFrame(frame);
+                            connections = streamSource.Connections;
+                        }
                     }
                 }
 
-                // A copy, so the list itself can change while we write - into a borrowed array rather
-                // than a new one, since this is every frame of every stream and the copy is thrown
-                // away at the end of the method. Borrowed and given back on this thread, which is
-                // where a pool with a cache per thread is at its best.
-                listening = streamSource.ConnectionList.Count;
-                connections = ArrayPool<RTSPConnection>.Shared.Rent(listening);
-                streamSource.ConnectionList.CopyTo(connections, 0);
+                // The snapshot, which the list changing while we write does not change.
+                connections ??= streamSource.Connections;
+                listening = connections.Length;
             }
 
             frame.StreamType = streamType;
@@ -4614,8 +4626,6 @@ namespace SharpRTSPServer
 
             // One frame, offered to every connection watching. Nothing about it differs between
             // them, which is why it is not copied for any of them.
-            try
-            {
             for (int i = 0; i < listening; i++)
             {
                 RTSPConnection connection = connections[i];
@@ -4651,14 +4661,6 @@ namespace SharpRTSPServer
                 // thread, so one that stopped reading held up the media for all of them.
                 frame.AddRef();
                 outbound.Enqueue(frame);
-            }
-            }
-            finally
-            {
-                // Cleared before it goes back: a pooled array holding connections would keep them
-                // alive for as long as the pool did.
-                Array.Clear(connections, 0, listening);
-                ArrayPool<RTSPConnection>.Shared.Return(connections);
             }
 
             // Nothing is dropped here any more. A frame is handed to a connection rather than written
@@ -4707,6 +4709,7 @@ namespace SharpRTSPServer
                 }
 
                 StreamSources.Add(streamSource);
+                _streamsById = StreamSources.ToDictionary(x => x.StreamID);
             }
         }
 
@@ -4770,6 +4773,7 @@ namespace SharpRTSPServer
                 finishedGroup = CloseMulticastGroup(streamSource);
 
                 this.StreamSources.Remove(streamSource);
+                _streamsById = StreamSources.ToDictionary(x => x.StreamID);
             }
 
             foreach (RTSPConnection connection in watching)

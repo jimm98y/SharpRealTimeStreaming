@@ -860,7 +860,9 @@ namespace SharpRTSPClient
                 // with auto reconnect, makes it again - see Resume and ConnectAgain
                 _rtspClient = new RtspListener(_rtspSocket, _loggerFactory.CreateLogger<RtspListener>())
                 {
-                    AutoReconnect = false
+                    AutoReconnect = false,
+                    // the packets handled of the receiving thread, each of a using: none kept after its event
+                    ReuseDataMessages = true,
                 };
             }
             catch (IOException ex) when (IsSocketTimeout(ex))
@@ -2918,6 +2920,20 @@ namespace SharpRTSPClient
 
         private static readonly TimeSpan WatchdogPeriod = TimeSpan.FromMilliseconds(250);
 
+        // the clients watched and each one's session, of one timer of all: of a timer of each, the 1000 of a server
+        //  of 1000 streams fired together and fought over the timer queue's lock
+        private static readonly ConcurrentDictionary<RTSPClient, int> s_watched = new ConcurrentDictionary<RTSPClient, int>();
+        private static readonly WaitCallback s_check = client =>
+        {
+            if (s_watched.TryGetValue((RTSPClient)client, out int session))
+                ((RTSPClient)client).Watchdog(session);
+        };
+        private static readonly Timer s_watchdogs = new Timer(_ =>
+        {
+            foreach (var watched in s_watched)
+                ThreadPool.UnsafeQueueUserWorkItem(s_check, watched.Key);
+        }, null, WatchdogPeriod, WatchdogPeriod);
+
         /// <summary>Requests still waiting for their reply, and when each was sent.</summary>
         /// <remarks>
         /// By reference: SharpRTSP hands back the very instance that was sent as the reply's
@@ -2928,7 +2944,6 @@ namespace SharpRTSPClient
 
         private long _lastMediaTimestamp;
         private volatile bool _mediaExpected;
-        private Timer _watchdog;
 
         /// <summary>Whether this connection's session got as far as playing, which auto reconnect asks.</summary>
         private volatile bool _played;
@@ -3188,7 +3203,7 @@ namespace SharpRTSPClient
                 // before answering is not reconnected to for ever
                 _played = false;
                 int session = ++_watchdogSession;
-                Interlocked.Exchange(ref _watchdog, new Timer(Watchdog, session, WatchdogPeriod, WatchdogPeriod))?.Dispose();
+                s_watched[this] = session;
             }
         }
 
@@ -3202,30 +3217,32 @@ namespace SharpRTSPClient
             lock (_teardownLock)
             {
                 _watchdogSession++;
-                Interlocked.Exchange(ref _watchdog, null)?.Dispose();
+                s_watched.TryRemove(this, out _);
                 _pendingRequests.Clear();
                 _resumeProbe = null;
             }
         }
 
-        private void Watchdog(object state)
+        private void Watchdog(int session)
         {
             // a timer thread: anything escaping here would take the process down
             try
             {
-                // Checked and torn down under the lock a teardown takes, and only while the session
-                // it watches is the current one: one torn down meanwhile - by Stop(), or by the
-                // listener on an error, on threads of their own - is neither torn down again nor
-                // reported, and a check still running from before is not either.
-                StoppedReason? reason;
+                // Torn down under the lock a teardown takes, and only while the session it watches is
+                // the current one: one torn down meanwhile - by Stop(), or by the listener on an error,
+                // on threads of their own - is not torn down again, and a check still running from
+                // before is not either. Checked without it: of nothing timed out, as of nearly every
+                // check, the lock is not taken at all.
+                if (Volatile.Read(ref _watchdogSession) != session)
+                    return;
+                StoppedReason? reason = CheckTimeouts();
+                if (reason == null)
+                    return;
+
                 bool reconnect, resume;
                 lock (_teardownLock)
                 {
-                    if (_watchdogSession != (int)state)
-                        return;
-
-                    reason = CheckTimeouts();
-                    if (reason == null)
+                    if (_watchdogSession != session)
                         return;
 
                     // Only a session that got as far as playing: a server that drops the connection
