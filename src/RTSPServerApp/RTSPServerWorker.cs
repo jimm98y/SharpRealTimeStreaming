@@ -376,7 +376,11 @@ internal class RTSPServerWorker : BackgroundService
                                 return;
                             try
                             {
-                                lock (mediaFileReader)
+                                // the other track of this file being fed, this wake left to it: of a wait, of each audio tick behind the picture of its
+                                //  file, of 300 streams half the server's CPU spun in the lock; the next wake sends what is due
+                                if (!Monitor.TryEnter(mediaFileReader))
+                                    return;
+                                try
                                 {
                                     // Send what the clock says is due, not one sample per wake-up. See
                                     // MediaFileReader.Clock for why the wake-up cannot be trusted to be
@@ -455,6 +459,10 @@ internal class RTSPServerWorker : BackgroundService
                                         rtspVideoTrack.FeedInRawSamples((uint)unchecked(mediaFileReader.VideoRtpBaseTime + videoPts), videoFeed);
                                     }
                                 }
+                                finally
+                                {
+                                    Monitor.Exit(mediaFileReader);
+                                }
                             }
                             finally
                             {
@@ -502,7 +510,11 @@ internal class RTSPServerWorker : BackgroundService
                                 return;
                             try
                             {
-                                lock (mediaFileReader)
+                                // the other track of this file being fed, this wake left to it: of a wait, of each audio tick behind the picture of its
+                                //  file, of 300 streams half the server's CPU spun in the lock; the next wake sends what is due
+                                if (!Monitor.TryEnter(mediaFileReader))
+                                    return;
+                                try
                                 {
                                     // The same clock as the picture, which is the whole point - see
                                     // MediaFileReader.Clock.
@@ -564,6 +576,10 @@ internal class RTSPServerWorker : BackgroundService
                                         AddUnits(audioFeed, units);
                                         rtspAudioTrack.FeedInRawSamples((uint)unchecked(mediaFileReader.AudioRtpBaseTime + audioPts), audioFeed);
                                     }
+                                }
+                                finally
+                                {
+                                    Monitor.Exit(mediaFileReader);
                                 }
                             }
                             finally
