@@ -2283,11 +2283,30 @@ namespace SharpRTSPServer
                     return;
                 }
 
-                rtpTransport = new RtpTcpTransport(listener)
+                var tcpTransport = new RtpTcpTransport(listener)
                 {
                     DataChannel = transport.Interleaved.First,
                     ControlChannel = transport.Interleaved.Second,
                 };
+                // the client's RTCP over the connection - its receiver reports, of each few seconds - a keepalive, as of UDP
+                //  (RFC 2326 12.37): of its RTSP requests alone, of a client sending them late of a host busy, its session
+                //  was dropped at RTSP_TIMEOUT while it was receiving
+                tcpTransport.ControlReceived += (localSender, localE) =>
+                {
+                    using (localE.Data)
+                    {
+                        try
+                        {
+                            ConnectionByRtpTransport(localSender as IRtpTransport)?.UpdateKeepAlive();
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogDebug(ex, "Error handling RTCP over the connection");
+                        }
+                    }
+                };
+                tcpTransport.Start();
+                rtpTransport = tcpTransport;
                 // RTP over RTSP mode
                 transportReply = new RtspTransport()
                 {
