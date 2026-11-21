@@ -102,7 +102,8 @@ namespace SharpRTSPServer
 
         private static readonly object SpareLock = new object();
 
-        private const int MOST_SPARE = 64;
+        // as RtpPackets': of 1000 streams fed at once, of 64 the rest made and dropped of each wake-up
+        private const int MOST_SPARE = 1024;
 
         /// <summary>
         /// A frame to fill in, reused if there is one going spare.
