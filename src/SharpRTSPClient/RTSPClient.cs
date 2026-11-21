@@ -2923,15 +2923,22 @@ namespace SharpRTSPClient
         // the clients watched and each one's session, of one timer of all: of a timer of each, the 1000 of a server
         //  of 1000 streams fired together and fought over the timer queue's lock
         private static readonly ConcurrentDictionary<RTSPClient, int> s_watched = new ConcurrentDictionary<RTSPClient, int>();
+        // of a client's check queued and not run yet, none queued again: of a pool behind, of each 250 ms a check more of each
+        //  client, 4000 a second of 1000, and the pool's queue grew without end
+        private int _checkQueued;
         private static readonly WaitCallback s_check = client =>
         {
+            Volatile.Write(ref ((RTSPClient)client)._checkQueued, 0);
             if (s_watched.TryGetValue((RTSPClient)client, out int session))
                 ((RTSPClient)client).Watchdog(session);
         };
         private static readonly Timer s_watchdogs = new Timer(_ =>
         {
             foreach (var watched in s_watched)
-                ThreadPool.UnsafeQueueUserWorkItem(s_check, watched.Key);
+            {
+                if (Interlocked.Exchange(ref watched.Key._checkQueued, 1) == 0)
+                    ThreadPool.UnsafeQueueUserWorkItem(s_check, watched.Key);
+            }
         }, null, WatchdogPeriod, WatchdogPeriod);
 
         /// <summary>Requests still waiting for their reply, and when each was sent.</summary>
