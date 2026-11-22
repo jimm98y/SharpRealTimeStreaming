@@ -750,9 +750,9 @@ internal class RTSPServerWorker : BackgroundService
                         active.RemoveAt(i);
                         continue;
                     }
-                    if (reader.VideoTick != null)
+                    if (reader.VideoTick != null && Interlocked.Exchange(ref video.Queued, 1) == 0)
                         ThreadPool.UnsafeQueueUserWorkItem(video, preferLocal: false);
-                    if (reader.AudioTick != null)
+                    if (reader.AudioTick != null && Interlocked.Exchange(ref audio.Queued, 1) == 0)
                         ThreadPool.UnsafeQueueUserWorkItem(audio, preferLocal: false);
                 }
             }
@@ -775,10 +775,17 @@ internal class RTSPServerWorker : BackgroundService
             feed.Add(unit);
     }
 
-    // a track's tick, of the pool: its tick as it is now, of none once its stream has ended
+    // a track's tick, of the pool: its tick as it is now, of none once its stream has ended. Queued only of none queued and
+    //  not run yet: of a pool behind, of each 10 ms a tick more of each track, and the pool's queue grew without end
     private sealed class TickWork(MediaFileReader reader, bool video) : IThreadPoolWorkItem
     {
-        public void Execute() => (video ? reader.VideoTick : reader.AudioTick)?.Invoke();
+        public int Queued;
+
+        public void Execute()
+        {
+            Volatile.Write(ref Queued, 0);
+            (video ? reader.VideoTick : reader.AudioTick)?.Invoke();
+        }
     }
 
     // Returns the media (mdhd) timescale for the given track. This is the clock the sample PTS/DTS values are
