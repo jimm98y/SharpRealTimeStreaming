@@ -102,6 +102,40 @@ namespace SharpRTSPServer.Tests
             Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => Packetize(track, frame));
         }
 
+        private sealed class Packets : IRtpSender
+        {
+            public readonly List<(uint Timestamp, byte[] Packet)> Sent = new List<(uint, byte[])>();
+            public bool CanAcceptNewSamples(string streamID) => true;
+            public void FeedInRawRTP(string streamID, int streamType, uint rtpTimestamp, RtpPackets packets)
+            {
+                Sent.AddRange(packets.Select(p => (rtpTimestamp, p.ToArray())));
+                packets.Release();
+            }
+        }
+
+        [TestMethod]
+        [DataRow(AACFramesLayout.HeadersFirst, 12 + 2 + 2 + 2 + 5)]
+        [DataRow(AACFramesLayout.HeaderBeforeEach, 12 + 4 + 3 + 4 + 2)]
+        public void TwoFramesOfAPacketAreSentOfTheFirstsTimestamp(AACFramesLayout layout, int length)
+        {
+            var sink = new Packets();
+            var track = new AACTrack(ConfigDescriptor, 44100, 2) { FramesPerPacket = 2, FramesLayout = layout, Sink = sink };
+
+            track.FeedInRawSamples(1000, new List<ReadOnlyMemory<byte>> { new byte[] { 1, 2, 3 } });
+            Assert.IsEmpty(sink.Sent);
+            track.FeedInRawSamples(2024, new List<ReadOnlyMemory<byte>> { new byte[] { 4, 5 } });
+
+            var (timestamp, packet) = Assert.ContainsSingle(sink.Sent);
+            Assert.AreEqual(1000u, timestamp);
+            Assert.HasCount(length, packet);
+            // as the client reads them, of either layout
+            using var frame = new Rtsp.Rtp.AACPayload("1210").ProcessPacket(new Rtsp.Rtp.RtpPacket(packet));
+            var units = frame.Data.ToArray();
+            Assert.HasCount(2, units);
+            CollectionAssert.AreEqual(new byte[] { 1, 2, 3 }, units[0].ToArray());
+            CollectionAssert.AreEqual(new byte[] { 4, 5 }, units[1].ToArray());
+        }
+
         [TestMethod]
         public void TrackIsOnlyReadyOnceItHasAConfigDescriptor()
         {

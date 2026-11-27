@@ -1,1 +1,9 @@
 SharpRTSPServer.RTSPStreamSource.ConnectionsChanged -> System.EventHandler
+SharpRTSPServer.AACTrack.FramesPerPacket.get -> int
+SharpRTSPServer.AACTrack.FramesPerPacket.set -> void
+override SharpRTSPServer.AACTrack.FeedInRawSamples(uint rtpTimestamp, System.Collections.Generic.List<System.ReadOnlyMemory<byte>> samples) -> void
+SharpRTSPServer.AACFramesLayout
+SharpRTSPServer.AACFramesLayout.HeaderBeforeEach = 1 -> SharpRTSPServer.AACFramesLayout
+SharpRTSPServer.AACFramesLayout.HeadersFirst = 0 -> SharpRTSPServer.AACFramesLayout
+SharpRTSPServer.AACTrack.FramesLayout.get -> SharpRTSPServer.AACFramesLayout
+SharpRTSPServer.AACTrack.FramesLayout.set -> void

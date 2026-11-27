@@ -44,6 +44,9 @@ internal class RTSPServerWorker : BackgroundService
         public string FilePath { get; set; }
         public string StreamID { get; set; }
         public bool Shuffle { get; set; }
+        // the AAC frames of each RTP packet, and how they are laid out: HeadersFirst (RFC 3640) or HeaderBeforeEach
+        public int AudioFramesPerPacket { get; set; } = 1;
+        public SharpRTSPServer.AACFramesLayout AudioFramesLayout { get; set; }
     }
 
     public class MediaFileReader : IDisposable
@@ -535,6 +538,9 @@ internal class RTSPServerWorker : BackgroundService
                         if (inputTrack is SharpMP4.Tracks.AACTrack aac)
                         {
                             rtspAudioTrack = new SharpRTSPServer.AACTrack(aac.AudioSpecificConfig.ToBytes(), (int)aac.SamplingRate, aac.ChannelCount);
+                            // of the stream's: of 2 frames of a packet, half the audio's packets of each client
+                            ((SharpRTSPServer.AACTrack)rtspAudioTrack).FramesPerPacket = mediaFile.AudioFramesPerPacket;
+                            ((SharpRTSPServer.AACTrack)rtspAudioTrack).FramesLayout = mediaFile.AudioFramesLayout;
                         }
                         else if (inputTrack is SharpMP4.Tracks.OpusTrack opus)
                         {

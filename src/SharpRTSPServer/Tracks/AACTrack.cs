@@ -25,6 +25,16 @@ using System.Text;
 
 namespace SharpRTSPServer
 {
+    /// <summary>How several AAC frames of one RTP packet are laid out.</summary>
+    public enum AACFramesLayout
+    {
+        /// <summary>RFC 3640 3.2.1: one AU-headers-length, the AU header of each frame, then the frames.</summary>
+        HeadersFirst,
+
+        /// <summary>Before each frame, an AU-headers-length and its AU header: not of RFC 3640, read by SharpRTSP.</summary>
+        HeaderBeforeEach,
+    }
+
     /// <summary>
     /// AAC track.
     /// </summary>
@@ -142,8 +152,94 @@ namespace SharpRTSPServer
         /// <param name="samples">An array of AAC fragments. By default single fragment is expected.</param>
         /// <param name="rtpTimestamp">RTP timestamp in the timescale of the track.</param>
         /// <param name="packets">Where to build them, and what holds them afterwards.</param>
+        /// <summary>
+        /// The frames of each RTP packet (RFC 3640 3.2.1), 1 by default. Of more, the frames fed are held until as many, and
+        /// sent as one packet of the first's timestamp: fewer packets of each client, the earlier frames later by the ones
+        /// waited for - of two frames of 1024 samples of 44.1 kHz, 23 ms. Over UDP, the frames of a packet are to fit its MTU.
+        /// </summary>
+        public int FramesPerPacket { get; set; } = 1;
+
+        /// <summary>How the frames of a packet of <see cref="FramesPerPacket"/> of more than 1 are laid out.</summary>
+        public AACFramesLayout FramesLayout { get; set; } = AACFramesLayout.HeadersFirst;
+
+        // the frames held of FramesPerPacket of more than 1: copied, as the feeder's buffers are its own
+        private byte[] _held = Array.Empty<byte>();
+        private int _heldBytes;
+        private uint _heldTimestamp;
+        private readonly List<int> _heldLengths = new List<int>();
+        private readonly List<ReadOnlyMemory<byte>> _heldFeed = new List<ReadOnlyMemory<byte>>();
+
+        public override void FeedInRawSamples(uint rtpTimestamp, List<ReadOnlyMemory<byte>> samples)
+        {
+            if (FramesPerPacket <= 1)
+            {
+                base.FeedInRawSamples(rtpTimestamp, samples);
+                return;
+            }
+
+            for (int i = 0; i < samples.Count; i++)
+            {
+                ReadOnlyMemory<byte> frame = samples[i];
+                if (frame.Length == 0)
+                    continue;
+                if (_heldLengths.Count == 0)
+                    _heldTimestamp = rtpTimestamp;
+                if (_heldBytes + frame.Length > _held.Length)
+                    Array.Resize(ref _held, Math.Max(2 * _held.Length, _heldBytes + frame.Length));
+                frame.CopyTo(_held.AsMemory(_heldBytes));
+                _heldBytes += frame.Length;
+                _heldLengths.Add(frame.Length);
+            }
+
+            if (_heldLengths.Count < FramesPerPacket)
+                return;
+
+            _heldFeed.Clear();
+            for (int i = 0, at = 0; i < _heldLengths.Count; at += _heldLengths[i++])
+                _heldFeed.Add(_held.AsMemory(at, _heldLengths[i]));
+            _heldLengths.Clear();
+            _heldBytes = 0;
+            base.FeedInRawSamples(_heldTimestamp, _heldFeed);
+        }
+
         public override void CreateRtpPackets(List<ReadOnlyMemory<byte>> samples, uint rtpTimestamp, RtpPackets packets)
         {
+            if (FramesPerPacket > 1)
+            {
+                // the frames of one packet: the AU-headers-length, a header of 16 bits of each frame, then the frames - or
+                //  of each frame an AU-headers-length and its header before it
+                bool each = FramesLayout == AACFramesLayout.HeaderBeforeEach;
+                int headers = each ? 0 : 2 + 2 * samples.Count, size = RTP_HEADER_LENGTH + headers + (each ? AU_HEADER_LENGTH * samples.Count : 0);
+                for (int i = 0; i < samples.Count; i++)
+                {
+                    ThrowIfTooLongForAUHeader(samples[i].Length);
+                    size += samples[i].Length;
+                }
+                Span<byte> packet = packets.Rent(size).Span;
+                RTPPacketUtil.WriteHeader(packet, RTPPacketUtil.RTP_VERSION, false, false, 0, true, PayloadType);
+                RTPPacketUtil.WriteTS(packet, rtpTimestamp);
+                if (!each)
+                {
+                    packet[RTP_HEADER_LENGTH] = (byte)((16 * samples.Count) >> 8);
+                    packet[RTP_HEADER_LENGTH + 1] = (byte)(16 * samples.Count);
+                }
+                for (int i = 0, at = RTP_HEADER_LENGTH + headers; i < samples.Count; at += samples[i++].Length)
+                {
+                    if (each)
+                    {
+                        WriteAUHeader(packet.Slice(at), samples[i].Length);
+                        at += AU_HEADER_LENGTH;
+                    }
+                    else
+                    {
+                        packet[RTP_HEADER_LENGTH + 2 + 2 * i] = (byte)(samples[i].Length >> 5);
+                        packet[RTP_HEADER_LENGTH + 3 + 2 * i] = (byte)(samples[i].Length << 3);
+                    }
+                    samples[i].Span.CopyTo(packet.Slice(at));
+                }
+                return;
+            }
+
             for (int i = 0; i < samples.Count; i++)
             {
                 ReadOnlyMemory<byte> frame = samples[i];
