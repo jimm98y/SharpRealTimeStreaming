@@ -2937,9 +2937,24 @@ namespace SharpRTSPClient
             foreach (var watched in s_watched)
             {
                 if (Interlocked.Exchange(ref watched.Key._checkQueued, 1) == 0)
+#if NET
+                    ThreadPool.UnsafeQueueUserWorkItem(watched.Key._checkItem ??= new CheckItem(watched.Key), false);
+#else
                     ThreadPool.UnsafeQueueUserWorkItem(s_check, watched.Key);
+#endif
             }
         }, null, WatchdogPeriod, WatchdogPeriod);
+#if NET
+        // the client's check queued of one item of its own: of a callback and its state, an item made of each, of 1000 clients
+        //  4000 a second
+        private sealed class CheckItem : IThreadPoolWorkItem
+        {
+            private readonly RTSPClient _client;
+            public CheckItem(RTSPClient client) => _client = client;
+            public void Execute() => s_check(_client);
+        }
+        private CheckItem _checkItem;
+#endif
 
         /// <summary>Requests still waiting for their reply, and when each was sent.</summary>
         /// <remarks>
